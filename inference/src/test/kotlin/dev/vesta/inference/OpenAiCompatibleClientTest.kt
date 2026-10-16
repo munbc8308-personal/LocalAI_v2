@@ -49,6 +49,28 @@ class OpenAiCompatibleClientTest : FunSpec({
         )
     }
 
+    test("추론 필드(reasoning, reasoning_content)는 Reasoning으로 나눈다") {
+        val sse = """
+            data: {"choices":[{"delta":{"content":"","reasoning":"생각"}}]}
+
+            data: {"choices":[{"delta":{"reasoning_content":"더"}}]}
+
+            data: {"choices":[{"delta":{"content":"답"},"finish_reason":"stop"}]}
+
+            data: [DONE]
+
+        """.trimIndent()
+        val chunks = client(contentType = "text/event-stream") { sse }
+            .chat(ChatRequest("m", listOf(ChatMessage(ChatRole.USER, "hi"))))
+            .toList()
+        chunks shouldContainExactly listOf(
+            ChatChunk.Reasoning("생각"),
+            ChatChunk.Reasoning("더"),
+            ChatChunk.Delta("답"),
+            ChatChunk.Done("stop", null),
+        )
+    }
+
     test("모델 목록") {
         val models = client { """{"object":"list","data":[{"id":"a","owned_by":"library"},{"id":"b"}]}""" }.listModels()
         models.map { it.id } shouldBe listOf("a", "b")

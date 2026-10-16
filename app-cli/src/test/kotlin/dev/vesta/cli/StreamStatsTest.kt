@@ -22,6 +22,16 @@ class StreamStatsTest : FunSpec({
         stats.promptTokens shouldBe null
     }
 
+    test("생각 토큰은 TTFT에 넣고 답변 시작은 따로 잰다") {
+        val stats = StreamStats.collect(
+            flowOf(ChatChunk.Reasoning("음"), ChatChunk.Reasoning("..."), ChatChunk.Delta("답"), ChatChunk.Done("stop", Usage(3, 3))),
+        )
+        stats.text shouldBe "답"
+        stats.reasoning shouldBe "음..."
+        stats.reasoningChunks shouldBe 2
+        (stats.firstAnswerMs >= stats.ttftMs) shouldBe true
+    }
+
     test("중앙값") {
         listOf(5L, 1L, 3L).median() shouldBe 3L
         emptyList<Long>().median() shouldBe 0L

@@ -47,7 +47,13 @@ internal data class ChunkChoice(
 )
 
 @Serializable
-internal data class ChunkDelta(val content: String? = null)
+internal data class ChunkDelta(
+    val content: String? = null,
+    /** Ollama 형식 */
+    val reasoning: String? = null,
+    /** vLLM·mlx 계열 형식 */
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+)
 
 @Serializable
 internal data class WireUsage(

@@ -26,6 +26,9 @@ sealed interface ChatChunk {
     /** 생성된 텍스트 조각. */
     data class Delta(val text: String) : ChatChunk
 
+    /** 추론 모델(gpt-oss 등)이 답변 전에 내는 생각 과정. 사용자 답변에는 넣지 않는다. */
+    data class Reasoning(val text: String) : ChatChunk
+
     /** 스트림 끝. 엔진이 사용량을 주면 함께 담는다. */
     data class Done(val finishReason: String?, val usage: Usage?) : ChatChunk
 }

@@ -52,7 +52,10 @@ class BenchCommand : CliktCommand(name = "bench") {
             val results = prompts.flatMap { prompt ->
                 (1..runs).map { run ->
                     measure(client, model, prompt, maxTokens).also {
-                        echo("  [${prompt.id} #$run] TTFT ${it.ttftMs}ms, ${"%.1f".format(it.decodeTokensPerSecond)} tok/s, 출력 ${it.completionTokens} tok")
+                        echo(
+                            "  [${prompt.id} #$run] TTFT ${it.ttftMs}ms, 답변 시작 ${it.firstAnswerMs}ms, " +
+                                "${"%.1f".format(it.decodeTokensPerSecond)} tok/s, 출력 ${it.completionTokens} tok (생각 조각 ${it.reasoningChunks})",
+                        )
                     }
                 }
             }
@@ -61,6 +64,7 @@ class BenchCommand : CliktCommand(name = "bench") {
                 model = model,
                 loadTtftMs = warmup.ttftMs,
                 medianTtftMs = results.map { it.ttftMs }.median(),
+                medianFirstAnswerMs = results.map { it.firstAnswerMs }.median(),
                 medianDecodeTokensPerSecond = results.map { it.decodeTokensPerSecond }.median(),
                 memoryBytes = memory?.sizeBytes,
                 gpuMemoryBytes = memory?.gpuBytes,
@@ -69,11 +73,12 @@ class BenchCommand : CliktCommand(name = "bench") {
         }
 
         echo("")
-        echo("모델".padEnd(40) + "TTFT(중앙)  tok/s(중앙)  로드+첫응답  메모리")
+        echo("모델".padEnd(40) + "TTFT(중앙)  답변시작(중앙)  tok/s(중앙)  로드+첫응답  메모리")
         reports.forEach {
             echo(
                 it.model.padEnd(40) +
                     "${it.medianTtftMs}ms".padEnd(12) +
+                    "${it.medianFirstAnswerMs}ms".padEnd(15) +
                     "%.1f".format(it.medianDecodeTokensPerSecond).padEnd(13) +
                     "${it.loadTtftMs}ms".padEnd(13) +
                     (it.memoryBytes?.let(::gb) ?: "?"),
@@ -95,11 +100,14 @@ class BenchCommand : CliktCommand(name = "bench") {
         return RunResult(
             promptId = prompt.id,
             ttftMs = stats.ttftMs,
+            firstAnswerMs = stats.firstAnswerMs,
             totalMs = stats.totalMs,
             promptTokens = stats.promptTokens,
             completionTokens = stats.completionTokens,
             decodeTokensPerSecond = stats.decodeTokensPerSecond,
+            reasoningChunks = stats.reasoningChunks,
             output = stats.text,
+            reasoning = stats.reasoning,
         )
     }
 }
@@ -114,6 +122,7 @@ data class ModelReport(
     val model: String,
     val loadTtftMs: Long,
     val medianTtftMs: Long,
+    val medianFirstAnswerMs: Long,
     val medianDecodeTokensPerSecond: Double,
     val memoryBytes: Long?,
     val gpuMemoryBytes: Long?,
@@ -124,11 +133,14 @@ data class ModelReport(
 data class RunResult(
     val promptId: String,
     val ttftMs: Long,
+    val firstAnswerMs: Long,
     val totalMs: Long,
     val promptTokens: Int?,
     val completionTokens: Int,
     val decodeTokensPerSecond: Double,
+    val reasoningChunks: Int,
     val output: String,
+    val reasoning: String,
 )
 
 internal fun List<Long>.median(): Long = sorted().let { if (it.isEmpty()) 0 else it[it.size / 2] }

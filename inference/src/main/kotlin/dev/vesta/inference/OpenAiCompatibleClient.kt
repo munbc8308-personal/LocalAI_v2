@@ -58,7 +58,9 @@ class OpenAiCompatibleClient(
                 val chunk = InferenceJson.decodeFromString(ChatCompletionChunk.serializer(), event)
                 chunk.usage?.let { usage = Usage(it.promptTokens, it.completionTokens) }
                 for (choice in chunk.choices) {
-                    choice.delta?.content?.takeIf { it.isNotEmpty() }?.let { emit(ChatChunk.Delta(it)) }
+                    val delta = choice.delta
+                    (delta?.reasoning ?: delta?.reasoningContent)?.takeIf { it.isNotEmpty() }?.let { emit(ChatChunk.Reasoning(it)) }
+                    delta?.content?.takeIf { it.isNotEmpty() }?.let { emit(ChatChunk.Delta(it)) }
                     choice.finishReason?.let { finishReason = it }
                 }
             }
