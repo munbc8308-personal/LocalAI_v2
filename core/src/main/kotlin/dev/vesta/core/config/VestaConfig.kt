@@ -1,0 +1,89 @@
+package dev.vesta.core.config
+
+/**
+ * `~/.vesta/config.yaml` 구조 (PROJECT.md 4.9).
+ * 모든 값에 기본값이 있어 설정 파일이 없어도 동작한다.
+ */
+data class VestaConfig(
+    val inference: InferenceConfig = InferenceConfig(),
+    val models: ModelsConfig = ModelsConfig(),
+    val decision: DecisionConfig = DecisionConfig(),
+    val web: WebConfig = WebConfig(),
+    val memory: MemoryConfig = MemoryConfig(),
+    val mcp: McpConfig = McpConfig(),
+)
+
+data class InferenceConfig(
+    /** OpenAI 호환 API 주소. Ollama 기본값. */
+    val baseUrl: String = "http://127.0.0.1:11434/v1",
+    /** Ollama 전용 API(`/api/ps` 등) 주소. 메모리 측정에 쓴다. */
+    val ollamaUrl: String = "http://127.0.0.1:11434",
+    val requestTimeoutSeconds: Long = 600,
+)
+
+data class ModelSpec(
+    val name: String,
+    val keepAlive: String? = null,
+    val engine: String = "ollama",
+)
+
+data class ModelsConfig(
+    val general: ModelSpec? = null,
+    val code: ModelSpec? = null,
+    val embedding: ModelSpec? = null,
+    val reranker: ModelSpec? = null,
+    val vision: ModelSpec? = null,
+    val image: ModelSpec? = null,
+    val stt: ModelSpec? = null,
+    val tts: ModelSpec? = null,
+)
+
+data class DecisionThresholds(
+    val agent: Double = 0.6,
+    val needsWeb: Double = 0.5,
+    val needsLocal: Double = 0.5,
+)
+
+data class DecisionConfig(
+    val engine: String = "ollaya",
+    val baseUrl: String = "http://127.0.0.1:11435",
+    /** 한국어 정확도가 부족하면 `decider`로 바꾼다 (PROJECT.md 4.7a). */
+    val model: String = "laya",
+    val thresholds: DecisionThresholds = DecisionThresholds(),
+    val fallback: String = "general",
+)
+
+enum class WebMode { AUTO, ALWAYS, OFF }
+
+data class WebConfig(
+    val mode: WebMode = WebMode.AUTO,
+    val searxngUrl: String = "http://127.0.0.1:8888",
+)
+
+data class MemoryConfig(
+    /** 전체 통합 메모리 중 앱이 쓸 비율 (PROJECT.md 2.2). */
+    val budgetPercent: Int = 70,
+)
+
+data class McpServerConfig(
+    val transport: String = "stdio",
+    val command: String,
+    val args: List<String> = emptyList(),
+    val enabled: Boolean = true,
+    val toolOverrides: Map<String, String> = emptyMap(),
+)
+
+data class McpConfig(
+    val servers: Map<String, McpServerConfig> = mapOf(
+        "orchard" to McpServerConfig(
+            command = "/Applications/Orchard.app/Contents/MacOS/orchard-cli",
+            args = listOf("mcp"),
+            toolOverrides = mapOf(
+                "mail_send" to "EXEC",
+                "messages_send" to "EXEC",
+                "shortcuts_run" to "EXEC",
+                "music_control" to "READ",
+            ),
+        ),
+    ),
+)

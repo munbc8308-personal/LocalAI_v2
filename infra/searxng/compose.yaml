@@ -1,0 +1,23 @@
+# SearXNG — 무료 로컬 메타 검색 (PROJECT.md 5.3). Colima 위에서 실행한다.
+# 실행: scripts/setup-macos.sh 또는 `docker compose -f infra/searxng/compose.yaml up -d`
+name: vesta-searxng
+
+services:
+  searxng:
+    image: searxng/searxng:2026.9.30-a9d990033
+    container_name: vesta-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"   # 이 Mac에서만 접속
+    env_file:
+      - .env                     # SEARXNG_SECRET (setup 스크립트가 생성, git에 올리지 않음)
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    mem_limit: 1g                # 메모리 예산 (PROJECT.md 2.2, 컨테이너 VM 2GB 안)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Ollaya(결정 모델 런타임) 상시 실행. scripts/install-launchd.sh가 __HOME__을 바꿔 ~/Library/LaunchAgents에 설치한다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.ollaya</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/ollaya</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OLLAYA_HOST</key>
+        <string>127.0.0.1:11435</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/ollaya.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/ollaya.err.log</string>
+</dict>
+</plist>

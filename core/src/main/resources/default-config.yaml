@@ -1,0 +1,30 @@
+# Vesta 설정 (PROJECT.md 4.9). 생략한 값은 기본값을 쓴다.
+
+inference:
+  baseUrl: http://127.0.0.1:11434/v1     # OpenAI 호환 API (Ollama)
+  ollamaUrl: http://127.0.0.1:11434
+
+models: {}
+  # M0 벤치마크 후 확정한다 (PROJECT.md 4.10). 예:
+  # 값을 넣을 때는 위 {}를 지우고 아래처럼 쓴다:
+  # general:   { name: "<메인 모델>",   keepAlive: forever }
+  # code:      { name: "<코드 모델>",   keepAlive: 30m }
+  # embedding: { name: "<임베딩 모델>", keepAlive: forever }
+  # reranker:  { name: "<리랭커 모델>", keepAlive: forever }
+
+decision:
+  engine: ollaya
+  baseUrl: http://127.0.0.1:11435
+  model: laya                  # 한국어 정확도 부족 시 decider
+  thresholds:
+    agent: 0.6
+    needsWeb: 0.5
+    needsLocal: 0.5
+  fallback: general
+
+web:
+  mode: AUTO                   # AUTO / ALWAYS / OFF
+  searxngUrl: http://127.0.0.1:8888
+
+memory:
+  budgetPercent: 70

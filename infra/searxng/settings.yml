@@ -1,0 +1,21 @@
+# Vesta용 SearXNG 설정. 기본 설정 위에 필요한 값만 덮어쓴다.
+use_default_settings: true
+
+general:
+  instance_name: "vesta-search"
+
+server:
+  # secret_key는 환경 변수 SEARXNG_SECRET으로 주입한다 (.env)
+  limiter: false          # 로컬 전용이라 요청 제한 끔
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  default_lang: "auto"
+  formats:
+    - html
+    - json                # Vesta가 JSON API로 호출 (W-01)
+
+ui:
+  default_locale: "ko"
