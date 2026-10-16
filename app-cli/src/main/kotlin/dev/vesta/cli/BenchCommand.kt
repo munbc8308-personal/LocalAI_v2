@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import dev.vesta.core.config.ConfigLoader
 import dev.vesta.core.config.VestaPaths
@@ -35,6 +36,10 @@ class BenchCommand : CliktCommand(name = "bench") {
     private val runs by option("--runs", help = "프롬프트당 반복 횟수").int().default(2)
     private val maxTokens by option("--max-tokens", help = "응답 최대 토큰").int().default(512)
     private val suite by option("--suite", help = "프롬프트 묶음: general / code").default("general")
+    private val efforts by option(
+        "--reasoning-effort", "-r",
+        help = "추론 모델의 생각 양 low / medium / high (여러 번 지정하면 각각 측정)",
+    ).choice("low", "medium", "high").multiple()
 
     override fun run() = runBlocking {
         val paths = VestaPaths.default()
@@ -44,17 +49,19 @@ class BenchCommand : CliktCommand(name = "bench") {
         val admin = OllamaAdmin(config.inference.ollamaUrl, http)
         val prompts = BenchPrompts.suite(suite)
 
-        val reports = models.map { model ->
-            echo("== $model ==")
+        val variants = models.flatMap { model -> efforts.ifEmpty { listOf(null) }.map { model to it } }
+        val reports = variants.map { (model, effort) ->
+            echo("== $model${effort?.let { " (reasoning_effort=$it)" }.orEmpty()} ==")
             // 첫 호출은 모델 로드가 포함되므로 따로 잰다
-            val warmup = measure(client, model, BenchPrompts.WARMUP, 16)
+            val warmup = measure(client, model, BenchPrompts.WARMUP, 16, effort)
             echo("  로드 포함 첫 응답 ${warmup.ttftMs}ms")
             val results = prompts.flatMap { prompt ->
                 (1..runs).map { run ->
-                    measure(client, model, prompt, maxTokens).also {
+                    measure(client, model, prompt, maxTokens, effort).also {
                         echo(
                             "  [${prompt.id} #$run] TTFT ${it.ttftMs}ms, 답변 시작 ${it.firstAnswerMs}ms, " +
-                                "${"%.1f".format(it.decodeTokensPerSecond)} tok/s, 출력 ${it.completionTokens} tok (생각 조각 ${it.reasoningChunks})",
+                                "${"%.1f".format(it.decodeTokensPerSecond)} tok/s, 출력 ${it.completionTokens} tok (생각 조각 ${it.reasoningChunks})" +
+                                (if (it.output.isBlank()) " ← 답변 없음" else ""),
                         )
                     }
                 }
@@ -62,6 +69,8 @@ class BenchCommand : CliktCommand(name = "bench") {
             val memory = runCatching { admin.loadedModels().firstOrNull { it.name == model || it.name.startsWith("$model:") } }.getOrNull()
             ModelReport(
                 model = model,
+                reasoningEffort = effort,
+                emptyAnswers = results.count { it.output.isBlank() },
                 loadTtftMs = warmup.ttftMs,
                 medianTtftMs = results.map { it.ttftMs }.median(),
                 medianFirstAnswerMs = results.map { it.firstAnswerMs }.median(),
@@ -73,14 +82,15 @@ class BenchCommand : CliktCommand(name = "bench") {
         }
 
         echo("")
-        echo("모델".padEnd(40) + "TTFT(중앙)  답변시작(중앙)  tok/s(중앙)  로드+첫응답  메모리")
+        echo("모델".padEnd(40) + "TTFT(중앙)  답변시작(중앙)  tok/s(중앙)  로드+첫응답  빈 답변  메모리")
         reports.forEach {
             echo(
-                it.model.padEnd(40) +
+                (it.model + (it.reasoningEffort?.let { " ($it)" } ?: "")).padEnd(40) +
                     "${it.medianTtftMs}ms".padEnd(12) +
                     "${it.medianFirstAnswerMs}ms".padEnd(15) +
                     "%.1f".format(it.medianDecodeTokensPerSecond).padEnd(13) +
                     "${it.loadTtftMs}ms".padEnd(13) +
+                    "${it.emptyAnswers}/${it.results.size}".padEnd(9) +
                     (it.memoryBytes?.let(::gb) ?: "?"),
             )
         }
@@ -91,12 +101,18 @@ class BenchCommand : CliktCommand(name = "bench") {
         http.close()
     }
 
-    private suspend fun measure(client: InferenceClient, model: String, prompt: BenchPrompt, maxTokens: Int): RunResult {
+    private suspend fun measure(
+        client: InferenceClient,
+        model: String,
+        prompt: BenchPrompt,
+        maxTokens: Int,
+        reasoningEffort: String?,
+    ): RunResult {
         val messages = buildList {
             prompt.system?.let { add(ChatMessage(ChatRole.SYSTEM, it)) }
             add(ChatMessage(ChatRole.USER, prompt.user))
         }
-        val stats = StreamStats.collect(client.chat(ChatRequest(model, messages, temperature = 0.2, maxTokens = maxTokens)))
+        val stats = StreamStats.collect(client.chat(ChatRequest(model, messages, temperature = 0.2, maxTokens = maxTokens, reasoningEffort = reasoningEffort)))
         return RunResult(
             promptId = prompt.id,
             ttftMs = stats.ttftMs,
@@ -120,6 +136,8 @@ data class BenchReport(val suite: String, val runs: Int, val maxTokens: Int, val
 @Serializable
 data class ModelReport(
     val model: String,
+    val reasoningEffort: String?,
+    val emptyAnswers: Int,
     val loadTtftMs: Long,
     val medianTtftMs: Long,
     val medianFirstAnswerMs: Long,

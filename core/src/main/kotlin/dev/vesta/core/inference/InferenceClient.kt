@@ -20,6 +20,8 @@ data class ChatRequest(
     val messages: List<ChatMessage>,
     val temperature: Double? = null,
     val maxTokens: Int? = null,
+    /** 추론 모델의 생각 양: low / medium / high. 지원하지 않는 모델·엔진은 무시한다. */
+    val reasoningEffort: String? = null,
 )
 
 sealed interface ChatChunk {

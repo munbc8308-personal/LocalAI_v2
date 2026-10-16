@@ -32,6 +32,7 @@ internal data class ChatCompletionRequest(
     @SerialName("stream_options") val streamOptions: StreamOptions? = null,
     val temperature: Double? = null,
     @SerialName("max_tokens") val maxTokens: Int? = null,
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
 )
 
 @Serializable
