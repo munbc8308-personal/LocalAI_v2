@@ -43,6 +43,7 @@ class OpenAiCompatibleClient(
             temperature = request.temperature,
             maxTokens = request.maxTokens,
             reasoningEffort = request.reasoningEffort,
+            keepAlive = keepAliveJson(request.keepAlive),
         )
         http.preparePost("$baseUrl/chat/completions") {
             contentType(ContentType.Application.Json)

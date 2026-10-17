@@ -10,6 +10,7 @@ dependencies {
     implementation(project(":agents"))
     implementation(project(":conversation"))
     implementation(libs.clikt)
+    implementation(libs.jline)
     implementation(libs.kotlin.logging)
     runtimeOnly(libs.logback.classic)
     testImplementation(libs.ktor.client.mock)

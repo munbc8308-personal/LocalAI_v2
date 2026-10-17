@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0 진행 중 (v1.6, 2026-10-17)
+> 상태: M0 벤치마크 진행 중, M1 구현 (v1.7, 2026-10-17)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -22,6 +22,7 @@
 | v1.4 | 2026-10-16 | **Orchard Pro 구매 허용** — 무료 원칙의 유일한 예외. Pro 앱(Mail·Notes·Messages·Contacts·Music·Maps·Weather·Shortcuts)을 P1로 올리고, A-09 무료 대체 도구는 보류(Orchard 장애·중단 시 대비책)로 내림 |
 | v1.5 | 2026-10-16 | 비목표였던 **모델 학습(LoRA)·이미지·음성·멀티 유저**를 범위에 포함 (7.10~7.12). 비목표는 클라우드 배포 등으로 축소. `ImageAgent`, 모델 역할 IMAGE·VISION·STT·TTS, `training`·`media`·`identity` 모듈, 마일스톤 M12~M15 추가. 데이터 모델 전 테이블에 `userId` |
 | v1.6 | 2026-10-17 | **M0 착수**: Gradle 멀티 모듈 골격, 인프라 설치(Ollama 0.40.5, Ollaya 0.13.0, Colima, SearXNG), `vesta status`·`bench` 명령. 13.1 M0 진행 기록 추가. Laya 한국어 제로샷 첫 측정 |
+| v1.7 | 2026-10-17 | **M1 구현**: ModelManager(메모리 예산·LRU 언로드), ChatAgent, ConversationService, 세션·메시지 저장, `vesta chat`. gpt-oss:20b `reasoning_effort` 비교 결과(기본 low) 기록. 13.2 M1 진행 기록 추가 |
 
 ---
 
@@ -1202,9 +1203,40 @@ app-cli / app-server
 | code | `qwen3-coder:30b` | 18.6GB | llama.cpp |
 | embedding | `qwen3-embedding:4b` / `bge-m3:567m` | 2.5GB / 1.2GB | llama.cpp |
 
+#### 벤치마크: gpt-oss:20b (2026-10-17)
+| reasoning_effort | 답변 시작(중앙) | 생성 속도 | 빈 답변 | 메모리 |
+|------------------|----------------|-----------|---------|--------|
+| **low** | 0.5초 | 110 tok/s | 0/8 | 12.7GB |
+| medium | 1.6초 | 110 tok/s | 0/8 | 12.7GB |
+| high | 6.6초 | 88 tok/s | 2/8 (생각만 하다 토큰 한도) | 12.7GB |
+
+- 도구 호출 JSON·간단한 계산은 세 단계 모두 정확. 사실 설명은 medium에서도 오류("MLX가 MLCompute 사용"), 한국사 긴 설명은 연도·인물 오류 다수 → RAG·웹 근거가 필요하다.
+- **결정: 추론 모델의 기본 `reasoningEffort: low`.** D5(난이도) 4 이상 medium, 5는 high + 토큰 한도 확대 (M7).
+- 측정 중 발견: Ollama는 생각 과정을 `delta.reasoning`으로 보낸다. 이를 읽지 않으면 TTFT·tok/s가 틀리게 나온다 → `ChatChunk.Reasoning`으로 분리.
+
 #### 남은 일
-- 후보 벤치마크 실행 → 역할별 모델 확정, 메모리 실측표 (2.2 갱신)
+- 나머지 후보 벤치마크 실행 → 역할별 모델 확정, 메모리 실측표 (2.2 갱신)
 - 리랭커 후보 조사 (Ollama 기본 라이브러리에 없음 → M2 전에 실행 방식 결정)
+
+### 13.2 M1 진행 기록 (2026-10-17)
+
+#### 완료
+- **core**: `Agent`·`AgentRequest`·`AgentEvent`(SessionReady/Status/Reasoning/Token/Done/Error), `ConversationService`, `Session`·`StoredMessage`·저장소 인터페이스(사용자 범위 강제), `ModelProvider`, `ChannelType`. `ModelSpec`에 `reasoningEffort`·`temperature`·`maxTokens`, `ChatRequest`에 `keepAlive`.
+- **inference**: `ModelManager` — 역할별 모델 배정, 새 모델을 올리기 전 `/api/ps`·`/api/tags`로 예산 확인, 넘으면 상시 모델(`keepAlive: forever`)이 아닌 것 중 LRU부터 언로드(`keep_alive: 0`). OpenAI 호환 요청에 `keep_alive` 전달(Ollama가 지킴을 확인).
+- **storage**: `sessions`·`messages` 테이블(schema v2, `user_id` 포함), Exposed 저장소.
+- **agents**: `ChatAgent` — 기본 시스템 프롬프트(현재 시각 포함), 대화 기록 글자 수 상한(24,000자, user부터 시작).
+- **conversation**: `DefaultConversationService` — 세션 조회·생성, 사용자 메시지 저장, 에이전트 실행, 답변 저장. **중단·오류 시에도 생성된 부분을 `interrupted`로 저장**. 다른 사용자 세션 접근 거부.
+- **app-cli**: `vesta chat` (JLine) — 스트리밍, "생각 중…" 표시(`--show-thinking`으로 원문), 생성 중 Ctrl+C 중단, `-c` 최근 세션 이어하기, `-s <id>`, `-m <모델>`, `/new` `/sessions` `/resume` `/history` `/exit`.
+- **기본 설정**: `vesta config init` 템플릿의 메인 모델 `gpt-oss:20b` (`keepAlive: forever`, `reasoningEffort: low`) — 벤치마크 후 교체.
+- **테스트**: 30개 통과.
+
+#### 실제 동작 확인 (gpt-oss:20b)
+- 첫 답변 0.7초, 재시작 후 `vesta chat -c`로 이전 대화 이어가기 → 이전에 알려 준 이름을 기억함.
+- 시스템 프롬프트에 "대화가 저장되어 이어진다"를 넣기 전에는 기록이 있는데도 "기억 기능이 없다"고 답함 → 프롬프트로 해결.
+- 생성 중 Ctrl+C → "(중단됨)", DB에 부분 답변이 `interrupted=1`로 저장됨.
+
+#### 남은 일
+- 예산 초과 언로드를 실제 큰 모델 두 개로 확인 (현재는 단위 테스트만). 후보 모델 다운로드 후 진행.
 
 ---
 

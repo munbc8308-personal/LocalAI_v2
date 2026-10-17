@@ -20,6 +20,7 @@ kotlin {
 
 dependencies {
     testImplementation(libs.bundles.testing)
+    testRuntimeOnly(libs.logback.classic) // kotlin-logging(slf4j)이 테스트에서도 동작하도록
 }
 
 tasks.withType<Test>().configureEach {

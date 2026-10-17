@@ -12,6 +12,7 @@ kotlin-logging = "8.0.4"
 logback = "1.6.5"
 kotest = "6.2.6"
 mockk = "1.14.11"
+jline = "3.30.16"
 
 [libraries]
 # build-logic 전용 (convention plugin 의존성)
@@ -44,6 +45,7 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+jline = { module = "org.jline:jline", version.ref = "jline" }
 
 [bundles]
 ktor-client = ["ktor-client-core", "ktor-client-cio", "ktor-client-content-negotiation", "ktor-serialization-kotlinx-json"]

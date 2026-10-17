@@ -4,4 +4,5 @@ plugins {
 
 dependencies {
     api(project(":core"))
+    implementation(libs.kotlin.logging)
 }

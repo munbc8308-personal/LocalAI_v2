@@ -11,5 +11,5 @@ class Vesta : CliktCommand(name = "vesta") {
 }
 
 fun main(args: Array<String>) = Vesta()
-    .subcommands(StatusCommand(), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
+    .subcommands(ChatCommand(), StatusCommand(), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
     .main(args)

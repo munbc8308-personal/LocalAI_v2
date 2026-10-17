@@ -23,9 +23,16 @@ data class InferenceConfig(
 
 data class ModelSpec(
     val name: String,
+    /** "forever"면 상시 모델: 메모리 예산 초과 시에도 내리지 않는다 (PROJECT.md 2.3). */
     val keepAlive: String? = null,
     val engine: String = "ollama",
-)
+    /** 추론 모델의 생각 양. M0 벤치마크 결과 기본 low (PROJECT.md 13.1). */
+    val reasoningEffort: String? = null,
+    val temperature: Double? = null,
+    val maxTokens: Int? = null,
+) {
+    val alwaysOn: Boolean get() = keepAlive == "forever"
+}
 
 data class ModelsConfig(
     val general: ModelSpec? = null,

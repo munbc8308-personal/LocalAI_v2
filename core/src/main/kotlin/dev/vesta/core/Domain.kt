@@ -21,3 +21,6 @@ value class UserId(val value: Long)
 value class SessionId(val value: String)
 
 data class UserContext(val userId: UserId, val role: UserRole)
+
+/** 접속 경로 (PROJECT.md 6장). */
+enum class ChannelType { CLI, WEB, TELEGRAM, DISCORD, SLACK, SIGNAL, MATRIX, OPENAI_API }

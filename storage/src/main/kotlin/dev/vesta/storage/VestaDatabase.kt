@@ -22,7 +22,7 @@ class VestaDatabase private constructor(val db: Database) {
 
     /** 스키마를 최신으로 맞춘다. 여러 번 불러도 안전하다. */
     fun migrate() = transaction(db) {
-        SchemaUtils.create(SchemaVersion, Users)
+        SchemaUtils.create(SchemaVersion, Users, Sessions, Messages)
         val current = SchemaVersion.selectAll().maxOfOrNull { it[SchemaVersion.version] } ?: 0
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
@@ -45,7 +45,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        const val CURRENT_VERSION = 1
+        /** 1: users, 2: sessions·messages (M1) */
+        const val CURRENT_VERSION = 2
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()
