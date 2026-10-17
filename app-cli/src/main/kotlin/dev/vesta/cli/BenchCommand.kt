@@ -38,8 +38,8 @@ class BenchCommand : CliktCommand(name = "bench") {
     private val suite by option("--suite", help = "프롬프트 묶음: general / code").default("general")
     private val efforts by option(
         "--reasoning-effort", "-r",
-        help = "추론 모델의 생각 양 low / medium / high (여러 번 지정하면 각각 측정)",
-    ).choice("low", "medium", "high").multiple()
+        help = "추론 모델의 생각 양 none / low / medium / high (여러 번 지정하면 각각 측정. none은 생각 끔)",
+    ).choice("none", "low", "medium", "high").multiple()
 
     override fun run() = runBlocking {
         val paths = VestaPaths.default()

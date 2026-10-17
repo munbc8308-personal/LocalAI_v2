@@ -20,7 +20,7 @@ data class ChatRequest(
     val messages: List<ChatMessage>,
     val temperature: Double? = null,
     val maxTokens: Int? = null,
-    /** 추론 모델의 생각 양: low / medium / high. 지원하지 않는 모델·엔진은 무시한다. */
+    /** 추론 모델의 생각 양: none / low / medium / high. none은 생각을 끈다(Qwen3.5). 지원하지 않는 모델·엔진은 무시한다. */
     val reasoningEffort: String? = null,
     /** 모델을 메모리에 유지할 시간 (Ollama keep_alive). 예: "30m", "forever". null이면 엔진 기본값. */
     val keepAlive: String? = null,
