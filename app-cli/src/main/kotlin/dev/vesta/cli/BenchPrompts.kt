@@ -43,10 +43,21 @@ internal object BenchPrompts {
         ),
     )
 
+    /** 짧은 한국어 설명 질문. 한자 섞임·띄어쓰기 버릇을 보려고 반복 횟수를 늘려 쓴다. */
+    private val korean = listOf(
+        "Kotlin 코루틴을 한 문장으로 설명해 줘.",
+        "통합 메모리의 장점을 세 줄로.",
+        "RAG가 뭔지 짧게 설명해 줘.",
+        "Docker와 가상머신 차이를 두 문장으로.",
+        "SQLite WAL 모드가 뭐야?",
+        "LRU 캐시를 쉽게 설명해 줘.",
+    ).mapIndexed { i, q -> BenchPrompt("ko-style-${i + 1}", q) }
+
     fun suite(name: String): List<BenchPrompt> = when (name) {
         "general" -> general
         "code" -> code
-        else -> throw BadParameterValue("알 수 없는 suite: $name (general, code)")
+        "korean" -> korean
+        else -> throw BadParameterValue("알 수 없는 suite: $name (general, code, korean)")
     }
 }
 

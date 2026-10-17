@@ -35,7 +35,7 @@ class BenchCommand : CliktCommand(name = "bench") {
     private val models by option("--model", "-m", help = "측정할 모델 (여러 번 지정 가능)").multiple(required = true)
     private val runs by option("--runs", help = "프롬프트당 반복 횟수").int().default(2)
     private val maxTokens by option("--max-tokens", help = "응답 최대 토큰").int().default(512)
-    private val suite by option("--suite", help = "프롬프트 묶음: general / code").default("general")
+    private val suite by option("--suite", help = "프롬프트 묶음: general / code / korean").default("general")
     private val efforts by option(
         "--reasoning-effort", "-r",
         help = "추론 모델의 생각 양 none / low / medium / high (여러 번 지정하면 각각 측정. none은 생각 끔)",
@@ -71,6 +71,8 @@ class BenchCommand : CliktCommand(name = "bench") {
                 model = model,
                 reasoningEffort = effort,
                 emptyAnswers = results.count { it.output.isBlank() },
+                hanAnswers = results.count { KoreanStyle.hanWords(it.output).isNotEmpty() },
+                spacedParticleAnswers = results.count { KoreanStyle.spacedParticles(it.output) > 0 },
                 loadTtftMs = warmup.ttftMs,
                 medianTtftMs = results.map { it.ttftMs }.median(),
                 medianFirstAnswerMs = results.map { it.firstAnswerMs }.median(),
@@ -82,7 +84,7 @@ class BenchCommand : CliktCommand(name = "bench") {
         }
 
         echo("")
-        echo("모델".padEnd(40) + "TTFT(중앙)  답변시작(중앙)  tok/s(중앙)  로드+첫응답  빈 답변  메모리")
+        echo("모델".padEnd(40) + "TTFT(중앙)  답변시작(중앙)  tok/s(중앙)  로드+첫응답  빈 답변  한자  조사띄움  메모리")
         reports.forEach {
             echo(
                 (it.model + (it.reasoningEffort?.let { " ($it)" } ?: "")).padEnd(40) +
@@ -91,6 +93,8 @@ class BenchCommand : CliktCommand(name = "bench") {
                     "%.1f".format(it.medianDecodeTokensPerSecond).padEnd(13) +
                     "${it.loadTtftMs}ms".padEnd(13) +
                     "${it.emptyAnswers}/${it.results.size}".padEnd(9) +
+                    "${it.hanAnswers}/${it.results.size}".padEnd(6) +
+                    "${it.spacedParticleAnswers}/${it.results.size}".padEnd(10) +
                     (it.memoryBytes?.let(::gb) ?: "?"),
             )
         }
@@ -138,6 +142,10 @@ data class ModelReport(
     val model: String,
     val reasoningEffort: String?,
     val emptyAnswers: Int,
+    /** 한자가 섞인 답변 수 */
+    val hanAnswers: Int,
+    /** 조사 앞을 띄운 답변 수 ("MLX 은") */
+    val spacedParticleAnswers: Int,
     val loadTtftMs: Long,
     val medianTtftMs: Long,
     val medianFirstAnswerMs: Long,
