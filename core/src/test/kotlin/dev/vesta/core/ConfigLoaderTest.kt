@@ -20,7 +20,7 @@ class ConfigLoaderTest : FunSpec({
         val file = dir.resolve("config.yaml")
         file.writeText(javaClass.getResource("/default-config.yaml")!!.readText())
         val config = ConfigLoader.load(file)
-        config.decision.model shouldBe "laya"
+        config.decision.model shouldBe "winnow:e4b"
         config.web.mode shouldBe WebMode.AUTO
         config.mcp.servers.keys shouldBe setOf("orchard")
     }

@@ -57,8 +57,8 @@ data class DecisionThresholds(
 data class DecisionConfig(
     val engine: String = "ollaya",
     val baseUrl: String = "http://127.0.0.1:11435",
-    /** 한국어 정확도가 부족하면 `decider`로 바꾼다 (PROJECT.md 4.7a). */
-    val model: String = "laya",
+    /** M4 평가로 laya → winnow:e4b (PROJECT.md 13.5). decider는 macOS에서 CPU로만 돌아 5초 이상 걸려 제외. */
+    val model: String = "winnow:e4b",
     val thresholds: DecisionThresholds = DecisionThresholds(),
     val fallback: String = "general",
     /** false면 결정 모델을 건너뛰고 바로 메인 모델이 판정한다. */

@@ -14,6 +14,9 @@
     <dict>
         <key>OLLAYA_HOST</key>
         <string>127.0.0.1:11435</string>
+        <!-- 결정 모델은 모든 요청이 거치므로 내리지 않는다 (기본 5분이면 매번 다시 로드) -->
+        <key>OLLAYA_KEEP_ALIVE</key>
+        <string>-1</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

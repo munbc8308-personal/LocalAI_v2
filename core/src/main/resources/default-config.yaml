@@ -19,7 +19,7 @@ models:
 decision:
   engine: ollaya
   baseUrl: http://127.0.0.1:11435
-  model: laya                  # 한국어 정확도 부족 시 decider
+  model: winnow:e4b            # M4 평가로 laya에서 교체 (PROJECT.md 13.5): 라우팅 99%, GPU 실행
   thresholds:
     agent: 0.6
     needsWeb: 0.5
