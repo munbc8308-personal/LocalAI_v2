@@ -9,6 +9,8 @@ dependencies {
     implementation(project(":storage"))
     implementation(project(":agents"))
     implementation(project(":conversation"))
+    implementation(project(":knowledge"))
+    implementation(project(":retrieval"))
     implementation(libs.clikt)
     implementation(libs.jline)
     implementation(libs.kotlin.logging)

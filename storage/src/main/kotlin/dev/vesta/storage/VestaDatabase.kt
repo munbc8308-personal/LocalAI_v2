@@ -22,7 +22,9 @@ class VestaDatabase private constructor(val db: Database) {
 
     /** 스키마를 최신으로 맞춘다. 여러 번 불러도 안전하다. */
     fun migrate() = transaction(db) {
-        SchemaUtils.create(SchemaVersion, Users, Sessions, Messages)
+        SchemaUtils.create(SchemaVersion, Users, Sessions, Messages, Collections, Documents, Chunks)
+        // 키워드 검색(BM25)용 FTS5. 한국어는 접두어 검색으로 조사 차이를 흡수한다 (KnowledgeRepository.keywordSearch)
+        exec("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, heading, tokenize = 'unicode61 remove_diacritics 2')")
         val current = SchemaVersion.selectAll().maxOfOrNull { it[SchemaVersion.version] } ?: 0
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
@@ -45,8 +47,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1) */
-        const val CURRENT_VERSION = 2
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2) */
+        const val CURRENT_VERSION = 3
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()

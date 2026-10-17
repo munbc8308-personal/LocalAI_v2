@@ -15,8 +15,10 @@ interface Agent {
 data class AgentRequest(
     val user: UserContext,
     val session: Session,
-    /** 이번 사용자 입력까지 포함한 대화 기록 (시간 순). */
+    /** 이번 사용자 입력까지 포함한 대화 기록 (시간 순). 마지막은 라우팅 명령을 뗀 질문. */
     val history: List<ChatMessage>,
+    /** 문서 검색 대상 컬렉션 이름. 비어 있으면 사용자의 모든 컬렉션. */
+    val collections: List<String> = emptyList(),
 )
 
 data class UserInput(val text: String)

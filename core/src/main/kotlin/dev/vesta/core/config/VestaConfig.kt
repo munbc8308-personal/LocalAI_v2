@@ -30,6 +30,8 @@ data class ModelSpec(
     val reasoningEffort: String? = null,
     val temperature: Double? = null,
     val maxTokens: Int? = null,
+    /** Ollama가 아닌 엔진의 주소. 예: 리랭커 llama-server `http://127.0.0.1:8082` */
+    val baseUrl: String? = null,
 ) {
     val alwaysOn: Boolean get() = keepAlive == "forever"
 }

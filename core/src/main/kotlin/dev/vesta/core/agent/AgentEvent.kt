@@ -6,7 +6,7 @@ import dev.vesta.core.inference.Usage
 
 /**
  * 채널이 받아서 보여 주는 이벤트 (PROJECT.md 8.1).
- * 이후 마일스톤에서 Source, ToolCall, ApprovalRequest, Media가 추가된다.
+ * 이후 마일스톤에서 ToolCall, ApprovalRequest, Media가 추가된다.
  */
 sealed interface AgentEvent {
     /** 세션이 정해졌다. 새 세션이면 [created]가 true. */
@@ -17,6 +17,9 @@ sealed interface AgentEvent {
 
     /** 생각 과정 조각. 채널은 보통 "생각 중" 표시만 한다. */
     data class Reasoning(val text: String) : AgentEvent
+
+    /** 답변에 쓴 근거 목록. 번호는 답변의 [n]과 같다 (K-08). */
+    data class Sources(val evidence: List<dev.vesta.core.knowledge.Evidence>) : AgentEvent
 
     /** 답변 조각. */
     data class Token(val text: String) : AgentEvent

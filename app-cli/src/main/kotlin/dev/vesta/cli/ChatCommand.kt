@@ -166,6 +166,8 @@ class ChatCommand : CliktCommand(name = "chat") {
             /sessions        최근 세션 목록
             /resume [번호]   세션 이어하기 (번호 생략 시 가장 최근)
             /history         현재 대화 다시 보기
+            /docs 질문        등록한 모든 문서에서 찾아 답하기
+            @컬렉션 질문      지정한 컬렉션에서 찾아 답하기 (@a,b 여러 개)
             /exit            종료 (Ctrl+D)
             생성 중 Ctrl+C    답변 중단 (그때까지 내용은 저장)
         """.trimIndent()

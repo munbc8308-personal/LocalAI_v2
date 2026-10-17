@@ -7,11 +7,15 @@ import kotlin.time.Duration
 /** 대화 이벤트를 터미널에 그린다. 생각 과정은 기본으로 "생각 중…" 한 줄만 보여 준다. */
 internal class StreamRenderer(private val out: PrintWriter, private val showThinking: Boolean) {
     private var thinkingShown = false
+    private var sources: List<dev.vesta.core.knowledge.Evidence> = emptyList()
     private var answerStarted = false
+    private val answer = StringBuilder()
 
     fun render(event: AgentEvent, elapsed: Duration) {
         when (event) {
-            is AgentEvent.SessionReady, is AgentEvent.Status -> Unit
+            is AgentEvent.SessionReady -> Unit
+            is AgentEvent.Status -> if (event.text != "생성 중") out.println(dim("· ${event.text}"))
+            is AgentEvent.Sources -> sources = event.evidence
             is AgentEvent.Reasoning -> {
                 if (showThinking) {
                     out.print(dim(event.text))
@@ -25,12 +29,21 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
                     if (thinkingShown) out.print(if (showThinking) "\n\n" else CLEAR_LINE)
                     answerStarted = true
                 }
+                answer.append(event.text)
                 out.print(event.text)
             }
             is AgentEvent.Done -> {
                 clearThinkingIfNoAnswer()
                 val tokens = event.usage?.completionTokens?.let { " · ${it} tok" }.orEmpty()
                 out.println()
+                // 답변에서 실제로 인용한 번호만 보여 준다
+                val cited = Citations.cited(answer.toString(), sources)
+                if (cited.isNotEmpty()) {
+                    out.println(dim("출처"))
+                    cited.forEach { out.println(dim("  [${it.citation}] ${it.title}${it.location?.let { l -> " · $l" }.orEmpty()} — ${it.ref}")) }
+                } else if (sources.isNotEmpty()) {
+                    out.println(dim("(인용한 출처 없음 · 검색 ${sources.size}건)"))
+                }
                 out.println(dim("[${event.model}$tokens · ${"%.1f".format(elapsed.inWholeMilliseconds / 1000.0)}s]"))
             }
             is AgentEvent.Error -> {

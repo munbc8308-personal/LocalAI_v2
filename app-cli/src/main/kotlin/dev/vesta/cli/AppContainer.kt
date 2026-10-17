@@ -1,6 +1,7 @@
 package dev.vesta.cli
 
 import dev.vesta.agents.ChatAgent
+import dev.vesta.agents.DocsAgent
 import dev.vesta.conversation.DefaultConversationService
 import dev.vesta.core.AgentType
 import dev.vesta.core.UserContext
@@ -15,6 +16,11 @@ import dev.vesta.inference.OllamaAdmin
 import dev.vesta.inference.OpenAiCompatibleClient
 import dev.vesta.storage.ExposedMessageRepository
 import dev.vesta.storage.ExposedSessionRepository
+import dev.vesta.storage.KnowledgeRepository
+import dev.vesta.knowledge.Indexer
+import dev.vesta.retrieval.HttpReranker
+import dev.vesta.retrieval.LocalRetriever
+import dev.vesta.retrieval.VectorIndex
 import dev.vesta.storage.VestaDatabase
 
 /**
@@ -39,10 +45,18 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         budgetBytes = MacSystem.totalMemoryBytes() * config.memory.budgetPercent / 100,
         runtime = OllamaAdmin(config.inference.ollamaUrl, http),
     )
+    val knowledge = KnowledgeRepository(database.db)
+    val indexer = Indexer(knowledge, inference)
+    /** 리랭커는 선택 (models.reranker, engine: llama-server). 없으면 RRF 순서만 쓴다. */
+    val reranker = config.models.reranker?.takeIf { it.baseUrl != null }?.let { HttpReranker(it.baseUrl!!, it.name, http) }
+    val retriever = LocalRetriever(knowledge, inference, VectorIndex(knowledge), reranker)
     val conversation = DefaultConversationService(
         sessions = sessions,
         messages = messages,
-        agents = mapOf(AgentType.CHAT to ChatAgent(inference, modelManager)),
+        agents = mapOf(
+            AgentType.CHAT to ChatAgent(inference, modelManager),
+            AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
+        ),
     )
 
     /** 단일 사용자 동안은 OWNER 한 명 (PROJECT.md 7.12). */

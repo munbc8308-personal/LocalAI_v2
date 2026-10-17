@@ -3,7 +3,7 @@
 #   1. Homebrew로 Ollama·Colima·Docker CLI·docker-compose·zstd·ffmpeg 설치
 #   2. Colima(컨테이너 VM, 메모리 2GB) 시작·자동 시작 등록
 #   3. Ollama 서비스 시작 (brew services)
-#   4. Ollaya 설치 (~/.local, sudo 없음) + launchd 등록
+#   4. Ollaya 설치 (~/.local, sudo 없음) + 리랭커 모델(bge-reranker-v2-m3) + launchd 등록
 #   5. SearXNG 컨테이너 시작
 set -eu
 
@@ -11,7 +11,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 step() { printf '\n==> %s\n' "$*"; }
 
 step "Homebrew 패키지"
-brew install ollama colima docker docker-compose zstd ffmpeg
+brew install ollama colima docker docker-compose zstd ffmpeg llama.cpp
 
 # brew로 설치한 docker-compose를 `docker compose` 플러그인으로 쓰기 위한 설정
 DOCKER_CONFIG_FILE="$HOME/.docker/config.json"
@@ -36,6 +36,20 @@ if [ ! -x "$HOME/.local/bin/ollaya" ]; then
     INSTALLER=$(mktemp -d)/install.sh
     curl -fsSL https://ollaya.dev/install.sh -o "$INSTALLER"
     OLLAYA_INSTALL_DIR="$HOME/.local" sh "$INSTALLER"
+fi
+step "리랭커 모델"
+RERANKER="$HOME/.vesta/models/bge-reranker-v2-m3-Q8_0.gguf"
+# Hugging Face가 공개한 sha256 (gpustack/bge-reranker-v2-m3-GGUF, 635,676,416 bytes)
+RERANKER_SHA=a43c7c9b11a4c1517e5bf95151960e1621d1b72f7a493364b01e386cf1aaa1d3
+if [ ! -f "$RERANKER" ]; then
+    mkdir -p "$HOME/.vesta/models"
+    curl -fL -o "$RERANKER.part" https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q8_0.gguf
+    if [ "$(shasum -a 256 "$RERANKER.part" | awk '{print $1}')" != "$RERANKER_SHA" ]; then
+        rm -f "$RERANKER.part"
+        echo "리랭커 모델 체크섬 불일치 — 다시 실행하세요" >&2
+        exit 1
+    fi
+    mv "$RERANKER.part" "$RERANKER"
 fi
 "$ROOT/scripts/install-launchd.sh"
 

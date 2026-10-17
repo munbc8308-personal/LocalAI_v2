@@ -26,7 +26,7 @@ private val log = KotlinLogging.logger {}
 /**
  * 대화 엔진 (PROJECT.md 6.1, 8장).
  * 세션 조회·생성 → 사용자 메시지 저장 → 에이전트 실행 → 답변 저장.
- * M1에서는 항상 ChatAgent. M4에서 Router가 에이전트를 고른다.
+ * 에이전트 선택: 명시 지정(/docs, @컬렉션)이 있으면 그것, 없으면 ChatAgent. M4에서 Router가 고른다.
  */
 class DefaultConversationService(
     private val sessions: SessionRepository,
@@ -40,15 +40,16 @@ class DefaultConversationService(
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
 
         messages.append(session.id, NewMessage(ChatRole.USER, input.text))
+        val route = ExplicitRoute.parse(input.text)
         val history = messages.list(session.id)
             .filter { it.content.isNotBlank() }
-            .map { ChatMessage(it.role, it.content) }
+            .map { ChatMessage(it.role, ExplicitRoute.parse(it.content)?.question?.ifBlank { null } ?: it.content) }
 
-        val agent = agents.getValue(AgentType.CHAT)
+        val agent = route?.agent?.let { agents[it] } ?: agents.getValue(AgentType.CHAT)
         val answer = StringBuilder()
         var done: AgentEvent.Done? = null
         try {
-            agent.handle(AgentRequest(user, session, history))
+            agent.handle(AgentRequest(user, session, history, route?.collections.orEmpty()))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

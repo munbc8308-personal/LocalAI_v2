@@ -117,3 +117,31 @@ class DefaultConversationServiceTest : FunSpec({
         }
     }
 })
+
+class ExplicitRouteTest : FunSpec({
+    test("/docs와 @컬렉션을 해석한다") {
+        ExplicitRoute.parse("/docs 메모리 예산은?") shouldBe ExplicitRoute(AgentType.DOCS, emptyList(), "메모리 예산은?")
+        ExplicitRoute.parse("@vesta 메모리 예산은?") shouldBe ExplicitRoute(AgentType.DOCS, listOf("vesta"), "메모리 예산은?")
+        ExplicitRoute.parse("@a,b @c 질문") shouldBe ExplicitRoute(AgentType.DOCS, listOf("a", "b", "c"), "질문")
+        ExplicitRoute.parse("메일 주소는 me@example.com") shouldBe null
+        ExplicitRoute.parse("/docsx 질문") shouldBe null
+    }
+
+    test("@컬렉션 질문은 DocsAgent로 가고 질문에서 지정 부분을 뗀다") {
+        val docs = RecordingDocsAgent()
+        val chat = ScriptedAgent { error("chat이 불리면 안 됨") }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.DOCS to docs))
+        service.send(UserContext(UserId(1), UserRole.OWNER), ChannelType.CLI, null, UserInput("@vesta 메모리 예산은?")).toList()
+        docs.request!!.collections shouldBe listOf("vesta")
+        docs.request!!.history.last().content shouldBe "메모리 예산은?"
+    }
+})
+
+private class RecordingDocsAgent : Agent {
+    var request: AgentRequest? = null
+    override val type = AgentType.DOCS
+    override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
+        this@RecordingDocsAgent.request = request
+        emit(AgentEvent.Done(AgentType.DOCS, "m", null))
+    }
+}

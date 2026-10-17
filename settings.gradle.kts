@@ -25,6 +25,8 @@ include(
     "core",
     "inference",
     "storage",
+    "knowledge",
+    "retrieval",
     "agents",
     "conversation",
     "app-cli",

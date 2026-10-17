@@ -47,3 +47,39 @@ object Messages : LongIdTable("messages") {
     val completionTokens = integer("completion_tokens").nullable()
     val createdAt = timestamp("created_at")
 }
+
+/** 지식 베이스 컬렉션 (PROJECT.md K-01, 11장 Collection). */
+object Collections : LongIdTable("collections") {
+    val ownerUserId = reference("owner_user_id", Users)
+    val name = varchar("name", 100)
+    val description = text("description").nullable()
+    val embeddingModel = varchar("embedding_model", 200)
+    val createdAt = timestamp("created_at")
+
+    init {
+        uniqueIndex(ownerUserId, name)
+    }
+}
+
+/** 색인한 파일. contentHash로 변경 여부를 판단한다 (K-10). */
+object Documents : LongIdTable("documents") {
+    val collectionId = reference("collection_id", Collections, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val path = text("path")
+    val title = text("title")
+    val contentHash = varchar("content_hash", 64)
+    val indexedAt = timestamp("indexed_at")
+
+    init {
+        uniqueIndex(collectionId, path)
+    }
+}
+
+/** 청크. 키워드 검색은 FTS5 가상 테이블 chunks_fts(rowid = chunks.id)가 맡는다. */
+object Chunks : LongIdTable("chunks") {
+    val documentId = reference("document_id", Documents, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val ordinal = integer("ordinal")
+    val text = text("text")
+    val location = varchar("location", 100).nullable()
+    val heading = text("heading").nullable()
+    val embedding = binary("embedding")
+}

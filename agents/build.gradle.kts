@@ -4,4 +4,6 @@ plugins {
 
 dependencies {
     api(project(":core"))
+    implementation(project(":retrieval"))
+    implementation(project(":storage"))
 }
