@@ -54,6 +54,9 @@ object Collections : LongIdTable("collections") {
     val name = varchar("name", 100)
     val description = text("description").nullable()
     val embeddingModel = varchar("embedding_model", 200)
+    /** DOCS / CODE (schema v6에서 추가) */
+    val kind = varchar("kind", 16).default("DOCS")
+    val rootPath = text("root_path").nullable()
     val createdAt = timestamp("created_at")
 
     init {

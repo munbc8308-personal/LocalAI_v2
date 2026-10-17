@@ -1,0 +1,21 @@
+# 코드 검색 평가셋 (PROJECT.md M5 완료 기준: 저장소 질문에 정확한 파일·위치). 코퍼스: 이 저장소. 열: 질문<TAB>정답 파일 경로에 들어가는 글자(| 로 여러 개)
+SSRF 막는 코드 어디 있어?	UrlGuard.kt
+리다이렉트를 몇 번까지 따라가?	HttpPageFetcher.kt
+결정 모델 신뢰도가 낮으면 다음 단계로 넘기는 부분 보여 줘	Router.kt
+메모리 예산 넘으면 모델 내리는 로직이 어디야?	ModelManager.kt
+스트리밍 응답(SSE) 파싱하는 곳	OpenAiCompatibleClient.kt
+응답이 중단돼도 부분 답변을 저장하는 코드	DefaultConversationService.kt
+검색어에서 한국어 조사 떼는 함수	KeywordQuery.kt
+벡터 검색이랑 키워드 검색 결과 합치는 부분	LocalRetriever.kt
+마크다운 제목 경로 만드는 파서	Parsing.kt
+Ollaya 응답 JSON 해석하는 코드	OllayaClient.kt
+답변 근거에 출처 번호 붙이는 곳	ContextAssembler.kt
+웹 검색어 만드는 프롬프트	QueryRewriter.kt
+FTS5 가상 테이블 만드는 곳	VestaDatabase.kt
+/web 같은 명령어 해석하는 코드	ExplicitRoute.kt
+Ctrl+C로 생성 중단하는 처리	ChatCommand.kt
+벤치마크에서 한자 섞였는지 검사하는 코드	KoreanStyle.kt
+SearXNG 컨테이너 설정 파일	compose.yaml
+robots.txt 해석하는 부분	HttpPageFetcher.kt
+코드를 선언 단위로 자르는 정규식	CodeChunker.kt
+컬렉션 kind 열 추가하는 마이그레이션	VestaDatabase.kt

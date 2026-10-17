@@ -51,7 +51,8 @@ class CollectionListCommand : CliktCommand(name = "list") {
             if (collections.isEmpty()) echo("컬렉션이 없습니다. 만들기: vesta collection create <이름>")
             collections.forEach {
                 val stats = app.knowledge.stats(it.id)
-                echo("${it.name.padEnd(20)} 문서 ${stats.documents}개 · 청크 ${stats.chunks}개 · ${it.embeddingModel}${it.description?.let { d -> " — $d" }.orEmpty()}")
+                val kind = if (it.kind == dev.vesta.core.knowledge.CollectionKind.CODE) "코드 ${it.rootPath}" else "문서"
+                echo("${it.name.padEnd(20)} [$kind] 파일 ${stats.documents}개 · 청크 ${stats.chunks}개 · ${it.embeddingModel}${it.description?.let { d -> " — $d" }.orEmpty()}")
             }
         }
     }

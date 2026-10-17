@@ -42,6 +42,8 @@ class DefaultConversationService(
     private val routingLog: RoutingLogRepository? = null,
     /** 사용자별로 지금 쓸 수 있는 에이전트 (예: 컬렉션이 있어야 DOCS) */
     private val availability: suspend (UserContext) -> Set<AgentType> = { agents.keys },
+    /** `@이름`으로 지정한 컬렉션이 모두 코드 저장소면 CODE 등, 지정 대상에 맞는 에이전트 */
+    private val mentionAgent: suspend (UserContext, List<String>) -> AgentType? = { _, _ -> null },
 ) : ConversationService {
 
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
@@ -55,9 +57,11 @@ class DefaultConversationService(
             .map { ChatMessage(it.role, ExplicitRoute.parse(it.content)?.question?.ifBlank { null } ?: it.content) }
 
         val available = availability(user).filter { it in agents }.toSet()
-        val decision = router?.route(input.text, history.dropLast(1), available)
+        val routed = router?.route(input.text, history.dropLast(1), available)
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
+        val decision = if (routed.collections.isEmpty()) routed
+            else mentionAgent(user, routed.collections)?.let { routed.copy(agent = it, requested = null) } ?: routed
         emit(AgentEvent.Routed(decision))
         routingLog?.let { log -> runCatching { log.record(session.id, decision) } }
         val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
@@ -65,7 +69,7 @@ class DefaultConversationService(
         val answer = StringBuilder()
         var done: AgentEvent.Done? = null
         try {
-            agent.handle(AgentRequest(user, session, history.dropLast(1) + ChatMessage(ChatRole.USER, route.question.ifBlank { input.text }), route.collections))
+            agent.handle(AgentRequest(user, session, history.dropLast(1) + ChatMessage(ChatRole.USER, route.question.ifBlank { input.text }), route.collections, route))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

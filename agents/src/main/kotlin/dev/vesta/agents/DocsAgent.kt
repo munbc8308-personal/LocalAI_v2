@@ -8,6 +8,7 @@ import dev.vesta.core.agent.AgentRequest
 import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRole
 import dev.vesta.core.inference.InferenceClient
+import dev.vesta.core.knowledge.CollectionKind
 import dev.vesta.core.knowledge.RetrieveOptions
 import dev.vesta.core.knowledge.Retriever
 import dev.vesta.core.model.ModelProvider
@@ -38,7 +39,7 @@ class DocsAgent(
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
-        val all = knowledge.listCollections(request.user.userId)
+        val all = knowledge.listCollections(request.user.userId).filter { it.kind == CollectionKind.DOCS }
         val targets = if (request.collections.isEmpty()) all else all.filter { it.name in request.collections }
         val missing = request.collections - targets.map { it.name }.toSet()
         if (targets.isEmpty()) {

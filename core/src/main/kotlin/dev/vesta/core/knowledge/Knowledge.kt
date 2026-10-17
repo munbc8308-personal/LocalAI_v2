@@ -6,6 +6,9 @@ import dev.vesta.core.UserId
 @JvmInline
 value class CollectionId(val value: Long)
 
+/** 컬렉션 종류: 일반 문서(K-01) 또는 코드 저장소(D-01). */
+enum class CollectionKind { DOCS, CODE }
+
 /** 지식 베이스 (PROJECT.md K-01). 설명은 라우팅(D4)에 쓴다. */
 data class Collection(
     val id: CollectionId,
@@ -14,6 +17,9 @@ data class Collection(
     val description: String?,
     /** 이 컬렉션의 임베딩을 만든 모델. 바꾸면 다시 색인해야 한다. */
     val embeddingModel: String,
+    val kind: CollectionKind = CollectionKind.DOCS,
+    /** 코드 저장소의 루트 경로 (CODE일 때). 상대 경로 표시·파일 지정 질의에 쓴다. */
+    val rootPath: String? = null,
 )
 
 /** 검색으로 찾은 근거 한 조각 (PROJECT.md 5.1, 11장 Evidence). */

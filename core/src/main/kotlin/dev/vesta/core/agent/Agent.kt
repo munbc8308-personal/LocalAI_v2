@@ -19,6 +19,8 @@ data class AgentRequest(
     val history: List<ChatMessage>,
     /** 문서 검색 대상 컬렉션 이름. 비어 있으면 사용자의 모든 컬렉션. */
     val collections: List<String> = emptyList(),
+    /** 라우터 판정 (D2·D3 확률 등). 에이전트가 정보원을 고를 때 참고한다. */
+    val routing: dev.vesta.core.decision.RoutingDecision? = null,
 )
 
 data class UserInput(val text: String)

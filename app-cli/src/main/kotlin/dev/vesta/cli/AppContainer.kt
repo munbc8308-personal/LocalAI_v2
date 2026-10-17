@@ -1,7 +1,9 @@
 package dev.vesta.cli
 
 import dev.vesta.agents.ChatAgent
+import dev.vesta.agents.CodeAgent
 import dev.vesta.agents.DocsAgent
+import dev.vesta.core.knowledge.CollectionKind
 import dev.vesta.agents.QueryRewriter
 import dev.vesta.agents.WebResearchAgent
 import dev.vesta.retrieval.WebRetriever
@@ -86,13 +88,19 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         // 문서 컬렉션이 있어야 DOCS로 보낸다
         availability = { user ->
             buildSet {
-                addAll(listOf(AgentType.CHAT, AgentType.WEB))
-                if (knowledge.listCollections(user.userId).isNotEmpty()) add(AgentType.DOCS)
+                addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE))
+                if (knowledge.listCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
             }
+        },
+        // @이름이 모두 코드 저장소면 코드 도우미로
+        mentionAgent = { user, names ->
+            val named = knowledge.listCollections(user.userId).filter { it.name in names }
+            if (named.isNotEmpty() && named.all { it.kind == CollectionKind.CODE }) AgentType.CODE else null
         },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
+            AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever),
             AgentType.WEB to WebResearchAgent(inference, modelManager, QueryRewriter(inference, modelManager), webRetriever, { config.web.mode }),
         ),
     )

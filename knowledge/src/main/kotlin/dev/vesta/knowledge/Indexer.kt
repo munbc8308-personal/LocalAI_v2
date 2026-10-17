@@ -2,6 +2,7 @@ package dev.vesta.knowledge
 
 import dev.vesta.core.inference.InferenceClient
 import dev.vesta.core.knowledge.Collection
+import dev.vesta.core.knowledge.CollectionKind
 import dev.vesta.storage.KnowledgeRepository
 import dev.vesta.storage.NewChunk
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -37,6 +38,7 @@ class Indexer(
     private val repository: KnowledgeRepository,
     private val inference: InferenceClient,
     private val chunker: Chunker = Chunker(),
+    private val codeChunker: CodeChunker = CodeChunker(),
     private val batchSize: Int = 32,
     private val maxFileBytes: Long = 20L * 1024 * 1024,
 ) {
@@ -48,7 +50,7 @@ class Indexer(
         var chunkCount = 0
 
         for (target in targets.map { it.absolute().normalize() }) {
-            val files = files(target)
+            val files = if (collection.kind == CollectionKind.CODE) codeFiles(target) else files(target)
             for (file in files) {
                 val result = runCatching { indexFile(collection, file) }.getOrElse {
                     log.warn(it) { "색인 실패: $file" }
@@ -82,8 +84,12 @@ class Indexer(
         val hash = sha256(bytes)
         if (repository.findDocument(collection.id, file.toString())?.contentHash == hash) return IndexProgress.Unchanged(file)
 
-        val parsed = DocumentParser.parse(file, bytes)
-        val chunks = chunker.chunk(parsed)
+        val (parsed, chunks) = if (collection.kind == CollectionKind.CODE) {
+            val relative = collection.rootPath?.let { runCatching { Path.of(it).relativize(file).toString() }.getOrNull() } ?: file.toString()
+            ParsedDocument(relative, emptyList()) to codeChunker.chunk(relative, bytes.decodeToString())
+        } else {
+            DocumentParser.parse(file, bytes).let { it to chunker.chunk(it) }
+        }
         if (chunks.isEmpty()) return IndexProgress.Skipped(file, "글자가 없음 (스캔 PDF는 아직 지원하지 않음)")
 
         val profile = EmbeddingProfile.of(collection.embeddingModel)
@@ -98,6 +104,12 @@ class Indexer(
             chunks = chunks.zip(vectors) { chunk, vector -> NewChunk(chunk.text, chunk.location, chunk.heading, vector) },
         )
         return IndexProgress.Indexed(file, chunks.size)
+    }
+
+    private fun codeFiles(target: Path): List<Path> = when {
+        target.isRegularFile() -> if (CodeFiles.supports(target)) listOf(target) else emptyList()
+        target.isDirectory() -> CodeFiles.list(target)
+        else -> emptyList()
     }
 
     private fun files(target: Path): List<Path> = when {

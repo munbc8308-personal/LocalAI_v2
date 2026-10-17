@@ -3,6 +3,7 @@ package dev.vesta.storage
 import dev.vesta.core.UserId
 import dev.vesta.core.knowledge.Collection
 import dev.vesta.core.knowledge.CollectionId
+import dev.vesta.core.knowledge.CollectionKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.LongColumnType
@@ -49,15 +50,24 @@ class KnowledgeRepository(
 ) {
     private suspend fun <T> io(block: JdbcTransaction.() -> T): T = withContext(Dispatchers.IO) { transaction(db) { block() } }
 
-    suspend fun createCollection(owner: UserId, name: String, description: String?, embeddingModel: String): Collection = io {
+    suspend fun createCollection(
+        owner: UserId,
+        name: String,
+        description: String?,
+        embeddingModel: String,
+        kind: CollectionKind = CollectionKind.DOCS,
+        rootPath: String? = null,
+    ): Collection = io {
         val id = Collections.insertAndGetId {
             it[ownerUserId] = EntityID(owner.value, Users)
             it[Collections.name] = name
             it[Collections.description] = description
             it[Collections.embeddingModel] = embeddingModel
+            it[Collections.kind] = kind.name
+            it[Collections.rootPath] = rootPath
             it[createdAt] = clock.instant()
         }.value
-        Collection(CollectionId(id), owner, name, description, embeddingModel)
+        Collection(CollectionId(id), owner, name, description, embeddingModel, kind, rootPath)
     }
 
     suspend fun findCollection(owner: UserId, name: String): Collection? = io {
@@ -196,6 +206,8 @@ class KnowledgeRepository(
         name = this[Collections.name],
         description = this[Collections.description],
         embeddingModel = this[Collections.embeddingModel],
+        kind = CollectionKind.valueOf(this[Collections.kind]),
+        rootPath = this[Collections.rootPath],
     )
 
     companion object {

@@ -26,6 +26,10 @@ class VestaDatabase private constructor(val db: Database) {
         // 키워드 검색(BM25)용 FTS5. 한국어는 접두어 검색으로 조사 차이를 흡수한다 (KnowledgeRepository.keywordSearch)
         exec("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, heading, tokenize = 'unicode61 remove_diacritics 2')")
         val current = SchemaVersion.selectAll().maxOfOrNull { it[SchemaVersion.version] } ?: 0
+        // v6: 이미 있는 collections 테이블에 열 추가 (SchemaUtils.create는 기존 테이블을 바꾸지 않는다)
+        val columns = exec("PRAGMA table_info(collections)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
+        if ("kind" !in columns) exec("ALTER TABLE collections ADD COLUMN kind VARCHAR(16) DEFAULT 'DOCS' NOT NULL")
+        if ("root_path" !in columns) exec("ALTER TABLE collections ADD COLUMN root_path TEXT NULL")
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
             log.info { "schema $current -> $CURRENT_VERSION" }
@@ -47,8 +51,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4) */
-        const val CURRENT_VERSION = 5
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5) */
+        const val CURRENT_VERSION = 6
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()
