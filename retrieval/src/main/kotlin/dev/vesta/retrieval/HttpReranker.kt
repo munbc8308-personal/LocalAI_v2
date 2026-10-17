@@ -26,7 +26,7 @@ class HttpReranker(
         if (candidates.isEmpty()) return candidates
         val response = http.post("$baseUrl/v1/rerank") {
             contentType(ContentType.Application.Json)
-            setBody(RerankRequest(model, question, candidates.map { it.title + "\n" + it.text }, topN))
+            setBody(RerankRequest(model, question, candidates.map { listOfNotNull(it.title, it.location).joinToString(" · ") + "\n" + it.text }, topN))
         }
         check(response.status.isSuccess()) { "rerank HTTP ${response.status.value}: ${response.bodyAsText().take(300)}" }
         return response.body<RerankResponse>().results

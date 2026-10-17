@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- 리랭커(bge-reranker-v2-m3) 상시 실행. Ollama에 rerank API가 없어 llama.cpp llama-server로 띄운다 (PROJECT.md 13.3) -->
+<!-- 리랭커(bge-reranker-v2-m3). 기본은 끔 — 켜려면 scripts/install-launchd.sh dev.vesta.reranker 후 설정의 models.reranker 주석을 푼다. Ollama에 rerank API가 없어 llama.cpp llama-server로 띄운다 (PROJECT.md 13.3) -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
