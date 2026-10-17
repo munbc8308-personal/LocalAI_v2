@@ -2,6 +2,12 @@ package dev.vesta.cli
 
 import dev.vesta.agents.ChatAgent
 import dev.vesta.agents.DocsAgent
+import dev.vesta.agents.QueryRewriter
+import dev.vesta.agents.WebResearchAgent
+import dev.vesta.retrieval.WebRetriever
+import dev.vesta.storage.WebCacheRepository
+import dev.vesta.web.HttpPageFetcher
+import dev.vesta.web.SearxngClient
 import dev.vesta.conversation.DefaultConversationService
 import dev.vesta.core.AgentType
 import dev.vesta.core.UserContext
@@ -50,22 +56,38 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 리랭커는 선택 (models.reranker, engine: llama-server). 없으면 RRF 순서만 쓴다. */
     val reranker = config.models.reranker?.takeIf { it.baseUrl != null }?.let { HttpReranker(it.baseUrl!!, it.name, http) }
     val retriever = LocalRetriever(knowledge, inference, VectorIndex(knowledge), reranker)
+
+    /** 외부 웹용 HTTP 클라이언트 (리다이렉트 따라감). 로컬 엔진용과 분리한다. */
+    private val webHttp = HttpClients.web(config.web.pageTimeoutSeconds)
+    val webCache = WebCacheRepository(database.db)
+    val webRetriever = WebRetriever(
+        search = SearxngClient(config.web.searxngUrl, http, webCache),
+        fetcher = HttpPageFetcher(webHttp, config.web, webCache),
+        inference = inference,
+        embeddingModel = config.models.embedding?.name ?: DEFAULT_EMBEDDING,
+        maxPages = config.web.maxPages,
+    )
     val conversation = DefaultConversationService(
         sessions = sessions,
         messages = messages,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
+            AgentType.WEB to WebResearchAgent(inference, modelManager, QueryRewriter(inference, modelManager), webRetriever, { config.web.mode }),
         ),
     )
 
     /** 단일 사용자 동안은 OWNER 한 명 (PROJECT.md 7.12). */
     val owner = UserContext(database.ensureOwner(System.getProperty("user.name") ?: "owner"), UserRole.OWNER)
 
-    override fun close() = http.close()
+    override fun close() {
+        http.close()
+        webHttp.close()
+    }
 
     companion object {
         /** 설정에 메인 모델이 없을 때 --model과 함께 쓰는 기본 파라미터 (M0 벤치마크: 생각 양 low). */
-        val DEFAULT_GENERAL = ModelSpec(name = "", keepAlive = "forever", reasoningEffort = "low")
+        val DEFAULT_GENERAL = ModelSpec(name = "", keepAlive = "forever", reasoningEffort = "none")
+        const val DEFAULT_EMBEDDING = "bge-m3:567m"
     }
 }

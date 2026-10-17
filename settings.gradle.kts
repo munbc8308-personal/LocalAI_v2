@@ -27,6 +27,7 @@ include(
     "storage",
     "knowledge",
     "retrieval",
+    "web",
     "agents",
     "conversation",
     "app-cli",

@@ -44,7 +44,8 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
                 } else if (sources.isNotEmpty()) {
                     out.println(dim("(인용한 출처 없음 · 검색 ${sources.size}건)"))
                 }
-                out.println(dim("[${event.model}$tokens · ${"%.1f".format(elapsed.inWholeMilliseconds / 1000.0)}s]"))
+                // 모델을 쓰지 않은 안내 답변(model "-")은 꼬리표를 달지 않는다
+                if (event.model != "-") out.println(dim("[${event.model}$tokens · ${"%.1f".format(elapsed.inWholeMilliseconds / 1000.0)}s]"))
             }
             is AgentEvent.Error -> {
                 clearThinkingIfNoAnswer()

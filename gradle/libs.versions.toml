@@ -14,6 +14,8 @@ kotest = "6.2.6"
 mockk = "1.14.11"
 jline = "3.30.16"
 pdfbox = "3.0.7"
+jsoup = "1.23.2"
+jspecify = "1.0.0"
 
 [libraries]
 # build-logic 전용 (convention plugin 의존성)
@@ -48,6 +50,9 @@ kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 jline = { module = "org.jline:jline", version.ref = "jline" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+# jsoup의 null 표시 어노테이션 (컴파일 시에만 필요)
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 
 [bundles]
 ktor-client = ["ktor-client-core", "ktor-client-cio", "ktor-client-content-negotiation", "ktor-serialization-kotlinx-json"]

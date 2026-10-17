@@ -19,4 +19,16 @@ object HttpClients {
                 socketTimeoutMillis = requestTimeoutSeconds * 1_000
             }
         }
+
+    /** 외부 웹 페이지 수집용. 리다이렉트를 따라가고, 요청마다 짧은 타임아웃을 둔다. */
+    fun web(timeoutSeconds: Long, engine: HttpClientEngine = CIO.create()): HttpClient =
+        HttpClient(engine) {
+            expectSuccess = false
+            followRedirects = true
+            install(HttpTimeout) {
+                connectTimeoutMillis = 5_000
+                requestTimeoutMillis = timeoutSeconds * 1_000
+                socketTimeoutMillis = timeoutSeconds * 1_000
+            }
+        }
 }

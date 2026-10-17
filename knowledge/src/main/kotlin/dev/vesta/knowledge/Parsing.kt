@@ -114,3 +114,8 @@ internal object PdfParser {
         ParsedDocument(title, blocks)
     }
 }
+
+/** 다른 모듈(웹 본문 등)이 일반 텍스트를 문단으로 나눌 때 쓴다. */
+object PlainTextParserFacade {
+    fun parse(text: String, title: String): ParsedDocument = PlainTextParser.parse(text, title)
+}

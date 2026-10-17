@@ -69,7 +69,8 @@ class ChatCommand : CliktCommand(name = "chat") {
                 }.trim()
                 if (line.isEmpty()) continue
 
-                if (line.startsWith("/")) {
+                // /web /docs /chat 은 라우팅 명령이라 대화 엔진으로 넘긴다
+                if (line.startsWith("/") && line.substringBefore(' ') !in ROUTING_COMMANDS) {
                     val (command, arg) = line.split(Regex("\\s+"), limit = 2).let { it[0] to it.getOrNull(1) }
                     when (command) {
                         "/exit", "/quit" -> break
@@ -160,12 +161,14 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
+        val ROUTING_COMMANDS = setOf("/web", "/docs", "/chat")
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val HELP = """
             /new             새 대화
             /sessions        최근 세션 목록
             /resume [번호]   세션 이어하기 (번호 생략 시 가장 최근)
             /history         현재 대화 다시 보기
+            /web 질문         웹 검색해서 답하기 (질문에 URL이 있으면 그 페이지를 읽음)
             /docs 질문        등록한 모든 문서에서 찾아 답하기
             @컬렉션 질문      지정한 컬렉션에서 찾아 답하기 (@a,b 여러 개)
             /exit            종료 (Ctrl+D)

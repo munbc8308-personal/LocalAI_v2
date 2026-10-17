@@ -64,9 +64,17 @@ data class DecisionConfig(
 
 enum class WebMode { AUTO, ALWAYS, OFF }
 
+/** 웹 검색 (PROJECT.md 5.3·5.4). OFF면 외부로 아무것도 보내지 않는다. */
 data class WebConfig(
     val mode: WebMode = WebMode.AUTO,
     val searxngUrl: String = "http://127.0.0.1:8888",
+    /** 질문 하나에 읽을 최대 페이지 수 */
+    val maxPages: Int = 6,
+    val pageTimeoutSeconds: Long = 10,
+    val cacheHours: Long = 24,
+    /** 읽지 않을 도메인 (하위 도메인 포함) */
+    val blockedDomains: List<String> = emptyList(),
+    val userAgent: String = "VestaBot/0.1 (+local personal assistant)",
 )
 
 data class MemoryConfig(

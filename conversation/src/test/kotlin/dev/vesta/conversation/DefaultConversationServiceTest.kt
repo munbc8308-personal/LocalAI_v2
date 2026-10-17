@@ -125,6 +125,8 @@ class ExplicitRouteTest : FunSpec({
         ExplicitRoute.parse("@a,b @c 질문") shouldBe ExplicitRoute(AgentType.DOCS, listOf("a", "b", "c"), "질문")
         ExplicitRoute.parse("메일 주소는 me@example.com") shouldBe null
         ExplicitRoute.parse("/docsx 질문") shouldBe null
+        ExplicitRoute.parse("/web 오늘 환율") shouldBe ExplicitRoute(AgentType.WEB, emptyList(), "오늘 환율")
+        ExplicitRoute.parse("이 글 요약해 줘 https://example.com/a") shouldBe ExplicitRoute(AgentType.WEB, emptyList(), "이 글 요약해 줘 https://example.com/a")
     }
 
     test("@컬렉션 질문은 DocsAgent로 가고 질문에서 지정 부분을 뗀다") {

@@ -83,3 +83,21 @@ object Chunks : LongIdTable("chunks") {
     val heading = text("heading").nullable()
     val embedding = binary("embedding")
 }
+
+/** 웹 페이지 본문 캐시 (PROJECT.md W-07, 11장 WebPage). */
+object WebPages : LongIdTable("web_pages") {
+    val url = text("url").uniqueIndex()
+    val title = text("title")
+    val text = text("text")
+    val publishedDate = varchar("published_date", 64).nullable()
+    val fetchedAt = timestamp("fetched_at")
+    val expiresAt = timestamp("expires_at")
+}
+
+/** 외부로 보낸 검색어 기록 (PROJECT.md 5.4, W-06, 11장 WebSearchLog). */
+object WebSearchLogs : LongIdTable("web_search_log") {
+    val query = text("query")
+    val backend = varchar("backend", 32)
+    val resultCount = integer("result_count")
+    val createdAt = timestamp("created_at")
+}
