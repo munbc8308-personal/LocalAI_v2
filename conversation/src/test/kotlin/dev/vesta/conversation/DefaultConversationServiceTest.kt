@@ -1,6 +1,7 @@
 package dev.vesta.conversation
 
 import dev.vesta.core.AgentType
+import dev.vesta.router.ExplicitRoute
 import dev.vesta.core.ChannelType
 import dev.vesta.core.SessionId
 import dev.vesta.core.UserContext
@@ -92,8 +93,8 @@ class DefaultConversationServiceTest : FunSpec({
         }
         val service = DefaultConversationService(MemorySessions(), messages, mapOf(AgentType.CHAT to agent))
 
-        // SessionReady, Token 두 개만 받고 수집을 끝낸다 = 사용자 중단
-        service.send(user, ChannelType.CLI, null, UserInput("길게 말해 줘")).take(2).toList()
+        // SessionReady, Routed, Token 세 개만 받고 수집을 끝낸다 = 사용자 중단
+        service.send(user, ChannelType.CLI, null, UserInput("길게 말해 줘")).take(3).toList()
         val saved = messages.items.last()
         saved.content shouldBe "부분"
         saved.interrupted shouldBe true

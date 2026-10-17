@@ -14,6 +14,7 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
     fun render(event: AgentEvent, elapsed: Duration) {
         when (event) {
             is AgentEvent.SessionReady -> Unit
+            is AgentEvent.Routed -> out.println(dim("→ " + RoutingText.describe(event.decision)))
             is AgentEvent.Status -> if (event.text != "생성 중") out.println(dim("· ${event.text}"))
             is AgentEvent.Sources -> sources = event.evidence
             is AgentEvent.Reasoning -> {

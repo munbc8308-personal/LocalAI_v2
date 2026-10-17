@@ -48,6 +48,7 @@ data class ModelsConfig(
 )
 
 data class DecisionThresholds(
+    /** 결정 모델의 에이전트 판정을 받아들일 최소 신뢰도. 못 넘으면 메인 모델이 판정한다 (4.5 4단계). */
     val agent: Double = 0.6,
     val needsWeb: Double = 0.5,
     val needsLocal: Double = 0.5,
@@ -60,6 +61,10 @@ data class DecisionConfig(
     val model: String = "laya",
     val thresholds: DecisionThresholds = DecisionThresholds(),
     val fallback: String = "general",
+    /** false면 결정 모델을 건너뛰고 바로 메인 모델이 판정한다. */
+    val enabled: Boolean = true,
+    /** 결정 모델 질문 문구 언어 (M4 평가: en이 ko보다 정확) */
+    val criteriaLanguage: String = "en",
 )
 
 enum class WebMode { AUTO, ALWAYS, OFF }

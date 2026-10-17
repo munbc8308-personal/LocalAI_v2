@@ -15,5 +15,6 @@ fun main(args: Array<String>) = Vesta()
         ChatCommand(),
         CollectionCommand().subcommands(CollectionCreateCommand(), CollectionListCommand(), CollectionAddCommand(), CollectionRemoveCommand()),
         SearchCommand(),
+        EvalCommand().subcommands(EvalRoutingCommand()),
         StatusCommand(), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
     .main(args)

@@ -12,6 +12,9 @@ sealed interface AgentEvent {
     /** 세션이 정해졌다. 새 세션이면 [created]가 true. */
     data class SessionReady(val sessionId: SessionId, val title: String?, val created: Boolean) : AgentEvent
 
+    /** 어느 에이전트가 맡았는지 (라우팅 결과, PROJECT.md 4.6). */
+    data class Routed(val decision: dev.vesta.core.decision.RoutingDecision) : AgentEvent
+
     /** 진행 상태 ("생성 중" 등, C-05). */
     data class Status(val text: String) : AgentEvent
 

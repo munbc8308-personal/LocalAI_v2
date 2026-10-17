@@ -101,3 +101,18 @@ object WebSearchLogs : LongIdTable("web_search_log") {
     val resultCount = integer("result_count")
     val createdAt = timestamp("created_at")
 }
+
+/** 라우팅 기록 (PROJECT.md 11장 RoutingLog). 보정·평가·학습 데이터(L-01)용. */
+object RoutingLogs : LongIdTable("routing_log") {
+    val sessionId = varchar("session_id", 36).index()
+    val question = text("question")
+    val agent = varchar("agent", 16)
+    val requested = varchar("requested", 16).nullable()
+    val stage = varchar("stage", 16)
+    val confidence = double("confidence")
+    val needsWeb = double("needs_web").nullable()
+    val needsLocal = double("needs_local").nullable()
+    val latencyMs = long("latency_ms")
+    val userOverride = varchar("user_override", 16).nullable()
+    val createdAt = timestamp("created_at")
+}

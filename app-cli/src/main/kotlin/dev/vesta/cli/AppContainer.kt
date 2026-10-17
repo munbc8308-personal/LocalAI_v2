@@ -6,6 +6,10 @@ import dev.vesta.agents.QueryRewriter
 import dev.vesta.agents.WebResearchAgent
 import dev.vesta.retrieval.WebRetriever
 import dev.vesta.storage.WebCacheRepository
+import dev.vesta.storage.ExposedRoutingLogRepository
+import dev.vesta.decision.OllayaClient
+import dev.vesta.router.LlmRouter
+import dev.vesta.router.Router
 import dev.vesta.web.HttpPageFetcher
 import dev.vesta.web.SearxngClient
 import dev.vesta.conversation.DefaultConversationService
@@ -41,6 +45,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     }
 
     private val http = HttpClients.local(config.inference.requestTimeoutSeconds)
+    /** 평가 명령이 결정 모델을 바꿔 가며 만들 때 쓴다 */
+    internal val httpForEval get() = http
     private val database = VestaDatabase.open(paths.database).also { it.migrate() }
 
     val sessions = ExposedSessionRepository(database.db)
@@ -67,9 +73,23 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         embeddingModel = config.models.embedding?.name ?: DEFAULT_EMBEDDING,
         maxPages = config.web.maxPages,
     )
+    val router = Router(
+        config = config.decision,
+        decision = OllayaClient(config.decision.baseUrl, config.decision.model, http),
+        llm = LlmRouter(inference, modelManager),
+    )
     val conversation = DefaultConversationService(
         sessions = sessions,
         messages = messages,
+        router = router,
+        routingLog = ExposedRoutingLogRepository(database.db),
+        // 문서 컬렉션이 있어야 DOCS로 보낸다
+        availability = { user ->
+            buildSet {
+                addAll(listOf(AgentType.CHAT, AgentType.WEB))
+                if (knowledge.listCollections(user.userId).isNotEmpty()) add(AgentType.DOCS)
+            }
+        },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),

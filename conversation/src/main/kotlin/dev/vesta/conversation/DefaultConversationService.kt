@@ -9,6 +9,11 @@ import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.AgentRequest
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.decision.RoutingDecision
+import dev.vesta.core.decision.RoutingLogRepository
+import dev.vesta.core.decision.RoutingStage
+import dev.vesta.router.ExplicitRoute
+import dev.vesta.router.Router
 import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRole
 import dev.vesta.core.session.MessageRepository
@@ -26,12 +31,17 @@ private val log = KotlinLogging.logger {}
 /**
  * 대화 엔진 (PROJECT.md 6.1, 8장).
  * 세션 조회·생성 → 사용자 메시지 저장 → 에이전트 실행 → 답변 저장.
- * 에이전트 선택: 명시 지정(/docs, @컬렉션)이 있으면 그것, 없으면 ChatAgent. M4에서 Router가 고른다.
+ * 에이전트 선택은 Router (PROJECT.md 4.5: 명시 → 규칙 → 결정 모델 → 메인 모델 → 일반 대화).
  */
 class DefaultConversationService(
     private val sessions: SessionRepository,
     private val messages: MessageRepository,
     private val agents: Map<AgentType, Agent>,
+    /** null이면 명시 지정·규칙만 쓴다 (테스트·결정 모델 없는 환경) */
+    private val router: Router? = null,
+    private val routingLog: RoutingLogRepository? = null,
+    /** 사용자별로 지금 쓸 수 있는 에이전트 (예: 컬렉션이 있어야 DOCS) */
+    private val availability: suspend (UserContext) -> Set<AgentType> = { agents.keys },
 ) : ConversationService {
 
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
@@ -40,16 +50,22 @@ class DefaultConversationService(
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
 
         messages.append(session.id, NewMessage(ChatRole.USER, input.text))
-        val route = ExplicitRoute.parse(input.text)
         val history = messages.list(session.id)
             .filter { it.content.isNotBlank() }
             .map { ChatMessage(it.role, ExplicitRoute.parse(it.content)?.question?.ifBlank { null } ?: it.content) }
 
-        val agent = route?.agent?.let { agents[it] } ?: agents.getValue(AgentType.CHAT)
+        val available = availability(user).filter { it in agents }.toSet()
+        val decision = router?.route(input.text, history.dropLast(1), available)
+            ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
+            ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
+        emit(AgentEvent.Routed(decision))
+        routingLog?.let { log -> runCatching { log.record(session.id, decision) } }
+        val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
+        val route = decision
         val answer = StringBuilder()
         var done: AgentEvent.Done? = null
         try {
-            agent.handle(AgentRequest(user, session, history, route?.collections.orEmpty()))
+            agent.handle(AgentRequest(user, session, history.dropLast(1) + ChatMessage(ChatRole.USER, route.question.ifBlank { input.text }), route.collections))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

@@ -4,5 +4,6 @@ plugins {
 
 dependencies {
     api(project(":core"))
+    api(project(":router"))
     implementation(libs.kotlin.logging)
 }

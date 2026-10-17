@@ -28,6 +28,8 @@ include(
     "knowledge",
     "retrieval",
     "web",
+    "decision",
+    "router",
     "agents",
     "conversation",
     "app-cli",
