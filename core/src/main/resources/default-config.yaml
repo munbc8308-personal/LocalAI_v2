@@ -5,9 +5,10 @@ inference:
   ollamaUrl: http://127.0.0.1:11434
 
 models:
-  # M0 벤치마크로 확정 (PROJECT.md 13.1). Qwen3.5는 생각 모드가 기본이라 none으로 끈다
-  general:   { name: "qwen3.5:35b-a3b-nvfp4", keepAlive: forever, reasoningEffort: none }
-  code:      { name: "qwen3.5:35b-a3b-coding-nvfp4", keepAlive: 30m, reasoningEffort: none }
+  # M0 벤치마크로 확정 (PROJECT.md 13.1). Gemma4는 생각 모드가 기본이라 none으로 끈다
+  # 메인·코드 모두 같은 모델 — 같은 모델이므로 keepAlive도 같게 둔다 (짧게 주면 메인 모델이 내려간다)
+  general:   { name: "gemma4:26b-mxfp8", keepAlive: forever, reasoningEffort: none }
+  code:      { name: "gemma4:26b-mxfp8", keepAlive: forever, reasoningEffort: none }
   # 임베딩: M2 평가(PROJECT.md 13.3)에서 qwen3-embedding:4b와 품질이 같고 색인 4배 빠름, 메모리 절반
   embedding: { name: "bge-m3:567m", keepAlive: forever }
   # 리랭커: 설치돼 있지만 기본은 끔 (평가셋에서 정확도 향상 없음, 검색 93ms → 520ms). 켜려면 주석을 푼다
