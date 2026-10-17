@@ -20,11 +20,14 @@ object HttpClients {
             }
         }
 
-    /** 외부 웹 페이지 수집용. 리다이렉트를 따라가고, 요청마다 짧은 타임아웃을 둔다. */
+    /**
+     * 외부 웹 페이지 수집용. 요청마다 짧은 타임아웃을 둔다.
+     * 리다이렉트는 **자동으로 따라가지 않는다** — 수집기가 한 번씩 내부 주소인지 검사하며 따라간다 (SSRF 방지).
+     */
     fun web(timeoutSeconds: Long, engine: HttpClientEngine = CIO.create()): HttpClient =
         HttpClient(engine) {
             expectSuccess = false
-            followRedirects = true
+            followRedirects = false
             install(HttpTimeout) {
                 connectTimeoutMillis = 5_000
                 requestTimeoutMillis = timeoutSeconds * 1_000

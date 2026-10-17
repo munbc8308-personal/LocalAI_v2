@@ -13,6 +13,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.net.InetAddress
 
 class WebTest : FunSpec({
     val article = """
@@ -53,15 +54,28 @@ class WebTest : FunSpec({
         Robots.disallowed("User-agent: *\nDisallow: /a\nDisallow: /b", "vestabot") shouldBe listOf("/a", "/b")
     }
 
+    /** DNS 가짜: example.com은 공인 IP, rebind.test는 루프백(127.0.0.1.nip.io 같은 우회 흉내) */
+    val dns: suspend (String) -> List<InetAddress> = { host ->
+        when (host) {
+            "example.com", "www.example.com" -> listOf(InetAddress.getByAddress(host, byteArrayOf(93, 184.toByte(), 216.toByte(), 34)))
+            "rebind.test" -> listOf(InetAddress.getByAddress(host, byteArrayOf(127, 0, 0, 1)))
+            else -> listOf(InetAddress.getByName(host))
+        }
+    }
+
     fun fetcher(config: WebConfig = WebConfig()) = HttpPageFetcher(
         HttpClient(MockEngine { request ->
             when (request.url.encodedPath) {
                 "/robots.txt" -> respond("User-agent: *\nDisallow: /secret", HttpStatusCode.OK)
+                "/to-internal" -> respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location, "http://127.0.0.1:11434/api/tags"))
+                "/to-post" -> respond("", HttpStatusCode.MovedPermanently, headersOf(HttpHeaders.Location, "/post"))
+                "/loop" -> respond("", HttpStatusCode.Found, headersOf(HttpHeaders.Location, "/loop"))
                 else -> respond(article, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/html; charset=utf-8"))
             }
-        }),
+        }) { followRedirects = false },
         config,
         cache = null,
+        guard = UrlGuard(config.blockedDomains, dns),
     )
 
     test("페이지를 받아 본문을 돌려준다") {
@@ -75,5 +89,22 @@ class WebTest : FunSpec({
             .shouldBeInstanceOf<FetchResult.Failed>().reason shouldBe "차단 도메인"
         fetcher().fetch("http://127.0.0.1:11434/api/tags").shouldBeInstanceOf<FetchResult.Failed>().reason shouldContain "내부"
         fetcher().fetch("http://192.168.0.1/").shouldBeInstanceOf<FetchResult.Failed>()
+    }
+
+    test("SSRF: 이름이 내부 IP로 해석되거나, 리다이렉트로 내부로 가면 막는다") {
+        fetcher().fetch("http://rebind.test/post").shouldBeInstanceOf<FetchResult.Failed>().reason shouldContain "내부"
+        fetcher().fetch("https://example.com/to-internal").shouldBeInstanceOf<FetchResult.Failed>().reason shouldContain "리다이렉트 차단"
+        fetcher().fetch("https://user:pw@example.com/post").shouldBeInstanceOf<FetchResult.Failed>()
+        fetcher().fetch("https://example.com/loop").shouldBeInstanceOf<FetchResult.Failed>().reason shouldContain "너무 많음"
+    }
+
+    test("안전한 리다이렉트는 따라간다") {
+        fetcher().fetch("https://example.com/to-post").shouldBeInstanceOf<FetchResult.Ok>().page.title shouldBe "Kotlin 2.4 정리"
+    }
+
+    test("내부 주소 판정") {
+        listOf("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.1.1", "100.64.1.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1")
+            .forEach { UrlGuard.isInternal(InetAddress.getByName(it)) shouldBe true }
+        listOf("8.8.8.8", "93.184.216.34", "2606:4700::1111").forEach { UrlGuard.isInternal(InetAddress.getByName(it)) shouldBe false }
     }
 })
