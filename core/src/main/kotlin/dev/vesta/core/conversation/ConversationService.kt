@@ -14,4 +14,7 @@ import kotlinx.coroutines.flow.Flow
 interface ConversationService {
     /** [sessionId]가 null이면 새 세션을 만든다. */
     fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent>
+
+    /** ApprovalRequested에 대한 사용자 답 (T-03). 이미 끝났거나 없는 요청이면 false. */
+    suspend fun resolveApproval(user: UserContext, requestId: String, decision: dev.vesta.core.tools.ApprovalDecision): Boolean
 }

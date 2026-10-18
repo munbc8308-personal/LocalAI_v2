@@ -9,6 +9,8 @@ import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.AgentRequest
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.tools.ApprovalBroker
+import dev.vesta.core.tools.ApprovalDecision
 import dev.vesta.core.decision.RoutingDecision
 import dev.vesta.core.decision.RoutingLogRepository
 import dev.vesta.core.decision.RoutingStage
@@ -44,7 +46,13 @@ class DefaultConversationService(
     private val availability: suspend (UserContext) -> Set<AgentType> = { agents.keys },
     /** `@이름`으로 지정한 컬렉션이 모두 코드 저장소면 CODE 등, 지정 대상에 맞는 에이전트 */
     private val mentionAgent: suspend (UserContext, List<String>) -> AgentType? = { _, _ -> null },
+    /** 도구 승인 중계 (M6). 에이전트와 같은 인스턴스를 써야 한다. */
+    private val approvals: ApprovalBroker? = null,
 ) : ConversationService {
+
+    override suspend fun resolveApproval(user: UserContext, requestId: String, decision: ApprovalDecision): Boolean =
+        approvals?.resolve(user, requestId, decision) ?: false
+
 
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }

@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M5 완료 (v2.5, 2026-10-17)
+> 상태: M0~M6 완료 (v2.6, 2026-10-18)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -31,6 +31,7 @@
 | v2.3 | 2026-10-17 | **M3 구현**: 웹 검색(SearXNG·페이지 수집·본문 추출·웹 RAG·WebResearchAgent), `/web`·URL 규칙 라우팅. 13.4 M3 진행 기록 |
 | v2.4 | 2026-10-17 | **M4 라우터**(명시·규칙·결정 모델·메인 모델 판정, 한국어 평가셋 97%) · **M5 코드 도우미**(저장소 등록·코드 청킹·CodeAgent·파일 지정 질의). 13.5·13.6 진행 기록 |
 | v2.5 | 2026-10-17 | **결정 모델 laya → winnow:e4b** (라우팅 97% → 99%, 332ms → 235ms, Metal GPU, +7GB). Ollaya keep-alive 무기한 |
+| v2.6 | 2026-10-18 | **M6 작업 에이전트**: 도구 호출 루프, 승인 정책(WRITE 승인·EXEC 매번 승인·셸 수정 후 승인), 경로 제한, 기본 도구 11종, 셸 정책, TaskAgent, tool_run 기록. 13.7 진행 기록 |
 
 ---
 
@@ -1403,6 +1404,35 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 #### 남은 일
 - tree-sitter 심볼 청킹(D-07), git diff 리뷰(D-05), diff 적용(D-06, M6 승인 도구와 함께), 프로젝트 요약(D-09).
 - 테스트 파일 가중치 조정, 파일 지정 시 관련 선언 전체를 함께 붙이기.
+
+### 13.7 M6 진행 기록 (2026-10-18)
+
+#### 완료
+- **도구 호출**: `ChatRequest.tools`·`ChatMessage.toolCalls/toolCallId`·`ChatChunk.ToolCalls`. Ollama OpenAI 호환 API로 gemma4 도구 호출 확인, 스트리밍 인자 조각을 index별로 모은다.
+- **core**: `Tool`(spec·risk·describe·execute), `ApprovalBroker`/`PendingApproval`/`ApprovalDecision`(승인·거부·수정 후 승인), `ToolRunLog`, 이벤트 `ToolStarted`·`ToolFinished`·`ApprovalRequested`, `ConversationService.resolveApproval`.
+- **tools 모듈**:
+  - `PathSandbox`(T-04): 허용 폴더(`tools.allowedPaths`, 기본 ~/Documents·~/Desktop·~/Downloads + 등록한 코드 저장소) 안만, 심볼릭 링크를 풀어 판정(링크로 탈출 방지), `.ssh`·`.gnupg`·`.aws`·`.vesta`·키체인 폴더와 `.env`·키 파일(`*.pem` 등) 차단.
+  - 도구 11종: `current_time`, `list_files`, `read_file`(텍스트·PDF), `search_files`(이름·내용), `search_docs`, `web_search`·`read_url`(NETWORK — `web.mode: OFF`면 아예 주지 않음), `write_file`(create/overwrite/append, 기본은 덮어쓰지 않음), `make_directory`, `move_file`, `run_shell`.
+  - `ShellTool`(T-07): 매번 승인, 차단 목록(sudo, `rm -rf /`·`~`, 디스크 포맷·직접 쓰기, `curl … | sh`, 시스템 설정 변경, 전원, 백그라운드 실행, 키체인, osascript 등), 작업 폴더는 허용 폴더 안, 타임아웃 60초 후 프로세스 트리 종료, 출력 12,000자 제한, 환경 변수는 HOME·LANG 등만(API 키·토큰 제외), stdin 없음.
+- **agents**: `TaskAgent` — 짧은 계획(T-09) → 도구 호출 → 위험 등급별 승인(READ·NETWORK 자동, WRITE 승인, EXEC 매번 승인, 5분 무응답 시 거부) → 결과를 모델에 → 최대 12단계. 거부되면 실행하지 않고 거부 사실을 모델에 알린다. 모든 호출을 `tool_run`(schema v7)에 기록(T-08).
+- **conversation**: `InMemoryApprovalBroker`(요청을 연 사용자 본인만 답할 수 있음), TASK 에이전트 라우팅 사용.
+- **app-cli**: 승인 화면(요약·내용·경고, `[y]` 승인 / `[n]` 거부 / 셸은 `[e]` 명령 수정 후 승인, 기본값 거부), 도구 실행 로그(⚙ 시작, ✓/✗ 결과).
+- **테스트**: 82개 통과 (경로 탈출·차단 목록·셸 타임아웃·환경 변수 제거·승인/거부/수정·최대 단계 포함).
+
+#### 완료 기준 시나리오 (gemma4:26b-mxfp8)
+`<폴더>/meetings 폴더에서 회의록 파일들 찾아서 결정사항이랑 할 일만 요약하고 <폴더>/요약.md 로 저장해 줘`
+→ 라우터가 결정 모델로 TASK 판정(0.94) → 계획 → `list_files` → `read_file` ×2 → 쓰기 승인 화면(파일 경로·크기·내용 미리보기) → 승인 → `write_file` → 보고. **2회 연속 성공**, 저장된 요약이 회의록 내용과 일치. 셸 시나리오(`wc -l`)도 승인 후 실행·정리.
+
+#### 발견·수정
+- CLI가 `/private/…`처럼 경로로 시작하는 입력을 슬래시 명령으로 처리 → 등록된 CLI 명령만 명령으로 처리.
+- TaskAgent가 대화 목록을 복사하지 않고 넘겨 이미 보낸 요청 내용이 바뀌던 버그(테스트로 발견).
+- gemma4가 도구 사용 중 "저장할까요?"라고 되묻고 도구를 부르지 않음 → 프롬프트에 "요청받은 작업은 되묻지 말고 도구를 부를 것, 승인은 시스템이 받음" 추가 후 해결.
+- gemma4가 가끔 내부 표식(`thought`, `<channel|>`)을 답변에 냄 → `ArtifactFilter`로 제거.
+
+#### 남은 일
+- 결정 모델 D8(도구 위험도)로 승인 화면 경고, D9(작업 완료 판정) — M7.
+- 예약 작업(T-11), MCP 클라이언트(T-10) — M6a(Orchard)에서.
+- 파일 쓰기 승인 화면에 기존 파일과의 diff 표시.
 
 ---
 

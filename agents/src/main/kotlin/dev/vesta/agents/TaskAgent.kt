@@ -1,0 +1,155 @@
+package dev.vesta.agents
+
+import dev.vesta.core.AgentType
+import dev.vesta.core.ModelRole
+import dev.vesta.core.agent.Agent
+import dev.vesta.core.agent.AgentEvent
+import dev.vesta.core.agent.AgentRequest
+import dev.vesta.core.inference.ChatChunk
+import dev.vesta.core.inference.ChatMessage
+import dev.vesta.core.inference.ChatRequest
+import dev.vesta.core.inference.ChatRole
+import dev.vesta.core.inference.InferenceClient
+import dev.vesta.core.inference.Usage
+import dev.vesta.core.model.ModelProvider
+import dev.vesta.core.tools.ApprovalBroker
+import dev.vesta.core.tools.ApprovalDecision
+import dev.vesta.core.tools.Tool
+import dev.vesta.core.tools.ToolCall
+import dev.vesta.core.tools.ToolContext
+import dev.vesta.core.tools.ToolResult
+import dev.vesta.core.tools.ToolRunLog
+import dev.vesta.tools.ShellTool
+import dev.vesta.tools.ToolRegistry
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import java.time.Clock
+import java.time.ZoneId
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
+
+private val log = KotlinLogging.logger {}
+
+/**
+ * 작업 에이전트 (PROJECT.md 4.8 TaskAgent, 7.7).
+ * 모델이 도구를 고르고 → 실행(위험 등급에 따라 승인) → 결과를 다시 모델에 → 끝날 때까지 반복 (최대 [maxSteps]).
+ * 실행 전에 짧은 계획을 먼저 말하게 한다 (T-09). 모든 도구 호출은 ToolRun에 기록한다 (T-08).
+ */
+class TaskAgent(
+    private val inference: InferenceClient,
+    private val models: ModelProvider,
+    private val tools: ToolRegistry,
+    private val approvals: ApprovalBroker,
+    private val runLog: ToolRunLog? = null,
+    private val maxSteps: Int = 12,
+    private val approvalTimeoutSeconds: Long = 300,
+    private val maxToolOutputChars: Int = 12_000,
+    private val clock: Clock = Clock.systemDefaultZone(),
+    private val zone: ZoneId = ZoneId.systemDefault(),
+) : Agent {
+    override val type = AgentType.TASK
+
+    override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
+        val spec = models.acquire(ModelRole.GENERAL)
+        val system = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + Prompts.TASK_RULES
+        val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, system))
+        messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)
+        val context = ToolContext(request.user)
+        var usage: Usage? = null
+
+        for (step in 1..maxSteps) {
+            emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
+            val text = StringBuilder()
+            var calls = emptyList<ToolCall>()
+            val filter = ArtifactFilter()
+            inference.chat(
+                ChatRequest(
+                    model = spec.name,
+                    messages = messages.toList(), // 이후 단계에서 목록이 바뀌어도 이 요청 내용은 그대로
+                    temperature = spec.temperature ?: 0.2,
+                    maxTokens = spec.maxTokens,
+                    reasoningEffort = spec.reasoningEffort,
+                    keepAlive = spec.keepAlive,
+                    tools = tools.all.map { it.spec },
+                ),
+            ).collect { chunk ->
+                when (chunk) {
+                    is ChatChunk.Delta -> filter.accept(chunk.text).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+                    is ChatChunk.Reasoning -> emit(AgentEvent.Reasoning(chunk.text))
+                    is ChatChunk.ToolCalls -> calls = chunk.calls
+                    is ChatChunk.Done -> usage = chunk.usage
+                }
+            }
+            filter.flush().takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+            if (calls.isEmpty()) {
+                emit(AgentEvent.Done(type, spec.name, usage))
+                return@flow
+            }
+            if (text.isNotEmpty()) emit(AgentEvent.Token("\n"))
+            messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
+            for (call in calls) {
+                val result = runTool(call, request, context)
+                messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
+            }
+        }
+        emit(AgentEvent.Token("\n(도구 사용이 ${maxSteps}단계를 넘어 멈췄습니다. 이어서 하려면 다시 요청해 주세요.)"))
+        emit(AgentEvent.Done(type, spec.name, usage))
+    }
+
+    private suspend fun FlowCollector<AgentEvent>.runTool(call: ToolCall, request: AgentRequest, context: ToolContext): ToolResult {
+        val tool = tools[call.name] ?: return ToolResult("오류: 없는 도구 ${call.name}", isError = true)
+        var arguments = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrElse {
+            return ToolResult("오류: 인자 JSON을 읽지 못함 (${it.message})", isError = true)
+        }
+        var approved: Boolean? = null
+        if (ToolRegistry.needsApproval(tool.risk)) {
+            when (val decision = askApproval(tool, arguments, request)) {
+                ApprovalDecision.Approve -> approved = true
+                // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다
+                is ApprovalDecision.ApproveEdited -> { arguments = JsonObject(arguments + decision.editedArguments); approved = true }
+                is ApprovalDecision.Deny -> {
+                    val denied = ToolResult("사용자가 실행을 거부했다: ${decision.reason}. 다른 방법을 쓰거나 사용자에게 물어볼 것.", isError = true, summary = "거부됨")
+                    emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = false, summary = "거부됨 (${decision.reason})"))
+                    runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, false, denied, 0)
+                    return denied
+                }
+            }
+        }
+        emit(AgentEvent.ToolStarted(call.id, tool.spec.name, tool.risk, tool.describe(arguments).title))
+        val start = TimeSource.Monotonic.markNow()
+        val result = runCatching { tool.execute(arguments, context) }.getOrElse {
+            log.warn(it) { "도구 실패: ${tool.spec.name}" }
+            ToolResult("오류: ${it.message ?: it::class.simpleName}", isError = true)
+        }
+        val ms = start.elapsedNow().inWholeMilliseconds
+        emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = !result.isError, summary = result.summary))
+        runCatching { runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, approved, result, ms) }
+        return result
+    }
+
+    private suspend fun FlowCollector<AgentEvent>.askApproval(tool: Tool, arguments: JsonObject, request: AgentRequest): ApprovalDecision {
+        val details = tool.describe(arguments)
+        val pending = approvals.open(request.user)
+        emit(
+            AgentEvent.ApprovalRequested(
+                requestId = pending.id,
+                tool = tool.spec.name,
+                risk = tool.risk,
+                details = details,
+                reason = (arguments["reason"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
+                editableField = if (tool is ShellTool) "command" else null,
+                editableValue = if (tool is ShellTool) (arguments["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content else null,
+            ),
+        )
+        val decision = withTimeoutOrNull(approvalTimeoutSeconds.seconds) { pending.result.await() }
+            ?: ApprovalDecision.Deny("${approvalTimeoutSeconds / 60}분 동안 응답이 없어 거부")
+        approvals.close(pending.id)
+        return decision
+    }
+}

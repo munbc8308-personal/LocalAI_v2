@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":web"))
     implementation(project(":decision"))
     implementation(project(":router"))
+    implementation(project(":tools"))
     implementation(libs.clikt)
     implementation(libs.jline)
     implementation(libs.kotlin.logging)

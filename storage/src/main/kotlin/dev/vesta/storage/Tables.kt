@@ -119,3 +119,17 @@ object RoutingLogs : LongIdTable("routing_log") {
     val userOverride = varchar("user_override", 16).nullable()
     val createdAt = timestamp("created_at")
 }
+
+/** 도구 실행 기록 (PROJECT.md T-08, 11장 ToolRun). */
+object ToolRuns : LongIdTable("tool_run") {
+    val userId = long("user_id").index()
+    val sessionId = varchar("session_id", 36).index()
+    val tool = varchar("tool", 64)
+    val arguments = text("arguments")
+    val risk = varchar("risk", 16)
+    val approved = bool("approved").nullable()
+    val isError = bool("is_error")
+    val result = text("result")
+    val durationMs = long("duration_ms")
+    val createdAt = timestamp("created_at")
+}

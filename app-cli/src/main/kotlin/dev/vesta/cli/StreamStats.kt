@@ -48,6 +48,7 @@ internal data class StreamStats(
                         text.append(chunk.text)
                     }
                     is ChatChunk.Done -> done = chunk
+                    is ChatChunk.ToolCalls -> Unit
                 }
             }
             val totalMs = start.elapsedNow().inWholeMilliseconds

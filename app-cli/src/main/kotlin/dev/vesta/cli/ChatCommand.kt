@@ -69,8 +69,8 @@ class ChatCommand : CliktCommand(name = "chat") {
                 }.trim()
                 if (line.isEmpty()) continue
 
-                // /web /docs /chat 은 라우팅 명령이라 대화 엔진으로 넘긴다
-                if (line.startsWith("/") && line.substringBefore(' ') !in ROUTING_COMMANDS) {
+                // CLI 명령만 여기서 처리한다. /web·/docs·/chat(라우팅 명령)과 /Users/… 같은 경로로 시작하는 입력은 대화로 넘긴다
+                if (line.substringBefore(' ') in CLI_COMMANDS) {
                     val (command, arg) = line.split(Regex("\\s+"), limit = 2).let { it[0] to it.getOrNull(1) }
                     when (command) {
                         "/exit", "/quit" -> break
@@ -89,13 +89,12 @@ class ChatCommand : CliktCommand(name = "chat") {
                             }
                         }
                         "/history" -> session?.let { printHistory(out, app, it) } ?: out.println(dim("아직 대화가 없습니다."))
-                        else -> out.println(red("알 수 없는 명령: $command (/help)"))
                     }
                     out.flush()
                     continue
                 }
 
-                session = generate(terminal, app, session, line) ?: session
+                session = generate(terminal, reader, app, session, line) ?: session
             }
             out.println(dim("종료합니다."))
             out.flush()
@@ -104,7 +103,7 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     /** 답변 하나를 스트리밍으로 출력한다. 생성 중 Ctrl+C면 중단한다. 이번 턴의 세션을 돌려준다. */
-    private suspend fun generate(terminal: Terminal, app: AppContainer, session: Session?, text: String): Session? {
+    private suspend fun generate(terminal: Terminal, reader: LineReader, app: AppContainer, session: Session?, text: String): Session? {
         val out = terminal.writer()
         val renderer = StreamRenderer(out, showThinking)
         var current = session
@@ -116,6 +115,9 @@ class ChatCommand : CliktCommand(name = "chat") {
                         current = app.sessions.find(app.owner.userId, event.sessionId)
                     }
                     renderer.render(event, start.elapsedNow())
+                    if (event is AgentEvent.ApprovalRequested) {
+                        app.conversation.resolveApproval(app.owner, event.requestId, Approvals.ask(reader, out, event))
+                    }
                 }
             }.also { job ->
                 val previous = terminal.handle(Terminal.Signal.INT) { job.cancel(CancellationException("사용자 중단")) }
@@ -161,7 +163,7 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
-        val ROUTING_COMMANDS = setOf("/web", "/docs", "/chat")
+        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history")
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val HELP = """
             /new             새 대화

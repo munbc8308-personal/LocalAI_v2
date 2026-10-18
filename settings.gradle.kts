@@ -30,6 +30,7 @@ include(
     "web",
     "decision",
     "router",
+    "tools",
     "agents",
     "conversation",
     "app-cli",

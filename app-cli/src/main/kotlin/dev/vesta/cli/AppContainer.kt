@@ -2,6 +2,23 @@ package dev.vesta.cli
 
 import dev.vesta.agents.ChatAgent
 import dev.vesta.agents.CodeAgent
+import dev.vesta.agents.TaskAgent
+import dev.vesta.conversation.InMemoryApprovalBroker
+import dev.vesta.core.config.WebMode
+import dev.vesta.storage.ExposedToolRunLog
+import dev.vesta.tools.CurrentTimeTool
+import dev.vesta.tools.ListFilesTool
+import dev.vesta.tools.MakeDirectoryTool
+import dev.vesta.tools.MoveFileTool
+import dev.vesta.tools.PathSandbox
+import dev.vesta.tools.ReadFileTool
+import dev.vesta.tools.ReadUrlTool
+import dev.vesta.tools.SearchDocsTool
+import dev.vesta.tools.SearchFilesTool
+import dev.vesta.tools.ShellTool
+import dev.vesta.tools.ToolRegistry
+import dev.vesta.tools.WebSearchTool
+import dev.vesta.tools.WriteFileTool
 import dev.vesta.agents.DocsAgent
 import dev.vesta.core.knowledge.CollectionKind
 import dev.vesta.agents.QueryRewriter
@@ -51,6 +68,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     internal val httpForEval get() = http
     private val database = VestaDatabase.open(paths.database).also { it.migrate() }
 
+    /** 단일 사용자 동안은 OWNER 한 명 (PROJECT.md 7.12). */
+    val owner = UserContext(database.ensureOwner(System.getProperty("user.name") ?: "owner"), UserRole.OWNER)
+
     val sessions = ExposedSessionRepository(database.db)
     val messages = ExposedMessageRepository(database.db)
     val inference = OpenAiCompatibleClient(config.inference.baseUrl, http)
@@ -68,13 +88,41 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 외부 웹용 HTTP 클라이언트 (리다이렉트 따라감). 로컬 엔진용과 분리한다. */
     private val webHttp = HttpClients.web(config.web.pageTimeoutSeconds)
     val webCache = WebCacheRepository(database.db)
+    private val searxng = SearxngClient(config.web.searxngUrl, http, webCache)
+    private val pageFetcher = HttpPageFetcher(webHttp, config.web, webCache)
     val webRetriever = WebRetriever(
-        search = SearxngClient(config.web.searxngUrl, http, webCache),
-        fetcher = HttpPageFetcher(webHttp, config.web, webCache),
+        search = searxng,
+        fetcher = pageFetcher,
         inference = inference,
         embeddingModel = config.models.embedding?.name ?: DEFAULT_EMBEDDING,
         maxPages = config.web.maxPages,
     )
+    /** 파일 도구·셸 허용 폴더 = 설정 + 등록한 코드 저장소 루트 (T-04) */
+    val sandbox = PathSandbox(
+        config.tools.allowedPaths + kotlinx.coroutines.runBlocking {
+            knowledge.listCollections(owner.userId).mapNotNull { it.rootPath }
+        },
+    )
+    val toolRegistry = ToolRegistry(
+        buildList {
+            add(CurrentTimeTool())
+            add(ListFilesTool(sandbox))
+            add(ReadFileTool(sandbox, config.tools.maxOutputChars))
+            add(SearchFilesTool(sandbox))
+            add(SearchDocsTool(knowledge, retriever))
+            // 웹 검색이 꺼져 있으면 외부로 나가는 도구 자체를 주지 않는다 (5.4)
+            if (config.web.mode != WebMode.OFF) {
+                add(WebSearchTool(searxng))
+                add(ReadUrlTool(pageFetcher, config.tools.maxOutputChars))
+            }
+            add(WriteFileTool(sandbox))
+            add(MakeDirectoryTool(sandbox))
+            add(MoveFileTool(sandbox))
+            if (config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars))
+        },
+    )
+    val approvals = InMemoryApprovalBroker()
+
     val router = Router(
         config = config.decision,
         decision = OllayaClient(config.decision.baseUrl, config.decision.model, http),
@@ -88,7 +136,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         // 문서 컬렉션이 있어야 DOCS로 보낸다
         availability = { user ->
             buildSet {
-                addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE))
+                addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE, AgentType.TASK))
                 if (knowledge.listCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
             }
         },
@@ -97,16 +145,20 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             val named = knowledge.listCollections(user.userId).filter { it.name in names }
             if (named.isNotEmpty() && named.all { it.kind == CollectionKind.CODE }) AgentType.CODE else null
         },
+        approvals = approvals,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
             AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever),
+            AgentType.TASK to TaskAgent(
+                inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
+                maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
+                maxToolOutputChars = config.tools.maxOutputChars,
+            ),
             AgentType.WEB to WebResearchAgent(inference, modelManager, QueryRewriter(inference, modelManager), webRetriever, { config.web.mode }),
         ),
     )
 
-    /** 단일 사용자 동안은 OWNER 한 명 (PROJECT.md 7.12). */
-    val owner = UserContext(database.ensureOwner(System.getProperty("user.name") ?: "owner"), UserRole.OWNER)
 
     override fun close() {
         http.close()

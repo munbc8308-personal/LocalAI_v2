@@ -11,6 +11,21 @@ data class VestaConfig(
     val web: WebConfig = WebConfig(),
     val memory: MemoryConfig = MemoryConfig(),
     val mcp: McpConfig = McpConfig(),
+    val tools: ToolsConfig = ToolsConfig(),
+)
+
+/** 작업 도구 (PROJECT.md 7.7, 셸 실행 정책). */
+data class ToolsConfig(
+    /** 파일 도구·셸이 접근할 수 있는 폴더 (T-04). `~`는 홈. 코드 저장소 루트는 자동으로 더한다. */
+    val allowedPaths: List<String> = listOf("~/Documents", "~/Desktop", "~/Downloads"),
+    val shellEnabled: Boolean = true,
+    val shellTimeoutSeconds: Long = 60,
+    /** 도구 결과를 모델에 넘길 최대 글자 수 (넘으면 잘라 낸다) */
+    val maxOutputChars: Int = 12_000,
+    /** 에이전트 한 번에 도구를 부를 수 있는 최대 단계 (T-02) */
+    val maxSteps: Int = 12,
+    /** 승인 대기 시간. 넘으면 거부 (6.5) */
+    val approvalTimeoutSeconds: Long = 300,
 )
 
 data class InferenceConfig(

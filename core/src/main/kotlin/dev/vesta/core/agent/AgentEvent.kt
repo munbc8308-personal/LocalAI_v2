@@ -6,7 +6,7 @@ import dev.vesta.core.inference.Usage
 
 /**
  * 채널이 받아서 보여 주는 이벤트 (PROJECT.md 8.1).
- * 이후 마일스톤에서 ToolCall, ApprovalRequest, Media가 추가된다.
+ * 이후 마일스톤에서 Media가 추가된다.
  */
 sealed interface AgentEvent {
     /** 세션이 정해졌다. 새 세션이면 [created]가 true. */
@@ -23,6 +23,27 @@ sealed interface AgentEvent {
 
     /** 답변에 쓴 근거 목록. 번호는 답변의 [n]과 같다 (K-08). */
     data class Sources(val evidence: List<dev.vesta.core.knowledge.Evidence>) : AgentEvent
+
+    /** 도구 실행 시작 (T-08 실행 로그) */
+    data class ToolStarted(val callId: String, val tool: String, val risk: dev.vesta.core.RiskLevel, val summary: String) : AgentEvent
+
+    /** 도구 실행 결과 */
+    data class ToolFinished(val callId: String, val tool: String, val ok: Boolean, val summary: String) : AgentEvent
+
+    /**
+     * 사용자 승인이 필요하다 (T-03). 채널은 승인/거부(셸은 수정 후 승인)를 받아
+     * `ConversationService.resolveApproval(requestId, …)`를 부른다.
+     */
+    data class ApprovalRequested(
+        val requestId: String,
+        val tool: String,
+        val risk: dev.vesta.core.RiskLevel,
+        val details: dev.vesta.core.tools.ApprovalDetails,
+        val reason: String?,
+        /** 수정 후 승인이 가능한 도구(셸)면 수정할 인자 이름과 지금 값. 수정본은 이 인자만 담아 보내면 된다. */
+        val editableField: String? = null,
+        val editableValue: String? = null,
+    ) : AgentEvent
 
     /** 답변 조각. */
     data class Token(val text: String) : AgentEvent

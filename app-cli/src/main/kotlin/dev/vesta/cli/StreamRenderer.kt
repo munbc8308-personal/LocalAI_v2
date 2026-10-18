@@ -17,6 +17,14 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
             is AgentEvent.Routed -> out.println(dim("→ " + RoutingText.describe(event.decision)))
             is AgentEvent.Status -> if (event.text != "생성 중") out.println(dim("· ${event.text}"))
             is AgentEvent.Sources -> sources = event.evidence
+            is AgentEvent.ToolStarted -> {
+                if (answerStarted) out.println()
+                answerStarted = false
+                out.println(dim("  ⚙ ${event.tool} · ${event.summary}"))
+            }
+            is AgentEvent.ToolFinished -> out.println(dim("    ${if (event.ok) "✓" else "✗"} ${event.summary}"))
+            // 승인 화면은 ChatCommand가 입력을 받아야 하므로 거기서 그린다
+            is AgentEvent.ApprovalRequested -> Unit
             is AgentEvent.Reasoning -> {
                 if (showThinking) {
                     out.print(dim(event.text))

@@ -71,6 +71,26 @@ class OpenAiCompatibleClientTest : FunSpec({
         )
     }
 
+    test("도구 호출 인자 조각을 index별로 모은다") {
+        val sse = """
+            data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}
+
+            data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"a.md\"}"}}]}}]}
+
+            data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+            data: [DONE]
+
+        """.trimIndent()
+        val chunks = client(contentType = "text/event-stream") { sse }
+            .chat(ChatRequest("m", listOf(ChatMessage(ChatRole.USER, "hi"))))
+            .toList()
+        chunks shouldContainExactly listOf(
+            ChatChunk.ToolCalls(listOf(dev.vesta.core.tools.ToolCall("c1", "read_file", "{\"path\":\"a.md\"}"))),
+            ChatChunk.Done("tool_calls", null),
+        )
+    }
+
     test("모델 목록") {
         val models = client { """{"object":"list","data":[{"id":"a","owned_by":"library"},{"id":"b"}]}""" }.listModels()
         models.map { it.id } shouldBe listOf("a", "b")

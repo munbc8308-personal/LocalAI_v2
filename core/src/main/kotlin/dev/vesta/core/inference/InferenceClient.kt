@@ -13,7 +13,14 @@ data class ModelInfo(val id: String, val ownedBy: String? = null)
 
 enum class ChatRole { SYSTEM, USER, ASSISTANT, TOOL }
 
-data class ChatMessage(val role: ChatRole, val content: String)
+data class ChatMessage(
+    val role: ChatRole,
+    val content: String,
+    /** assistant가 요청한 도구 호출 (T-02) */
+    val toolCalls: List<dev.vesta.core.tools.ToolCall> = emptyList(),
+    /** role TOOL일 때 어느 호출의 결과인지 */
+    val toolCallId: String? = null,
+)
 
 data class ChatRequest(
     val model: String,
@@ -24,6 +31,8 @@ data class ChatRequest(
     val reasoningEffort: String? = null,
     /** 모델을 메모리에 유지할 시간 (Ollama keep_alive). 예: "30m", "forever". null이면 엔진 기본값. */
     val keepAlive: String? = null,
+    /** 모델이 호출할 수 있는 도구 (T-01). 비어 있으면 도구 없이 생성. */
+    val tools: List<dev.vesta.core.tools.ToolSpec> = emptyList(),
 )
 
 sealed interface ChatChunk {
@@ -32,6 +41,9 @@ sealed interface ChatChunk {
 
     /** 추론 모델(gpt-oss 등)이 답변 전에 내는 생각 과정. 사용자 답변에는 넣지 않는다. */
     data class Reasoning(val text: String) : ChatChunk
+
+    /** 모델이 도구 호출을 요청했다 (스트림이 끝날 때 한 번, 인자는 다 모은 상태). */
+    data class ToolCalls(val calls: List<dev.vesta.core.tools.ToolCall>) : ChatChunk
 
     /** 스트림 끝. 엔진이 사용량을 주면 함께 담는다. */
     data class Done(val finishReason: String?, val usage: Usage?) : ChatChunk

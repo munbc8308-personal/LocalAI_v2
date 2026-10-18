@@ -7,5 +7,6 @@ dependencies {
     api(project(":core"))
     implementation(project(":retrieval"))
     implementation(project(":storage"))
+    implementation(project(":tools"))
     implementation(libs.kotlin.logging)
 }

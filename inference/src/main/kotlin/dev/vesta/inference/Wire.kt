@@ -21,7 +21,29 @@ internal data class ModelsResponse(val data: List<WireModel> = emptyList())
 internal data class WireModel(val id: String, @SerialName("owned_by") val ownedBy: String? = null)
 
 @Serializable
-internal data class WireMessage(val role: String, val content: String)
+internal data class WireMessage(
+    val role: String,
+    val content: String,
+    @SerialName("tool_calls") val toolCalls: List<WireToolCall>? = null,
+    @SerialName("tool_call_id") val toolCallId: String? = null,
+)
+
+@Serializable
+internal data class WireToolCall(
+    val id: String? = null,
+    val index: Int? = null,
+    val type: String? = "function",
+    val function: WireFunctionCall? = null,
+)
+
+@Serializable
+internal data class WireFunctionCall(val name: String? = null, val arguments: String? = null)
+
+@Serializable
+internal data class WireTool(val type: String = "function", val function: WireFunction)
+
+@Serializable
+internal data class WireFunction(val name: String, val description: String, val parameters: kotlinx.serialization.json.JsonObject)
 
 @Serializable
 internal data class StreamOptions(@SerialName("include_usage") val includeUsage: Boolean)
@@ -37,6 +59,7 @@ internal data class ChatCompletionRequest(
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     /** Ollama 확장 필드. "forever"는 -1(무기한)로 보낸다. */
     @SerialName("keep_alive") val keepAlive: JsonElement? = null,
+    val tools: List<WireTool>? = null,
 )
 
 internal fun keepAliveJson(value: String?): JsonElement? = when (value) {
@@ -60,6 +83,7 @@ internal data class ChunkChoice(
 @Serializable
 internal data class ChunkDelta(
     val content: String? = null,
+    @SerialName("tool_calls") val toolCalls: List<WireToolCall>? = null,
     /** Ollama 형식 */
     val reasoning: String? = null,
     /** vLLM·mlx 계열 형식 */
