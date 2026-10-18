@@ -52,6 +52,7 @@ class CurrentTimeTool(private val zone: ZoneId = ZoneId.systemDefault()) : Tool 
 }
 
 class ListFilesTool(private val sandbox: PathSandbox) : Tool {
+    override val readsLocalData = true
     override val spec = ToolSpec(
         "list_files",
         "폴더 안의 파일·폴더 목록을 크기·수정 시각과 함께 보여 준다. recursive=true면 하위 폴더까지 (최대 300개).",
@@ -89,6 +90,7 @@ class ListFilesTool(private val sandbox: PathSandbox) : Tool {
 }
 
 class ReadFileTool(private val sandbox: PathSandbox, private val maxChars: Int) : Tool {
+    override val readsLocalData = true
     override val spec = ToolSpec(
         "read_file",
         "파일 내용을 읽는다. 텍스트·Markdown·PDF 지원. 긴 파일은 start_line/end_line으로 일부만 읽는다.",
@@ -127,6 +129,7 @@ class ReadFileTool(private val sandbox: PathSandbox, private val maxChars: Int) 
 }
 
 class SearchFilesTool(private val sandbox: PathSandbox) : Tool {
+    override val readsLocalData = true
     override val spec = ToolSpec(
         "search_files",
         "폴더 아래에서 이름(glob) 또는 내용(포함 문자열)으로 파일을 찾는다. 최대 50개.",

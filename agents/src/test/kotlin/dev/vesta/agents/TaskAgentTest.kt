@@ -48,7 +48,7 @@ private class ScriptedModel(private val turns: List<List<ChatChunk>>) : Inferenc
     }
 }
 
-private class RecordingTool(private val toolName: String, override val risk: RiskLevel) : Tool {
+private class RecordingTool(private val toolName: String, override val risk: RiskLevel, override val readsLocalData: Boolean = false) : Tool {
     val calls = mutableListOf<JsonObject>()
     override val spec = ToolSpec(toolName, toolName, buildJsonObject { })
     override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("$toolName 결과").also { calls += arguments }
@@ -85,6 +85,22 @@ class TaskAgentTest : FunSpec({
         model.requests[1].messages.last().let { it.role shouldBe ChatRole.TOOL; it.content shouldBe "read_file 결과"; it.toolCallId shouldBe "c1" }
         model.requests.first().tools.map { it.name } shouldBe listOf("read_file", "write_file")
         (events.last() as AgentEvent.Done).agent shouldBe dev.vesta.core.AgentType.TASK
+    }
+
+    test("로컬 파일을 읽은 뒤에는 웹 도구도 승인을 받는다 (인젝션으로 인한 유출 방지)") {
+        val read = RecordingTool("read_file", RiskLevel.READ, readsLocalData = true)
+        val web = RecordingTool("web_search", RiskLevel.NETWORK)
+        val before = AutoBroker(ApprovalDecision.Approve)
+        TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "web_search", "{}")))), models, ToolRegistry(listOf(read, web)), before).handle(request).toList()
+        before.opened shouldBe 0 // 로컬 데이터를 읽기 전 웹 검색은 자동
+
+        val after = AutoBroker(ApprovalDecision.Deny("유출 의심"))
+        TaskAgent(
+            ScriptedModel(turns(listOf(ToolCall("c1", "read_file", "{}")), listOf(ToolCall("c2", "web_search", """{"query":"비밀"}""")))),
+            models, ToolRegistry(listOf(read, web)), after,
+        ).handle(request).toList()
+        after.opened shouldBe 1
+        web.calls.size shouldBe 1 // 첫 테스트에서 1번, 두 번째는 거부되어 실행 안 됨
     }
 
     test("거부하면 실행하지 않고 거부 사실을 모델에 알린다") {

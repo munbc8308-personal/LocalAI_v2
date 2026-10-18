@@ -26,6 +26,13 @@ interface Tool {
     val spec: ToolSpec
     val risk: RiskLevel
 
+    /**
+     * 사용자의 로컬 데이터(파일·문서)를 결과로 돌려주는 도구인지.
+     * 이런 도구가 한 번 실행된 뒤에는 NETWORK 도구도 승인을 받는다 — 파일 속 지시문(프롬프트 인젝션)이
+     * 로컬 내용을 검색어·URL에 실어 밖으로 보내는 것을 막기 위해서다.
+     */
+    val readsLocalData: Boolean get() = false
+
     /** 승인 화면에 보여 줄 내용 (무엇을 하려는지 전부). READ 도구는 쓰지 않는다. */
     fun describe(arguments: JsonObject): ApprovalDetails {
         // 실행 로그용 한 줄: 첫 문자열 인자(대개 경로·검색어)를 보여 준다

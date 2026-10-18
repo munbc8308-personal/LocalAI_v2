@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonObject
 
 /** 등록한 문서·코드 컬렉션 검색 (T-05). */
 class SearchDocsTool(private val knowledge: KnowledgeRepository, private val retriever: Retriever) : Tool {
+    override val readsLocalData = true
     override val spec = ToolSpec(
         "search_docs",
         "사용자가 등록한 문서·코드 컬렉션에서 관련 내용을 찾는다. 결과에 파일 경로와 위치가 붙는다.",
@@ -45,6 +46,12 @@ class WebSearchTool(private val search: WebSearchClient) : Tool {
     )
     override val risk = RiskLevel.NETWORK
 
+    override fun describe(arguments: JsonObject) = dev.vesta.core.tools.ApprovalDetails(
+        title = "웹 검색 (외부로 검색어 전송): ${arguments.string("query")}",
+        body = "보낼 검색어 전체:\n${arguments.string("query")}",
+        warning = "이번 작업에서 로컬 파일을 읽었습니다. 검색어에 파일 내용·개인 정보가 들어 있지 않은지 확인하세요.",
+    )
+
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult {
         val query = arguments.string("query") ?: return fail("query가 필요함")
         val hits = search.search(query, 8)
@@ -59,6 +66,12 @@ class WebSearchTool(private val search: WebSearchClient) : Tool {
 class ReadUrlTool(private val fetcher: PageFetcher, private val maxChars: Int) : Tool {
     override val spec = ToolSpec("read_url", "웹 페이지 본문을 읽는다.", schema("url" to prop("string", "http(s) URL"), required = listOf("url")))
     override val risk = RiskLevel.NETWORK
+
+    override fun describe(arguments: JsonObject) = dev.vesta.core.tools.ApprovalDetails(
+        title = "웹 페이지 읽기 (외부 접속): ${arguments.string("url")?.take(120)}",
+        body = "접속할 URL 전체:\n${arguments.string("url")}",
+        warning = "이번 작업에서 로컬 파일을 읽었습니다. URL에 파일 내용·개인 정보가 들어 있지 않은지 확인하세요.",
+    )
 
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult {
         val url = arguments.string("url") ?: return fail("url이 필요함")

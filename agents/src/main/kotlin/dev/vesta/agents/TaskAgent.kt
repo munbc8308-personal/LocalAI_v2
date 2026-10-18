@@ -62,6 +62,7 @@ class TaskAgent(
         messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)
         val context = ToolContext(request.user)
         var usage: Usage? = null
+        val taint = Taint()
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
@@ -94,7 +95,7 @@ class TaskAgent(
             if (text.isNotEmpty()) emit(AgentEvent.Token("\n"))
             messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
             for (call in calls) {
-                val result = runTool(call, request, context)
+                val result = runTool(call, request, context, taint)
                 messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
             }
         }
@@ -102,13 +103,16 @@ class TaskAgent(
         emit(AgentEvent.Done(type, spec.name, usage))
     }
 
-    private suspend fun FlowCollector<AgentEvent>.runTool(call: ToolCall, request: AgentRequest, context: ToolContext): ToolResult {
+    /** 이번 작업에서 로컬 데이터를 읽었는지 */
+    private class Taint(var tainted: Boolean = false)
+
+    private suspend fun FlowCollector<AgentEvent>.runTool(call: ToolCall, request: AgentRequest, context: ToolContext, taint: Taint): ToolResult {
         val tool = tools[call.name] ?: return ToolResult("오류: 없는 도구 ${call.name}", isError = true)
         var arguments = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrElse {
             return ToolResult("오류: 인자 JSON을 읽지 못함 (${it.message})", isError = true)
         }
         var approved: Boolean? = null
-        if (ToolRegistry.needsApproval(tool.risk)) {
+        if (ToolRegistry.needsApproval(tool.risk, taint.tainted)) {
             when (val decision = askApproval(tool, arguments, request)) {
                 ApprovalDecision.Approve -> approved = true
                 // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다
@@ -128,6 +132,7 @@ class TaskAgent(
             ToolResult("오류: ${it.message ?: it::class.simpleName}", isError = true)
         }
         val ms = start.elapsedNow().inWholeMilliseconds
+        if (tool.readsLocalData && !result.isError) taint.tainted = true
         emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = !result.isError, summary = result.summary))
         runCatching { runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, approved, result, ms) }
         return result
