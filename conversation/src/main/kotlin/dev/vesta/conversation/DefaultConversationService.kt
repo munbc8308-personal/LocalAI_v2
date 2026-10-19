@@ -50,6 +50,9 @@ class DefaultConversationService(
     private val approvals: ApprovalBroker? = null,
 ) : ConversationService {
 
+    /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
+    private val lastDecision = java.util.concurrent.ConcurrentHashMap<dev.vesta.core.SessionId, RoutingDecision>()
+
     override suspend fun resolveApproval(user: UserContext, requestId: String, decision: ApprovalDecision): Boolean =
         approvals?.resolve(user, requestId, decision) ?: false
 
@@ -65,12 +68,15 @@ class DefaultConversationService(
             .map { ChatMessage(it.role, ExplicitRoute.parse(it.content)?.question?.ifBlank { null } ?: it.content) }
 
         val available = availability(user).filter { it in agents }.toSet()
-        val routed = router?.route(input.text, history.dropLast(1), available)
+        val routed = router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
         val decision = if (routed.collections.isEmpty()) routed
-            else mentionAgent(user, routed.collections)?.let { routed.copy(agent = it, requested = null) } ?: routed
+            else mentionAgent(user, routed.collections)?.let { routed.copy(agent = it, requested = null) }
+                // @이름으로 직접 지정했는데 그 컬렉션이 없으면 일반 대화로 넘기지 말고 DocsAgent가 "없다"고 알린다
+                ?: if (routed.requested == AgentType.DOCS && AgentType.DOCS in agents) routed.copy(agent = AgentType.DOCS, requested = null) else routed
         emit(AgentEvent.Routed(decision))
+        lastDecision[session.id] = decision
         routingLog?.let { log -> runCatching { log.record(session.id, decision) } }
         val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
         val route = decision

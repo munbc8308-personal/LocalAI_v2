@@ -8,6 +8,7 @@ import kotlin.time.Duration
 internal class StreamRenderer(private val out: PrintWriter, private val showThinking: Boolean) {
     private var thinkingShown = false
     private var sources: List<dev.vesta.core.knowledge.Evidence> = emptyList()
+    private var grounding: AgentEvent.Grounding? = null
     private var answerStarted = false
     private val answer = StringBuilder()
 
@@ -15,8 +16,12 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
         when (event) {
             is AgentEvent.SessionReady -> Unit
             is AgentEvent.Routed -> out.println(dim("→ " + RoutingText.describe(event.decision)))
-            is AgentEvent.Status -> if (event.text != "생성 중") out.println(dim("· ${event.text}"))
+            is AgentEvent.Status -> if (event.text != "생성 중") {
+                if (answerStarted) { out.println(); answerStarted = false }
+                out.println(dim("· ${event.text}"))
+            }
             is AgentEvent.Sources -> sources = event.evidence
+            is AgentEvent.Grounding -> grounding = event
             is AgentEvent.ToolStarted -> {
                 if (answerStarted) out.println()
                 answerStarted = false
@@ -45,6 +50,13 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
                 clearThinkingIfNoAnswer()
                 val tokens = event.usage?.completionTokens?.let { " · ${it} tok" }.orEmpty()
                 out.println()
+                grounding?.let { g ->
+                    if (g.unsupported.isEmpty()) out.println(dim("근거 확인: ${g.checked}문장 모두 자료로 뒷받침됨"))
+                    else {
+                        out.println(red("⚠ 근거로 확인되지 않은 문장 ${g.unsupported.size}/${g.checked}:"))
+                        g.unsupported.forEach { out.println(red("  · ${it.take(120)}")) }
+                    }
+                }
                 // 답변에서 실제로 인용한 번호만 보여 준다
                 val cited = Citations.cited(answer.toString(), sources)
                 if (cited.isNotEmpty()) {

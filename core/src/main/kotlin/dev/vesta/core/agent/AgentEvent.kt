@@ -45,6 +45,9 @@ sealed interface AgentEvent {
         val editableValue: String? = null,
     ) : AgentEvent
 
+    /** 근거 검증 결과 (D7). [unsupported]는 근거로 확인되지 않은 문장. */
+    data class Grounding(val checked: Int, val unsupported: List<String>) : AgentEvent
+
     /** 답변 조각. */
     data class Token(val text: String) : AgentEvent
 

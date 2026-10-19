@@ -13,6 +13,7 @@ import dev.vesta.core.model.ModelProvider
 import dev.vesta.retrieval.ContextAssembler
 import dev.vesta.retrieval.WebProgress
 import dev.vesta.retrieval.WebRetriever
+import dev.vesta.decision.Judge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.emitAll
@@ -34,6 +35,8 @@ class WebResearchAgent(
     private val clock: Clock = Clock.systemDefaultZone(),
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val contextBudgetChars: Int = 12_000,
+    /** D6·D7·D10 판정 (없으면 건너뜀) */
+    private val judge: Judge? = null,
 ) : Agent {
     override val type = AgentType.WEB
 
@@ -47,18 +50,33 @@ class WebResearchAgent(
         val queries = if (urls.isEmpty()) rewriter.webQueries(request.history) else emptyList()
         if (urls.isNotEmpty()) emit(AgentEvent.Status("URL 읽기: ${urls.joinToString()}"))
 
-        val result = retriever.retrieve(question, queries, urls) { progress ->
-            when (progress) {
-                is WebProgress.Searching -> emit(AgentEvent.Status("웹 검색: \"${progress.query}\""))
-                is WebProgress.Reading -> emit(AgentEvent.Status("페이지 ${progress.count}개 읽는 중"))
-            }
+        var lastFailure: String? = null
+        val search: suspend (List<String>) -> List<dev.vesta.core.knowledge.Evidence> = { q ->
+            retriever.retrieve(question, q, urls) { progress ->
+                when (progress) {
+                    is WebProgress.Searching -> emit(AgentEvent.Status("웹 검색: \"${progress.query}\""))
+                    is WebProgress.Reading -> emit(AgentEvent.Status("페이지 ${progress.count}개 읽는 중"))
+                }
+            }.also { result -> lastFailure = result.failures.firstOrNull()?.reason }.evidence
         }
-        if (result.evidence.isEmpty()) {
-            val why = result.failures.firstOrNull()?.let { " (${it.reason})" }.orEmpty()
+        // D6: URL을 직접 읽을 때는 재검색하지 않는다
+        val gathered = if (urls.isNotEmpty()) search(emptyList()) else searchUntilSufficient(
+            question, queries, judge, search,
+            nextQueries = { tried -> rewriter.webQueries(request.history, avoid = tried) },
+            limit = 6,
+        )
+        // D10: AI를 겨냥한 지시문이 든 웹 조각은 근거에서 뺀다
+        val evidence = if (judge == null) gathered else gathered.filter { item ->
+            val injected = judge.injection(item.text) >= Judge.THRESHOLD
+            if (injected) emit(AgentEvent.Status("⚠ AI 대상 지시문이 들어 있어 제외: ${item.ref}"))
+            !injected
+        }
+        if (evidence.isEmpty()) {
+            val why = lastFailure?.let { " ($it)" }.orEmpty()
             reply(if (urls.isNotEmpty()) "페이지를 읽지 못했습니다$why." else "웹에서 관련 내용을 찾지 못했습니다$why.")
             return@flow
         }
-        val context = ContextAssembler.assemble(result.evidence, contextBudgetChars)
+        val context = ContextAssembler.assemble(evidence, contextBudgetChars)
         emit(AgentEvent.Sources(context.evidence))
 
         val spec = models.acquire(ModelRole.GENERAL)
@@ -68,7 +86,7 @@ class WebResearchAgent(
         val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + earlier +
             ChatMessage(ChatRole.USER, "웹 자료:\n${context.text}\n\n질문: $question")
         emit(AgentEvent.Status("생성 중"))
-        emitAll(Generation.stream(inference, spec, messages, type))
+        emitAll(Generation.stream(inference, spec, messages, type).verifiedAgainst(judge, context.text))
     }
 
     private suspend fun FlowCollector<AgentEvent>.reply(text: String) {

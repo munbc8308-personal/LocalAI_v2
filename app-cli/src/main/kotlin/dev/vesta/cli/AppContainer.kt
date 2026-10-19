@@ -121,6 +121,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             add(WriteFileTool(sandbox))
             add(MakeDirectoryTool(sandbox))
             add(MoveFileTool(sandbox))
+            add(dev.vesta.tools.ApplyPatchTool(sandbox))
             if (config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars))
         },
     )
@@ -132,6 +133,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         ?.let { McpToolSource("orchard", it, config.tools.maxOutputChars) }
     private val decisionClient = OllayaClient(config.decision.baseUrl, config.decision.model, http)
     private val appGroups = AppGroupSelector(decisionClient.takeIf { config.decision.enabled })
+    /** D4·D6·D7·D8·D10 판정 (PROJECT.md 4.4, M7). 결정 모델을 끄면 판정도 건너뛴다 */
+    val judge = if (config.decision.enabled) dev.vesta.decision.Judge(decisionClient) else null
+    val rewriter = QueryRewriter(inference, modelManager)
 
     val router = Router(
         config = config.decision,
@@ -160,8 +164,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         approvals = approvals,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
-            AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
-            AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever),
+            AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
+            AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever, judge = judge),
             AgentType.PERSONAL to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
@@ -174,13 +178,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                     val groups = appGroups.select(request.history.last().content, all.map { it.group }.toSet())
                     all.filter { it.group in groups }
                 },
+                judge = judge,
             ),
             AgentType.TASK to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
                 maxToolOutputChars = config.tools.maxOutputChars,
+                judge = judge,
             ),
-            AgentType.WEB to WebResearchAgent(inference, modelManager, QueryRewriter(inference, modelManager), webRetriever, { config.web.mode }),
+            AgentType.WEB to WebResearchAgent(inference, modelManager, rewriter, webRetriever, { config.web.mode }, judge = judge),
         ),
     )
 

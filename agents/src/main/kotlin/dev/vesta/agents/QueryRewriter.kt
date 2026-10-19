@@ -32,15 +32,28 @@ class QueryRewriter(
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val maxQueries: Int = 2,
 ) {
-    suspend fun webQueries(history: List<ChatMessage>): List<String> {
-        val question = history.last().content
-        val recent = history.dropLast(1).takeLast(4).joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(300)}" }
-        val prompt = """
-            사용자 질문에 답하기 위한 웹 검색어를 최대 ${maxQueries}개 만든다.
-            - 이전 대화를 참고해 대명사·생략을 풀어 혼자서도 뜻이 통하는 검색어로 쓴다.
+    /** 웹 검색어. [avoid]는 이미 써 봤지만 근거가 부족했던 검색어 (D6 재검색). */
+    suspend fun webQueries(history: List<ChatMessage>, avoid: List<String> = emptyList()): List<String> =
+        rewrite(history, avoid, """
             - 검색 엔진에 넣기 좋게 핵심 단어 위주로 짧게 쓴다. 기술 주제는 영어 검색어를 하나 섞어도 좋다.
             - 최신 정보가 필요하면 연도를 넣는다. 오늘은 ${LocalDate.now(clock.withZone(zone))}이다.
             - 질문에 없는 개인 정보는 넣지 않는다.
+        """.trimIndent(), "웹 검색어")
+
+    /** 등록 문서 검색용 질의 (K-09). 이어지는 질문의 대명사·생략을 풀어 독립 질문으로 만든다. */
+    suspend fun localQueries(history: List<ChatMessage>, avoid: List<String> = emptyList()): List<String> =
+        rewrite(history, avoid, """
+            - 문서에서 찾기 좋게, 문서에 쓰였을 법한 말(용어·제목)로 바꿔 쓴다. 한 개는 원래 질문을 다듬은 독립 질문, 하나는 핵심 용어 위주로.
+        """.trimIndent(), "문서 검색 질의")
+
+    private suspend fun rewrite(history: List<ChatMessage>, avoid: List<String>, rules: String, what: String): List<String> {
+        val question = history.last().content
+        val recent = history.dropLast(1).takeLast(4).joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(300)}" }
+        val retry = if (avoid.isEmpty()) "" else "\n- 다음 검색어로는 근거를 충분히 찾지 못했다. 다른 표현·관점으로 바꾼다: ${avoid.joinToString(" / ")}"
+        val prompt = """
+            사용자 질문에 답하기 위한 $what 를 최대 ${maxQueries}개 만든다.
+            - 이전 대화를 참고해 대명사·생략을 풀어 혼자서도 뜻이 통하게 쓴다.
+            $rules$retry
             JSON 한 줄로만 답한다: {"queries": ["검색어1", "검색어2"]}
 
             이전 대화:

@@ -14,6 +14,7 @@ import dev.vesta.core.knowledge.Retriever
 import dev.vesta.core.model.ModelProvider
 import dev.vesta.retrieval.ContextAssembler
 import dev.vesta.storage.KnowledgeRepository
+import dev.vesta.decision.Judge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -34,13 +35,17 @@ class DocsAgent(
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val evidenceLimit: Int = 6,
     private val contextBudgetChars: Int = 12_000,
+    /** K-09 질의 재작성 (없으면 질문 그대로) */
+    private val rewriter: QueryRewriter? = null,
+    /** D4·D6·D7 판정 (없으면 건너뜀) */
+    private val judge: Judge? = null,
 ) : Agent {
     override val type = AgentType.DOCS
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
         val all = knowledge.listCollections(request.user.userId).filter { it.kind == CollectionKind.DOCS }
-        val targets = if (request.collections.isEmpty()) all else all.filter { it.name in request.collections }
+        var targets = if (request.collections.isEmpty()) all else all.filter { it.name in request.collections }
         val missing = request.collections - targets.map { it.name }.toSet()
         if (targets.isEmpty()) {
             reply(
@@ -50,8 +55,23 @@ class DocsAgent(
             return@flow
         }
 
+        // D4: 지정이 없고 컬렉션이 여럿이면 설명을 보고 관련 있는 것만
+        if (request.collections.isEmpty() && targets.size > 1 && judge != null) {
+            val picked = judge.collections(question, targets.associate { it.name to (it.description ?: it.name) })
+            if (picked.isNotEmpty()) targets = targets.filter { it.name in picked }
+        }
         emit(AgentEvent.Status("문서 검색 중 (${targets.joinToString { it.name }})"))
-        val found = retriever.retrieve(request.user.userId, listOf(question), RetrieveOptions(targets.map { it.id }, evidenceLimit))
+        // K-09: 이어지는 질문이면 대화 문맥을 반영한 질의로
+        val first = if (request.history.size > 1 && rewriter != null) {
+            (listOf(question) + rewriter.localQueries(request.history)).distinct()
+        } else listOf(question)
+        val ids = targets.map { it.id }
+        val found = searchUntilSufficient(
+            question, first, judge,
+            search = { queries -> retriever.retrieve(request.user.userId, queries, RetrieveOptions(ids, evidenceLimit)) },
+            nextQueries = { tried -> rewriter?.localQueries(request.history, avoid = tried).orEmpty() },
+            limit = evidenceLimit,
+        )
         if (found.isEmpty()) {
             reply("등록된 문서에서 관련 내용을 찾지 못했습니다.")
             return@flow
@@ -66,7 +86,7 @@ class DocsAgent(
         val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + earlier +
             ChatMessage(ChatRole.USER, "참고 자료:\n${context.text}\n\n질문: $question")
         emit(AgentEvent.Status("생성 중"))
-        emitAll(Generation.stream(inference, spec, messages, type))
+        emitAll(Generation.stream(inference, spec, messages, type).verifiedAgainst(judge, context.text))
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<AgentEvent>.reply(text: String) {

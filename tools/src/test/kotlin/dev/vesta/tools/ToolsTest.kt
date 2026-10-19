@@ -90,3 +90,21 @@ class ToolsTest : FunSpec({
         result.output shouldContain "잘림"
     }
 })
+
+class ApplyPatchToolTest : FunSpec({
+    val ctx = ToolContext(UserContext(UserId(1), UserRole.OWNER))
+
+    test("git 저장소에 패치를 검사 후 적용하고, 잘못된 패치·저장소 밖 경로는 거부한다") {
+        val home = createTempDirectory("home").toRealPath()
+        val repo = home.resolve("Documents/repo").createDirectories()
+        fun git(vararg a: String) = ProcessBuilder(listOf("git", "-C", repo.toString()) + a).redirectErrorStream(true).start().waitFor()
+        git("init", "-q"); repo.resolve("a.txt").writeText("hello\n"); git("add", "."); git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+        val tool = ApplyPatchTool(PathSandbox(listOf("~/Documents"), home))
+        val patch = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-hello\n+hello vesta\n"
+        tool.describe(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", patch) }).title shouldContain "(+1/-1)"
+        tool.execute(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", patch) }, ctx).isError shouldBe false
+        repo.resolve("a.txt").readText() shouldBe "hello vesta\n"
+        tool.execute(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", patch) }, ctx).output shouldContain "검사 실패"
+        tool.execute(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", "--- a/../x\n+++ b/../x\n@@ -0,0 +1 @@\n+x\n") }, ctx).output shouldContain "밖"
+    }
+})

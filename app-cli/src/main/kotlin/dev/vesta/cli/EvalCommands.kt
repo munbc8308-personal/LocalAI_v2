@@ -67,4 +67,13 @@ class EvalRoutingCommand : CliktCommand(name = "routing") {
             echo("지연 중앙 ${results.map { it.ms }.sorted()[n / 2]}ms · 결정 모델 ${decisionConfig.model} · 임계값 ${decisionConfig.thresholds.agent} · 모드 $mode")
         }
     }
+
+    companion object {
+        /** 설정 그대로의 라우터로 D1 정확도 (0~1). eval all에서 쓴다 */
+        suspend fun score(app: AppContainer, file: java.nio.file.Path): Double {
+            val rows = readTsv(file)
+            val all = AgentType.entries.toSet()
+            return rows.count { (question, expected) -> app.router.route(question, emptyList(), all).agent.name == expected }.toDouble() / rows.size
+        }
+    }
 }

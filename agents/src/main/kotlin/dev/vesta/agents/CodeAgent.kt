@@ -43,6 +43,8 @@ class CodeAgent(
     private val evidenceLimit: Int = 8,
     private val contextBudgetChars: Int = 16_000,
     private val maxAttachedLines: Int = 400,
+    /** D7 판정 (없으면 건너뜀) */
+    private val judge: dev.vesta.decision.Judge? = null,
 ) : Agent {
     override val type = AgentType.CODE
 
@@ -59,6 +61,11 @@ class CodeAgent(
 
         val evidence = mutableListOf<Evidence>()
         evidence += attached
+        // D-05: 변경 사항 리뷰 요청이면 git diff를 붙인다
+        if (DIFF_HINT.containsMatchIn(question)) targets.firstNotNullOfOrNull { repo -> repo.rootPath?.let { gitDiff(repo.name, it) } }?.let {
+            emit(AgentEvent.Status("git diff 읽음 (${it.location})"))
+            evidence += it
+        }
         if (wantsRepo) {
             emit(AgentEvent.Status("코드 검색 중 (${targets.joinToString { it.name }})"))
             evidence += retriever.retrieve(request.user.userId, listOf(question), RetrieveOptions(targets.map { it.id }, evidenceLimit))
@@ -69,17 +76,20 @@ class CodeAgent(
         val base = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + Prompts.CODE_RULES
         val earlier = HistoryWindow.fit(request.history.dropLast(1), ChatAgent.DEFAULT_CONTEXT_CHARS / 2)
             .let { if (it.lastOrNull()?.role == ChatRole.USER) it.dropLast(1) else it }
+        var groundingText = ""
         val messages = if (evidence.isEmpty()) {
             if (wantsRepo) emit(AgentEvent.Status("관련 코드를 찾지 못해 일반 지식으로 답합니다"))
             listOf(ChatMessage(ChatRole.SYSTEM, base)) + earlier + ChatMessage(ChatRole.USER, question)
         } else {
             val context = ContextAssembler.assemble(evidence, contextBudgetChars)
             emit(AgentEvent.Sources(context.evidence))
+            // 리뷰 문장은 자료를 옮긴 사실이 아니라 분석이라 D7 근거 검증이 잡음만 낸다 (M7 확인: 10문장 중 9개 "미확인")
+            groundingText = if (evidence.any { it.title == "git diff" }) "" else context.text
             listOf(ChatMessage(ChatRole.SYSTEM, base + "\n" + Prompts.CODE_CONTEXT_RULES)) + earlier +
                 ChatMessage(ChatRole.USER, "코드 자료:\n${context.text}\n\n질문: $question")
         }
         emit(AgentEvent.Status("생성 중"))
-        emitAll(Generation.stream(inference, spec, messages, type))
+        emitAll(Generation.stream(inference, spec, messages, type).verifiedAgainst(judge, groundingText))
     }
 
     /** 질문에 적힌 `경로[:시작[-끝]]` 중 등록 저장소 안에 실제로 있는 파일을 붙인다. */
@@ -97,7 +107,18 @@ class CodeAgent(
             Evidence(SourceType.CODE, file.toString(), path, "${repo.name} · $path:$start–$end", numbered, 1.0)
         }.distinctBy { it.ref + it.location }.toList()
 
+    /** 커밋하지 않은 변경 (작업 트리 + 스테이징) */
+    private fun gitDiff(name: String, root: String): Evidence? = runCatching {
+        val process = ProcessBuilder("git", "-C", root, "diff", "HEAD", "--no-color").redirectErrorStream(true).start()
+        val diff = process.inputStream.bufferedReader().readText()
+        process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
+        if (process.exitValue() != 0 || diff.isBlank()) return@runCatching null
+        val files = Regex("^diff --git", RegexOption.MULTILINE).findAll(diff).count()
+        Evidence(SourceType.CODE, "$root (git diff HEAD)", "git diff", "$name · 파일 ${files}개", diff.take(20_000), 1.0)
+    }.getOrNull()
+
     private companion object {
+        val DIFF_HINT = Regex("diff|변경 ?(사항|점|내용)|바뀐 (코드|부분)|수정한 (코드|부분)|커밋 전|작업한 (코드|부분)", RegexOption.IGNORE_CASE)
         val REPO_HINT = Regex("저장소|레포|리포|repo|코드베이스|우리 (코드|프로젝트)|내 프로젝트|이 프로젝트|어디서 (쓰|사용|처리|호출)|어디에 (있|정의)|구현(돼|되어) ?있")
         val FILE_REF = Regex("([\\w./-]+\\.(?:kt|kts|java|py|js|ts|tsx|go|rs|swift|rb|sql|sh|yaml|yml|toml|gradle|md))(?::(\\d+)(?:[-–](\\d+))?)?")
     }

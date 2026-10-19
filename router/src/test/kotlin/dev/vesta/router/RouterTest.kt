@@ -61,6 +61,15 @@ class RouterTest : FunSpec({
         decision.calls shouldBe 0
     }
 
+    test("짧은 후속 질문은 직전 에이전트·컬렉션을 이어받는다") {
+        val previous = dev.vesta.core.decision.RoutingDecision(AgentType.DOCS, 1.0, RoutingStage.EXPLICIT, collections = listOf("b"), question = "메인 모델은?")
+        val recent = listOf(ChatMessage(ChatRole.USER, "메인 모델은?"), ChatMessage(ChatRole.ASSISTANT, "gemma4"))
+        val router = Router(DecisionConfig(), FakeDecision("CHAT", 0.99), null)
+        router.route("그럼 코드 모델은?", recent, all, previous).let { it.agent shouldBe AgentType.DOCS; it.collections shouldBe listOf("b") }
+        router.route("코드 모델은?", recent, all, previous).agent shouldBe AgentType.DOCS
+        router.route("파이썬으로 웹 서버 만드는 법 자세히 알려줘", recent, all, previous).agent shouldBe AgentType.CHAT // 새 주제
+    }
+
     test("메인 모델 JSON 판정 해석") {
         LlmRouter.parse("""{"agent": "web", "confidence": 0.9, "needsWeb": true, "needsLocal": false}""") shouldBe
             LlmVerdict(AgentType.WEB, 0.9, needsWeb = true, needsLocal = false)

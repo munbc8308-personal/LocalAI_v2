@@ -8,5 +8,6 @@ dependencies {
     implementation(project(":retrieval"))
     implementation(project(":storage"))
     implementation(project(":tools"))
+    implementation(project(":decision"))
     implementation(libs.kotlin.logging)
 }

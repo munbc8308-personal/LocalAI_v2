@@ -27,7 +27,13 @@ class Router(
      * @param available 지금 쓸 수 있는 에이전트 (구현됨 + 조건 충족, 예: 컬렉션이 있어야 DOCS)
      * @param recent 직전 대화 (이번 질문 제외)
      */
-    suspend fun route(text: String, recent: List<ChatMessage>, available: Set<AgentType>): RoutingDecision {
+    suspend fun route(
+        text: String,
+        recent: List<ChatMessage>,
+        available: Set<AgentType>,
+        /** 같은 세션의 직전 판정. 짧은 후속 질문("그럼 코드 모델은?")은 이 에이전트·컬렉션을 이어받는다 */
+        previous: RoutingDecision? = null,
+    ): RoutingDecision {
         val start = TimeSource.Monotonic.markNow()
         fun done(decision: RoutingDecision) = substitute(decision.copy(latencyMs = start.elapsedNow().inWholeMilliseconds), available)
 
@@ -37,6 +43,14 @@ class Router(
             return done(RoutingDecision(route.agent, 1.0, stage, collections = route.collections, question = route.question))
         }
         if (CODE_BLOCK.containsMatchIn(text)) return done(RoutingDecision(AgentType.CODE, 1.0, RoutingStage.RULE, question = text))
+
+        // 2.5단계: 짧은 후속 질문은 직전 정보원(문서·웹·코드·개인 비서)을 이어간다.
+        // M7에서 발견: "그럼 코드 모델은?"을 일반 대화로 보내 근거 없이 지어낸 답이 나왔다
+        if (previous != null && recent.isNotEmpty() && text.length < FOLLOW_UP_CHARS * 2 && previous.agent in CONTINUABLE &&
+            FOLLOW_UP.containsMatchIn(text.trim())
+        ) {
+            return done(RoutingDecision(previous.agent, previous.confidence, RoutingStage.RULE, previous.needsWeb, previous.needsLocal, previous.collections, text))
+        }
 
         // 3단계: 결정 모델. 이어지는 짧은 질문("그거 더 자세히")은 문맥이 필요하므로 메인 모델로 넘긴다
         val model = decision
@@ -93,5 +107,8 @@ class Router(
         val CODE_BLOCK = Regex("```")
         /** 이보다 짧은 후속 질문은 결정 모델 대신 문맥을 보는 메인 모델이 판정 */
         const val FOLLOW_UP_CHARS = 20
+        val CONTINUABLE = setOf(AgentType.DOCS, AgentType.WEB, AgentType.CODE, AgentType.PERSONAL)
+        /** 앞 질문에 기대는 말로 시작하거나 주어가 빠진 짧은 질문 */
+        val FOLLOW_UP = Regex("^(그럼|그러면|그건|그거|그것|이건|이거|저건|또|더|그리고|그 ?다음|다른|나머지|위|아까|방금)|[은는]\\s*[?？]?$|^(왜|어떻게|언제|어디서|누가)\\s*\\S{0,6}[?？]$")
     }
 }
