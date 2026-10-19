@@ -22,7 +22,7 @@ class VestaDatabase private constructor(val db: Database) {
 
     /** 스키마를 최신으로 맞춘다. 여러 번 불러도 안전하다. */
     fun migrate() = transaction(db) {
-        SchemaUtils.create(SchemaVersion, Users, Sessions, Messages, Collections, Documents, Chunks, WebPages, WebSearchLogs, RoutingLogs, ToolRuns, WebSessions)
+        SchemaUtils.create(SchemaVersion, Users, Sessions, Messages, Collections, Documents, Chunks, WebPages, WebSearchLogs, RoutingLogs, ToolRuns, WebSessions, ChannelBindings, ChannelPairings)
         // 키워드 검색(BM25)용 FTS5. 한국어는 접두어 검색으로 조사 차이를 흡수한다 (KnowledgeRepository.keywordSearch)
         exec("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, heading, tokenize = 'unicode61 remove_diacritics 2')")
         val current = SchemaVersion.selectAll().maxOfOrNull { it[SchemaVersion.version] } ?: 0
@@ -51,8 +51,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9) */
-        const val CURRENT_VERSION = 8
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10) */
+        const val CURRENT_VERSION = 9
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()

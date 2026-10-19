@@ -1,7 +1,6 @@
 package dev.vesta.server
 
 import dev.vesta.api.CollectionDto
-import dev.vesta.api.DashboardDto
 import dev.vesta.api.LoadedModelDto
 import dev.vesta.app.ApiToken
 import dev.vesta.app.AppContainer
@@ -12,7 +11,12 @@ import io.ktor.client.request.get
 import io.ktor.http.isSuccess
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
+import dev.vesta.api.DashboardDto
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -33,6 +37,31 @@ fun main() {
     suspend fun probe(block: suspend () -> String): String = withTimeoutOrNull(1_500) { runCatching { block() }.getOrNull() } ?: "응답 없음"
     val webUi = ServerDeps::class.java.classLoader.getResource("web/index.html") != null
     if (!webUi) log.warn { "웹 UI 파일이 없습니다 (web-ui 빌드 결과가 클래스패스 web/ 에 없음)" }
+    val dashboard: suspend () -> DashboardDto = {
+        coroutineScope {
+            val ollamaVersion = async { probe { "v" + ollama.version() } }
+            val ollaya = async { probe { check(app.httpForEval.get("${app.config.decision.baseUrl}/api/version").status.isSuccess()); "정상 (${app.config.decision.model})" } }
+            val searxng = async { probe { check(app.httpForEval.get("${app.config.web.searxngUrl}/healthz").status.isSuccess()); "정상" } }
+            val loaded = async { withTimeoutOrNull(2_000) { runCatching { ollama.loadedModels() }.getOrNull() }.orEmpty() }
+            val total = MacSystem.totalMemoryBytes()
+            val models = with(app.config.models) {
+                listOfNotNull(general?.let { "general" to it.name }, code?.let { "code" to it.name }, embedding?.let { "embedding" to it.name }, reranker?.let { "reranker" to it.name })
+            }.toMap() + ("decision" to app.config.decision.model)
+            DashboardDto(
+                version = VERSION,
+                checks = mapOf(
+                    "Ollama" to ollamaVersion.await(),
+                    "Ollaya (결정 모델)" to if (app.config.decision.enabled) ollaya.await() else "꺼짐",
+                    "SearXNG" to searxng.await(),
+                    "Orchard" to if (app.orchard != null) "설정됨" else "없음",
+                ),
+                models = models,
+                loaded = loaded.await().map { LoadedModelDto(it.name, it.sizeBytes, it.gpuBytes) },
+                memoryTotalBytes = total,
+                memoryBudgetBytes = total * app.config.memory.budgetPercent / 100,
+            )
+        }
+    }
     val deps = ServerDeps(
         conversation = app.conversation,
         sessions = app.sessions,
@@ -53,35 +82,24 @@ fun main() {
                 CollectionDto(c.name, c.kind.name, c.description, c.rootPath, c.embeddingModel, stats.documents, stats.chunks)
             }
         },
-        dashboard = {
-            coroutineScope {
-                val ollamaVersion = async { probe { "v" + ollama.version() } }
-                val ollaya = async { probe { check(app.httpForEval.get("${app.config.decision.baseUrl}/api/version").status.isSuccess()); "정상 (${app.config.decision.model})" } }
-                val searxng = async { probe { check(app.httpForEval.get("${app.config.web.searxngUrl}/healthz").status.isSuccess()); "정상" } }
-                val loaded = async { withTimeoutOrNull(2_000) { runCatching { ollama.loadedModels() }.getOrNull() }.orEmpty() }
-                val total = MacSystem.totalMemoryBytes()
-                val models = with(app.config.models) {
-                    listOfNotNull(general?.let { "general" to it.name }, code?.let { "code" to it.name }, embedding?.let { "embedding" to it.name }, reranker?.let { "reranker" to it.name })
-                }.toMap() + ("decision" to app.config.decision.model)
-                DashboardDto(
-                    version = VERSION,
-                    checks = mapOf(
-                        "Ollama" to ollamaVersion.await(),
-                        "Ollaya (결정 모델)" to if (app.config.decision.enabled) ollaya.await() else "꺼짐",
-                        "SearXNG" to searxng.await(),
-                        "Orchard" to if (app.orchard != null) "설정됨" else "없음",
-                    ),
-                    models = models,
-                    loaded = loaded.await().map { LoadedModelDto(it.name, it.sizeBytes, it.gpuBytes) },
-                    memoryTotalBytes = total,
-                    memoryBudgetBytes = total * app.config.memory.budgetPercent / 100,
-                )
-            }
-        },
+        dashboard = dashboard,
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )
-    Runtime.getRuntime().addShutdownHook(Thread { app.close() })
+    // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
+    val channels = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    startChannels(app, channels) { dashboard().statusText() }
+    Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
     embeddedServer(CIO, port = app.config.server.port, host = host) { vestaApi(deps) }.start(wait = true)
 }
+
+/** 메신저 `/status` 답 */
+private fun DashboardDto.statusText(): String = buildString {
+    append("Vesta ").append(version)
+    checks.forEach { (name, value) -> append('\n').append(name).append(": ").append(value) }
+    if (loaded.isNotEmpty()) append("\n로드된 모델: ").append(loaded.joinToString { "${it.name} ${gb(it.sizeBytes)}" })
+    if (memoryTotalBytes > 0) append("\n메모리 예산: ").append(gb(memoryBudgetBytes)).append(" / ").append(gb(memoryTotalBytes))
+}
+
+private fun gb(bytes: Long): String = "%.1fGB".format(bytes / (1024.0 * 1024 * 1024))

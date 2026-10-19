@@ -77,6 +77,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val sessions = ExposedSessionRepository(database.db)
     /** 웹 UI 비밀번호·로그인 세션 (M9) */
     val webAuth = dev.vesta.storage.WebAuthRepository(database.db)
+    /** 메신저 계정 연결 (M10) */
+    val channelBindings = dev.vesta.storage.ExposedChannelBindingStore(database.db)
     val messages = ExposedMessageRepository(database.db)
     val inference = OpenAiCompatibleClient(config.inference.baseUrl, http)
     val modelManager = ModelManager(

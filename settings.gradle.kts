@@ -59,9 +59,15 @@ include(
     "mcp",
     "agents",
     "conversation",
+    "channel-core",
+    "channel-telegram",
     "app-common",
     "api-model",
     "web-ui",
     "app-cli",
     "app-server",
 )
+
+// 메신저 어댑터는 channels/ 아래에 모은다 (PROJECT.md 10장)
+project(":channel-core").projectDir = file("channels/channel-core")
+project(":channel-telegram").projectDir = file("channels/channel-telegram")

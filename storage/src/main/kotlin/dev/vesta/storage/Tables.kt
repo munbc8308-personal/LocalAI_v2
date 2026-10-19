@@ -146,3 +146,26 @@ object WebSessions : LongIdTable("web_session") {
     val createdAt = timestamp("created_at")
     val expiresAt = timestamp("expires_at")
 }
+
+/** 메신저 계정 ↔ 사용자 연결 (M10, PROJECT.md 6.5·11장 ChannelBinding) */
+object ChannelBindings : LongIdTable("channel_binding") {
+    val userId = long("user_id").index()
+    val channel = varchar("channel", 16)
+    val externalUserId = varchar("external_user_id", 64)
+    val externalChatId = varchar("external_chat_id", 64)
+    val sessionId = varchar("session_id", 36).nullable()
+    val allowed = bool("allowed").default(true)
+    val createdAt = timestamp("created_at")
+
+    init {
+        uniqueIndex(channel, externalUserId)
+    }
+}
+
+/** 메신저 연결용 일회용 코드. SHA-256만 저장한다 */
+object ChannelPairings : LongIdTable("channel_pairing") {
+    val userId = long("user_id")
+    val channel = varchar("channel", 16)
+    val codeHash = varchar("code_hash", 64)
+    val expiresAt = timestamp("expires_at")
+}

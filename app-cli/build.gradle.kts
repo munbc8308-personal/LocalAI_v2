@@ -6,6 +6,7 @@ plugins {
 dependencies {
     implementation(project(":app-common"))
     implementation(project(":api-model"))
+    implementation(project(":channel-telegram"))
     implementation(libs.clikt)
     implementation(libs.bundles.ktor.client)
     implementation(libs.jline)

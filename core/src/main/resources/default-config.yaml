@@ -32,3 +32,10 @@ web:
 
 memory:
   budgetPercent: 70
+
+# 메신저 (PROJECT.md 6.5·6.6). 봇 토큰은 여기 쓰지 않는다: vesta telegram token (키체인 저장)
+channels:
+  telegram:
+    enabled: true              # 토큰이 있을 때만 켜진다
+    allowLocalSources: true    # 로컬 문서·코드·Apple 앱 내용이 들어간 답변도 보냄 (v1.0 결정)
+    allowExecApproval: true    # 셸 승인을 텔레그램에서 받음 (v1.0 결정)

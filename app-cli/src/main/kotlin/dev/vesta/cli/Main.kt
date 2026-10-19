@@ -17,5 +17,6 @@ fun main(args: Array<String>) = Vesta()
         RepoCommand().subcommands(RepoAddCommand(), RepoUpdateCommand()),
         SearchCommand(),
         EvalCommand().subcommands(EvalRoutingCommand(), EvalRetrievalCommand(), EvalGroundingCommand(), EvalAllCommand()),
-        StatusCommand(), PasswdCommand(), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
+        StatusCommand(), PasswdCommand(),
+        TelegramCommand().subcommands(TelegramTokenCommand(), TelegramPairCommand(), TelegramListCommand(), TelegramUnlinkCommand(), TelegramOffCommand()), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
     .main(args)
