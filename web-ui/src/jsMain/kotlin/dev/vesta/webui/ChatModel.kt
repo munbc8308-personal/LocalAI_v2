@@ -1,0 +1,159 @@
+package dev.vesta.webui
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import dev.vesta.api.ApiJson
+import dev.vesta.api.ApprovalDto
+import dev.vesta.api.ChatRequestDto
+import dev.vesta.api.EventDto
+import dev.vesta.api.EvidenceDto
+import dev.vesta.api.MessageDto
+import dev.vesta.api.RoutingDto
+import dev.vesta.api.SessionDto
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
+
+/** 질문 하나와 그 답변 (화면의 한 묶음) */
+class Turn(val question: String) {
+    var answer by mutableStateOf("")
+    var routing by mutableStateOf<RoutingDto?>(null)
+    var status by mutableStateOf<String?>(null)
+    var thinking by mutableStateOf(false)
+    val tools = mutableStateListOf<ToolLine>()
+    var sources by mutableStateOf(emptyList<EvidenceDto>())
+    val approvals = mutableStateListOf<ApprovalView>()
+    var grounding by mutableStateOf<EventDto.Grounding?>(null)
+    var done by mutableStateOf<EventDto.Done?>(null)
+    var error by mutableStateOf<String?>(null)
+    /** 저장된 기록에서 불러온 답변 */
+    var agent by mutableStateOf<String?>(null)
+    var interrupted by mutableStateOf(false)
+}
+
+class ToolLine(val callId: String, val tool: String, val summary: String) {
+    var ok by mutableStateOf<Boolean?>(null)
+    var result by mutableStateOf<String?>(null)
+}
+
+enum class ApprovalState { PENDING, SENDING, APPROVED, EDITED, DENIED, EXPIRED }
+
+class ApprovalView(val request: EventDto.Approval) {
+    var state by mutableStateOf(ApprovalState.PENDING)
+    var edited by mutableStateOf(request.editableValue.orEmpty())
+}
+
+/** 대화 화면 상태와 동작. 한 번에 질문 하나만 보낸다. */
+class ChatController(private val scope: CoroutineScope) {
+    val turns = mutableStateListOf<Turn>()
+    val sessions = mutableStateListOf<SessionDto>()
+    var sessionId by mutableStateOf<String?>(null)
+    var busy by mutableStateOf(false)
+    var loadError by mutableStateOf<String?>(null)
+    private var job: Job? = null
+
+    fun refreshSessions() = scope.launch {
+        runCatching { Http.get("/api/sessions?limit=50", ListSerializer(SessionDto.serializer())) }
+            .onSuccess { sessions.clear(); sessions.addAll(it) }
+    }
+
+    fun newChat() {
+        stop()
+        sessionId = null
+        turns.clear()
+        loadError = null
+    }
+
+    fun open(id: String) = scope.launch {
+        stop()
+        loadError = null
+        runCatching { Http.get("/api/sessions/$id/messages", ListSerializer(MessageDto.serializer())) }
+            .onSuccess { messages ->
+                sessionId = id
+                turns.clear()
+                turns.addAll(history(messages))
+            }
+            .onFailure { loadError = it.message }
+    }
+
+    fun send(text: String) {
+        if (busy || text.isBlank()) return
+        val turn = Turn(text.trim())
+        turns += turn
+        busy = true
+        job = scope.launch {
+            try {
+                Http.chat(ChatRequestDto(turn.question, sessionId)).collect { apply(turn, it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                turn.error = "중지함"
+                throw e
+            } catch (e: Throwable) {
+                turn.error = e.message ?: "연결이 끊겼습니다"
+            } finally {
+                turn.status = null
+                turn.thinking = false
+                busy = false
+            }
+        }
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
+    }
+
+    fun decide(view: ApprovalView, decision: String) = scope.launch {
+        view.state = ApprovalState.SENDING
+        val dto = when (decision) {
+            "edit" -> ApprovalDto("edit", edited = mapOf(view.request.editableField.orEmpty() to view.edited))
+            "deny" -> ApprovalDto("deny", reason = "웹 UI에서 거부함")
+            else -> ApprovalDto("approve")
+        }
+        view.state = runCatching { Http.post("/api/approvals/${view.request.requestId}", ApiJson.encodeToString(ApprovalDto.serializer(), dto)) }
+            .fold(
+                { if (decision == "deny") ApprovalState.DENIED else if (decision == "edit") ApprovalState.EDITED else ApprovalState.APPROVED },
+                { if ((it as? HttpError)?.status == 404) ApprovalState.EXPIRED else ApprovalState.PENDING },
+            )
+    }
+
+    private fun apply(turn: Turn, event: EventDto) {
+        when (event) {
+            is EventDto.Session -> {
+                sessionId = event.sessionId
+                if (event.created) refreshSessions()
+            }
+            is EventDto.Routed -> turn.routing = event.routing
+            is EventDto.Status -> turn.status = event.text
+            is EventDto.Reasoning -> turn.thinking = true
+            is EventDto.Sources -> turn.sources = event.evidence
+            is EventDto.ToolStarted -> turn.tools += ToolLine(event.callId, event.tool, event.summary)
+            is EventDto.ToolFinished -> turn.tools.lastOrNull { it.callId == event.callId }?.let { it.ok = event.ok; it.result = event.summary }
+            is EventDto.Approval -> turn.approvals += ApprovalView(event)
+            is EventDto.Grounding -> turn.grounding = event
+            is EventDto.Token -> {
+                turn.thinking = false
+                turn.status = null
+                turn.answer += event.text
+            }
+            is EventDto.Done -> turn.done = event
+            is EventDto.Error -> turn.error = event.message
+        }
+    }
+
+    private fun history(messages: List<MessageDto>): List<Turn> {
+        val out = mutableListOf<Turn>()
+        for (m in messages) when (m.role) {
+            "USER" -> out += Turn(m.content)
+            "ASSISTANT" -> {
+                val turn = out.lastOrNull()?.takeIf { it.answer.isEmpty() } ?: Turn("").also { out += it }
+                turn.answer = m.content
+                turn.agent = m.agent
+                turn.interrupted = m.interrupted
+            }
+        }
+        return out
+    }
+}

@@ -15,6 +15,31 @@ dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
     repositories {
         mavenCentral()
+        // Compose 런타임이 쓰는 androidx 라이브러리
+        google {
+            content { includeGroupByRegex("androidx.*") }
+        }
+        // Kotlin/JS(web-ui) 빌드 도구: Node.js·Yarn 배포본. 프로젝트 저장소를 막아 두었으므로 여기서 선언한다
+        exclusiveContent {
+            forRepository {
+                ivy("https://nodejs.org/dist") {
+                    name = "Node.js"
+                    patternLayout { artifact("v[revision]/[artifact](-v[revision]-[classifier]).[ext]") }
+                    metadataSources { artifact() }
+                }
+            }
+            filter { includeModule("org.nodejs", "node") }
+        }
+        exclusiveContent {
+            forRepository {
+                ivy("https://github.com/yarnpkg/yarn/releases/download") {
+                    name = "Yarn"
+                    patternLayout { artifact("v[revision]/[artifact](-v[revision]).[ext]") }
+                    metadataSources { artifact() }
+                }
+            }
+            filter { includeModule("com.yarnpkg", "yarn") }
+        }
     }
 }
 
@@ -36,6 +61,7 @@ include(
     "conversation",
     "app-common",
     "api-model",
+    "web-ui",
     "app-cli",
     "app-server",
 )

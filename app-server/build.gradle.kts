@@ -17,3 +17,12 @@ application {
     mainClass = "dev.vesta.server.ServerKt"
     applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED", "-Dkotlin-logging.logStartupMessage=false")
 }
+
+// 웹 UI(web-ui) 빌드 결과를 클래스패스 web/ 에 넣어 서버가 서빙한다 (PROJECT.md 6.3)
+tasks.processResources {
+    dependsOn(":web-ui:jsBrowserDistribution")
+    from(rootProject.layout.projectDirectory.dir("web-ui/build/dist/js/productionExecutable")) {
+        into("web")
+        exclude("*.map", "composeResources/**")
+    }
+}

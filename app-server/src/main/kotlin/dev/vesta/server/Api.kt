@@ -2,9 +2,14 @@ package dev.vesta.server
 
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ApprovalDto
+import dev.vesta.api.CSRF_HEADER
 import dev.vesta.api.ChatRequestDto
+import dev.vesta.api.CollectionDto
+import dev.vesta.api.DashboardDto
 import dev.vesta.api.EventDto
 import dev.vesta.api.HealthDto
+import dev.vesta.api.LoginDto
+import dev.vesta.api.MeDto
 import dev.vesta.api.MessageDto
 import dev.vesta.api.OaiChatRequest
 import dev.vesta.api.SessionDto
@@ -20,13 +25,24 @@ import dev.vesta.core.session.SessionRepository
 import dev.vesta.core.tools.ApprovalDecision
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.http.ContentType
+import io.ktor.http.Cookie
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.http.content.staticResources
+import io.ktor.server.plugins.compression.Compression
+import io.ktor.server.plugins.compression.gzip
+import io.ktor.server.plugins.compression.excludeContentType
+import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
+import io.ktor.server.request.host
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
@@ -57,75 +73,145 @@ class ServerDeps(
     val token: String,
     val version: String,
     val health: suspend () -> Map<String, String> = { emptyMap() },
+    /** 웹 UI 로그인. 없으면 Bearer 토큰만 받는다 */
+    val auth: WebAuth? = null,
+    val collections: suspend (UserContext) -> List<CollectionDto> = { emptyList() },
+    val dashboard: suspend () -> DashboardDto = { DashboardDto(version, emptyMap(), emptyMap(), emptyList(), 0, 0) },
+    /** 접속을 받는 Host 이름 (DNS 리바인딩 방지). localhost·127.0.0.1·Tailscale(`*.ts.net`)은 항상 허용 */
+    val allowedHosts: Set<String> = emptySet(),
+    /** 웹 UI 정적 파일(클래스패스 `web/`)을 서빙할지 */
+    val serveWebUi: Boolean = false,
 )
 
 /**
- * Vesta HTTP API (PROJECT.md I-03, 8장). 이 Mac에서만 열고(기본 127.0.0.1), 모든 요청에 Bearer 토큰을 요구한다.
+ * Vesta HTTP API (PROJECT.md I-03, 8장). 이 Mac에서만 열고(기본 127.0.0.1), 인증이 필요하다.
  * - `/api/…`: Vesta 자체 API. 대화는 SSE로 AgentEvent를 흘려보낸다.
- * - `/v1/…`: OpenAI 호환 (외부 클라이언트용). 이 경로에서는 승인을 받을 수 없으므로 쓰기·셸 도구는 자동 거부한다.
+ *   CLI는 Bearer 토큰, 웹 UI는 로그인 세션 쿠키 + CSRF 헤더로 인증한다.
+ * - `/v1/…`: OpenAI 호환 (외부 클라이언트용, Bearer 토큰만). 이 경로에서는 승인을 받을 수 없으므로 쓰기·셸 도구는 자동 거부한다.
+ * - `/`: 웹 UI (M9).
  */
 fun Application.vestaApi(deps: ServerDeps) {
+    // 웹 UI 파일을 휴대폰으로 보낼 때 크기를 줄인다. SSE는 조각마다 바로 보내야 하므로 압축하지 않는다
+    install(Compression) {
+        gzip { excludeContentType(ContentType.Text.EventStream) }
+    }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             log.error(cause) { "API 오류: ${call.request.local.uri}" }
             call.respondJson(HttpStatusCode.InternalServerError, buildJsonObject { put("error", cause.message ?: "internal error") }.toString())
         }
     }
+    // 모든 응답: Host 검사(DNS 리바인딩 방지)와 보안 헤더
+    intercept(ApplicationCallPipeline.Plugins) {
+        if (!hostAllowed(call.request.host(), deps.allowedHosts)) {
+            call.respondJson(HttpStatusCode.Forbidden, """{"error":"허용되지 않은 Host"}""")
+            finish()
+            return@intercept
+        }
+        call.response.header("X-Content-Type-Options", "nosniff")
+        call.response.header("X-Frame-Options", "DENY")
+        call.response.header("Referrer-Policy", "no-referrer")
+        call.response.header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        )
+    }
     routing {
-        // 상태만 알려 준다 (토큰 불필요: launchd·CLI가 서버가 떠 있는지 확인)
+        // 상태만 알려 준다 (인증 불필요: launchd·CLI가 서버가 떠 있는지 확인)
         get("/api/health") {
             call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(HealthDto.serializer(), HealthDto("ok", deps.version, deps.health())))
         }
 
         route("/api") {
+            post("/login") {
+                val auth = deps.auth ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"웹 로그인이 꺼져 있음"}""")
+                val dto = ApiJson.decodeFromString(LoginDto.serializer(), call.receiveText())
+                when (val result = auth.login(dto.name, dto.password, call.request.header(HttpHeaders.UserAgent))) {
+                    is LoginResult.Ok -> {
+                        call.response.cookies.append(
+                            Cookie(
+                                SESSION_COOKIE, result.token,
+                                maxAge = auth.sessionTtl.seconds.toInt(), path = "/", httpOnly = true,
+                                secure = call.isHttps(), extensions = mapOf("SameSite" to "Strict"),
+                            ),
+                        )
+                        call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), result.session.toMe()))
+                    }
+                    LoginResult.Invalid -> call.respondJson(HttpStatusCode.Unauthorized, """{"error":"비밀번호가 맞지 않습니다"}""")
+                    LoginResult.NoPassword -> call.respondJson(HttpStatusCode.Conflict, """{"error":"비밀번호가 아직 없습니다. 이 Mac 터미널에서 vesta passwd 로 정하세요"}""")
+                    is LoginResult.Locked -> {
+                        call.response.header(HttpHeaders.RetryAfter, result.retryAfterSeconds.toString())
+                        call.respondJson(HttpStatusCode.TooManyRequests, """{"error":"여러 번 틀려 잠시 잠겼습니다. ${result.retryAfterSeconds}초 뒤에 다시 시도하세요"}""")
+                    }
+                }
+            }
+            post("/logout") {
+                call.principal(deps) ?: return@post
+                call.request.cookies[SESSION_COOKIE]?.let { deps.auth?.logout(it) }
+                call.response.cookies.append(Cookie(SESSION_COOKIE, "", maxAge = 0, path = "/", httpOnly = true, extensions = mapOf("SameSite" to "Strict")))
+                call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
+            }
+            get("/me") {
+                val session = call.request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) }
+                    ?: return@get call.respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe()))
+            }
             post("/chat") {
-                if (!call.authorized(deps.token)) return@post
+                val user = call.principal(deps) ?: return@post
                 val request = ApiJson.decodeFromString(ChatRequestDto.serializer(), call.receiveText())
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
-                    deps.conversation.send(deps.owner, channel, request.sessionId?.let(::SessionId), UserInput(request.text))
+                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text))
                         .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                 }
             }
             post("/approvals/{id}") {
-                if (!call.authorized(deps.token)) return@post
+                val user = call.principal(deps) ?: return@post
                 val dto = ApiJson.decodeFromString(ApprovalDto.serializer(), call.receiveText())
                 val decision = when (dto.decision) {
                     "approve" -> ApprovalDecision.Approve
                     "edit" -> ApprovalDecision.ApproveEdited(kotlinx.serialization.json.JsonObject(dto.edited.mapValues { JsonPrimitive(it.value) }))
                     else -> ApprovalDecision.Deny(dto.reason ?: "사용자가 거부함")
                 }
-                val ok = deps.conversation.resolveApproval(deps.owner, call.parameters["id"].orEmpty(), decision)
+                val ok = deps.conversation.resolveApproval(user, call.parameters["id"].orEmpty(), decision)
                 call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("resolved", ok) }.toString())
             }
             get("/sessions") {
-                if (!call.authorized(deps.token)) return@get
+                val user = call.principal(deps) ?: return@get
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 20
-                val list = deps.sessions.listRecent(deps.owner.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString()) }
+                val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(SessionDto.serializer()), list))
             }
             get("/sessions/{id}/messages") {
-                if (!call.authorized(deps.token)) return@get
+                val user = call.principal(deps) ?: return@get
                 val id = SessionId(call.parameters["id"].orEmpty())
-                if (deps.sessions.find(deps.owner.userId, id) == null) {
+                if (deps.sessions.find(user.userId, id) == null) {
                     call.respondJson(HttpStatusCode.NotFound, """{"error":"세션 없음"}""")
                     return@get
                 }
                 val list = deps.messages.list(id).map { MessageDto(it.role.name, it.content, it.agent?.name, it.model, it.interrupted, it.createdAt.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(MessageDto.serializer()), list))
             }
+            get("/collections") {
+                val user = call.principal(deps) ?: return@get
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(CollectionDto.serializer()), deps.collections(user)))
+            }
+            get("/dashboard") {
+                call.principal(deps) ?: return@get
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(DashboardDto.serializer(), deps.dashboard()))
+            }
         }
 
         route("/v1") {
             get("/models") {
-                if (!call.authorized(deps.token)) return@get
+                if (!call.bearer(deps.token)) return@get
                 call.respondJson(HttpStatusCode.OK, buildJsonObject {
                     put("object", "list")
                     putJsonArray("data") { add(buildJsonObject { put("id", MODEL_ID); put("object", "model"); put("owned_by", "vesta") }) }
                 }.toString())
             }
             post("/chat/completions") {
-                if (!call.authorized(deps.token)) return@post
+                if (!call.bearer(deps.token)) return@post
                 val request = ApiJson.decodeFromString(OaiChatRequest.serializer(), call.receiveText())
                 val question = request.messages.lastOrNull { it.role == "user" }?.content
                     ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":{"message":"user 메시지가 없음"}}""")
@@ -176,10 +262,23 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
         }
+
+        if (deps.serveWebUi) staticResources("/", "web") {
+            default("index.html")
+            // 파일 이름에 해시가 없으므로 매번 서버에 확인한다 (바뀌지 않았으면 304)
+            cacheControl { listOf(io.ktor.http.CacheControl.NoCache(null)) }
+        }
     }
 }
 
 private const val MODEL_ID = "vesta"
+internal const val SESSION_COOKIE = "vesta_session"
+
+/** localhost·루프백과 Tailscale MagicDNS 이름, 설정에 적은 이름만 받는다 */
+internal fun hostAllowed(host: String, allowed: Set<String>): Boolean {
+    val name = host.lowercase().removePrefix("[").removeSuffix("]")
+    return name in setOf("localhost", "127.0.0.1", "::1") || name.endsWith(".ts.net") || name in allowed
+}
 
 /** OpenAI 호환 경로에서는 승인 화면이 없으므로 위험 작업은 거부한다 */
 private suspend fun autoDeny(deps: ServerDeps, event: AgentEvent.ApprovalRequested) {
@@ -200,12 +299,16 @@ private fun chunk(id: String, content: String?, finish: String?, session: String
     })
 }.toString()
 
+private fun dev.vesta.storage.WebSession.toMe() = MeDto(name, user.role.name, csrf)
+
 private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, body: String) =
     respondText(body, ContentType.Application.Json, status)
 
 /** `text/event-stream`으로 `data: …` 줄을 흘려보낸다 (POST 요청이라 SSE 플러그인 대신 직접 쓴다) */
 private suspend fun ApplicationCall.sse(block: suspend (emit: suspend (String) -> Unit) -> Unit) {
     response.header(HttpHeaders.CacheControl, "no-cache")
+    // 프록시(Tailscale serve 등)가 모아서 보내지 않게
+    response.header("X-Accel-Buffering", "no")
     respondTextWriter(ContentType.Text.EventStream) {
         block { data ->
             write("data: $data\n\n")
@@ -214,8 +317,33 @@ private suspend fun ApplicationCall.sse(block: suspend (emit: suspend (String) -
     }
 }
 
+/** Tailscale serve는 HTTPS를 받아 이 서버(HTTP)로 넘긴다 */
+private fun ApplicationCall.isHttps(): Boolean =
+    request.origin.scheme == "https" || request.header("X-Forwarded-Proto") == "https" || request.host().endsWith(".ts.net")
+
+/**
+ * 요청한 사용자. Bearer 토큰(CLI)이면 OWNER, 세션 쿠키(웹 UI)면 그 사용자.
+ * 쿠키 인증의 GET 외 요청은 CSRF 헤더가 세션 값과 같아야 한다. 실패하면 응답을 보내고 null.
+ */
+private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
+    if (request.header(HttpHeaders.Authorization) != null) return if (bearer(deps.token)) deps.owner else null
+    val session = request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) }
+    if (session == null) {
+        respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
+        return null
+    }
+    if (request.httpMethod != HttpMethod.Get && request.httpMethod != HttpMethod.Head) {
+        val given = request.header(CSRF_HEADER).orEmpty()
+        if (!MessageDigest.isEqual(given.toByteArray(), session.csrf.toByteArray())) {
+            respondJson(HttpStatusCode.Forbidden, """{"error":"CSRF 확인 실패"}""")
+            return null
+        }
+    }
+    return session.user
+}
+
 /** Bearer 토큰 확인 (시간 차 공격을 피하려고 고정 시간 비교) */
-private suspend fun ApplicationCall.authorized(token: String): Boolean {
+private suspend fun ApplicationCall.bearer(token: String): Boolean {
     val given = request.header(HttpHeaders.Authorization)?.removePrefix("Bearer ")?.trim().orEmpty()
     val ok = MessageDigest.isEqual(given.toByteArray(), token.toByteArray())
     if (!ok) respondJson(HttpStatusCode.Unauthorized, """{"error":"토큰이 필요합니다 (Authorization: Bearer …)"}""")

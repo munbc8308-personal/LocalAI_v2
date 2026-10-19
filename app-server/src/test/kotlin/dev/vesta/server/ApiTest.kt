@@ -20,7 +20,11 @@ import dev.vesta.core.tools.ApprovalDetails
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import dev.vesta.app.PasswordHasher
+import dev.vesta.storage.VestaDatabase
+import dev.vesta.storage.WebAuthRepository
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.header
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -30,6 +34,7 @@ import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.time.Instant
+import kotlin.io.path.createTempDirectory
 
 private class FakeConversation : ConversationService {
     val decisions = mutableListOf<Pair<String, ApprovalDecision>>()
@@ -96,5 +101,53 @@ class ApiTest : FunSpec({
         stream shouldContain "chat.completion.chunk"
         stream shouldContain "data: [DONE]"
         client.get("/v1/models") { bearerAuth("secret") }.bodyAsText() shouldContain "\"id\":\"vesta\""
+    } }
+
+    fun webDeps(): ServerDeps {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val repo = WebAuthRepository(db.db)
+        kotlinx.coroutines.runBlocking { repo.setPasswordHash(owner, PasswordHasher.hash("correct horse")) }
+        return ServerDeps(conversation, NoSessions, NoMessages, UserContext(owner, UserRole.OWNER), token = "secret", version = "t", auth = WebAuth(repo))
+    }
+
+    test("웹 로그인: 쿠키로 조회하고, POST는 CSRF 헤더가 있어야 한다") { testApplication {
+        val deps = webDeps()
+        application { vestaApi(deps) }
+        client.post("/api/login") { setBody("""{"password":"wrong"}""") }.status shouldBe HttpStatusCode.Unauthorized
+        val login = client.post("/api/login") { setBody("""{"password":"correct horse"}""") }
+        login.status shouldBe HttpStatusCode.OK
+        val setCookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty()
+        setCookie shouldContain "HttpOnly"
+        setCookie shouldContain "SameSite=Strict"
+        val cookie = setCookie.substringBefore(';')
+        val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText()).csrf
+
+        client.get("/api/sessions") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.OK
+        client.get("/api/me") { header("Cookie", cookie) }.bodyAsText() shouldContain csrf
+        client.post("/api/chat") { header("Cookie", cookie); setBody("""{"text":"hi"}""") }.status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/chat") { header("Cookie", cookie); header("X-Vesta-CSRF", "x$csrf"); setBody("""{"text":"hi"}""") }.status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/chat") { header("Cookie", cookie); header("X-Vesta-CSRF", csrf); setBody("""{"text":"hi"}""") }.bodyAsText() shouldContain "\"type\":\"done\""
+        conversation.lastChannel shouldBe ChannelType.WEB
+        // OpenAI 호환 경로는 쿠키로 열 수 없다
+        client.get("/v1/models") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Unauthorized
+
+        client.post("/api/logout") { header("Cookie", cookie); header("X-Vesta-CSRF", csrf) }.status shouldBe HttpStatusCode.OK
+        client.get("/api/sessions") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Unauthorized
+    } }
+
+    test("연속으로 틀리면 잠긴다") { testApplication {
+        val deps = webDeps()
+        application { vestaApi(deps) }
+        repeat(5) { client.post("/api/login") { setBody("""{"password":"x"}""") } }
+        client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+    } }
+
+    test("모르는 Host는 거부한다 (DNS 리바인딩 방지)") { testApplication {
+        application { vestaApi(deps) }
+        client.get("/api/health") { header("Host", "evil.example.com") }.status shouldBe HttpStatusCode.Forbidden
+        client.get("/api/health") { header("Host", "127.0.0.1:8787") }.status shouldBe HttpStatusCode.OK
+        client.get("/api/health") { header("Host", "mac.tail1234.ts.net") }.status shouldBe HttpStatusCode.OK
+        client.get("/api/health").headers["Content-Security-Policy"].orEmpty() shouldContain "default-src 'self'"
     } }
 })

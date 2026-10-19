@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M8 완료 (v2.9, 2026-10-19)
+> 상태: M0~M9 완료 (v3.0, 2026-10-19)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -35,6 +35,7 @@
 | v2.7 | 2026-10-19 | **M6a Apple 앱 연동**: MCP stdio 클라이언트, Orchard 도구 52개를 위험 등급 매핑해 연결, PersonalAgent(D11 앱 그룹 선택), OWNER 전용, 거부된 작업 시스템 표시. 13.8 진행 기록 |
 | v2.8 | 2026-10-19 | **M7 품질 고도화**: 결정 모델 판정 D4·D6·D7·D8·D10, 질의 재작성(K-09)·재검색(W-10), 후속 질문 이어가기, git diff 리뷰(D-05)·패치 적용(D-06), `vesta eval all`. 12장 품질 목표 4개 모두 충족. 13.9 진행 기록 |
 | v2.9 | 2026-10-19 | **M8 서버·API**: app-server(Ktor, 127.0.0.1:8787), Vesta API(SSE)·OpenAI 호환 API, 키체인 토큰, CLI 원격/임베디드 자동 선택, launchd 상시 실행. 13.10 진행 기록 |
+| v3.0 | 2026-10-19 | **M9 웹 UI**: 시제품 비교로 웹 UI 기술을 Compose Multiplatform Web(Wasm) → **Compose HTML(Kotlin/JS, DOM)** 로 변경(사용자 결정). `api-model` KMP(JVM + JS), `web-ui` 모듈, 비밀번호 로그인(Argon2id)·세션 쿠키·CSRF·Host 검사, `vesta passwd`, Tailscale serve 스크립트. 13.11 진행 기록 |
 
 ---
 
@@ -473,9 +474,9 @@ MoE 모델은 MLX에서 속도 이득이 특히 크므로 우선 검토한다.
 | 배포 | 빌드 결과(정적 파일)를 `app-server`가 함께 서빙. 별도 서버 불필요 |
 | 접근 | 기본 `127.0.0.1`만. 다른 기기(휴대폰 등)에서 쓰려면 **Tailscale**(개인 무료)로 접속. 공유기 포트 개방은 하지 않음 |
 | 인증 | 사용자별 비밀번호 로그인(Argon2) + 세션 쿠키, CSRF 방지. localhost 접속도 로그인 필요. 멀티 유저 전에는 OWNER 한 명 (7.12 U-02) |
-| 기술 | **Compose Multiplatform Web (Kotlin/Wasm)** 확정. Ktor Client(Wasm)로 서버 호출, `api-model` 공유 모듈 사용. Markdown 렌더링·코드 하이라이트는 KMP 라이브러리(예: multiplatform-markdown-renderer, Highlights) 후보로 M9에서 검증 |
+| 기술 | **Compose HTML (Kotlin/JS, DOM)** (v3.0에서 Wasm에서 변경, 13.11). 브라우저 fetch로 서버 호출(SSE는 fetch 스트림), `api-model` 공유 모듈 사용. Markdown은 직접 만든 파서로 DOM 요소를 만든다(HTML 문자열 삽입 없음). 코드 하이라이트는 아직 없음(코드 글꼴·복사 버튼만) |
 
-웹 UI가 데스크톱 앱 역할을 대신하므로 **Compose Desktop 앱은 보류**한다. 웹 UI를 Compose로 만들기 때문에, 나중에 데스크톱 앱이 필요하면 UI 코드 대부분을 재사용할 수 있다.
+웹 UI가 데스크톱 앱 역할을 대신하므로 **Compose Desktop 앱은 보류**한다. 웹 UI는 Compose 런타임(상태 관리)을 쓰지만 화면 요소는 HTML DOM이라, 데스크톱 앱이 필요해지면 상태·API 코드(`ChatController`, `api-model`)는 재사용하고 화면은 다시 만든다.
 
 ### 6.4 메신저 조사 (2026-10 기준)
 집 Mac에서 돌리므로 **외부에서 들어오는 연결(공개 webhook)이 필요 없는 방식**을 우선한다.
@@ -1021,8 +1022,9 @@ class McpTool(                                          // MCP 도구를 Vesta T
 | 코드 파싱 | tree-sitter (JVM 바인딩) | P1 |
 | Git | JGit 또는 `git` CLI | |
 | CLI | Clikt + JLine | |
-| 웹 UI | **Compose Multiplatform Web (Kotlin/Wasm)** | Kotlin 통일 |
-| 공유 모델 | Kotlin Multiplatform (`api-model`: JVM + Wasm) | 서버·웹 UI가 같은 DTO 사용, kotlinx.serialization |
+| 웹 UI | **Compose HTML (Kotlin/JS)** 1.12 | Kotlin 통일. 휴대폰 한글 입력·복사·용량(약 920KB, gzip 전송) 때문에 Wasm 대신 선택 (13.11) |
+| 공유 모델 | Kotlin Multiplatform (`api-model`: JVM + JS) | 서버·CLI·웹 UI가 같은 DTO 사용, kotlinx.serialization |
+| 비밀번호 해시 | Bouncy Castle Argon2id | 웹 UI 로그인 |
 | Telegram | Bot API 직접 호출(Ktor Client) 또는 ktgbotapi | long polling |
 | Discord | Kord | Kotlin 코루틴 기반 |
 | Slack | Bolt for Java (Socket Mode) | Kotlin에서 사용 |
@@ -1066,8 +1068,8 @@ vesta/   (저장소 폴더: LocalAI/)
 ├── storage/       # SQLite, 세션/문서/캐시 저장
 ├── app-cli/       # CLI 진입점
 ├── app-server/    # 상시 실행 서버 본체: Ktor API, 채널 어댑터 기동, 웹 UI 서빙
-├── api-model/     # KMP 공유 모듈 (JVM + Wasm): 요청/응답 DTO, AgentEvent 직렬화 모델
-├── web-ui/        # Compose Multiplatform Web (Kotlin/Wasm). 빌드 결과를 app-server가 서빙
+├── api-model/     # KMP 공유 모듈 (JVM + JS): 요청/응답 DTO, AgentEvent 직렬화 모델
+├── web-ui/        # Compose HTML (Kotlin/JS). 빌드 결과를 app-server가 서빙
 ├── build-logic/   # Gradle convention plugin (Kotlin/JVM 공통 설정, 테스트 설정)
 └── gradle/libs.versions.toml   # 버전 카탈로그 (의존성 버전 한 곳에서 관리)
 ```
@@ -1099,7 +1101,7 @@ app-cli / app-server
 - 하위 모듈은 상위 모듈을 참조하지 않는다 (예: `knowledge` → `agents` 금지). 순환 의존 금지.
 - 모듈 간 통신은 `core`의 인터페이스로 한다. 구현체 연결(DI)은 `app-*` 모듈에서 한다.
 - 각 모듈은 단독으로 테스트 가능해야 한다 (외부 엔진은 가짜 구현으로 대체).
-- `api-model`은 Kotlin Multiplatform(JVM + Wasm) 모듈로, `app-server`와 `web-ui`만 의존한다. JVM 전용 라이브러리를 넣지 않는다.
+- `api-model`은 Kotlin Multiplatform(JVM + JS) 모듈로, `app-common`(core 타입 변환 `ApiMapping.kt`)·`app-server`·`app-cli`·`web-ui`가 의존한다. JVM 전용 라이브러리를 넣지 않는다.
 - 채널 어댑터는 `conversation`만 의존한다. 라우터·에이전트를 직접 호출하지 않는다.
 - `identity`는 `core`·`storage`만 의존하고, `conversation`이 모든 요청 앞에서 호출한다. `media`·`training`은 `core`·`inference`·`storage`만 의존한다.
 - `mcp`는 `tools`의 `Tool` 인터페이스를 구현하고 `core`에만 의존한다. `agents`는 `tools`를 통해서만 MCP 도구를 쓴다.
@@ -1539,6 +1541,60 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 #### 남은 일
 - 메신저·웹 UI가 붙을 채널 어댑터 구조(M9·M10), 서버에서 Orchard 상태 시험 호출, 로그 보관 정책.
 
+### 13.11 M9 진행 기록 (2026-10-19)
+
+#### 웹 UI 기술 시제품 비교 → Compose HTML로 변경
+| | Compose Multiplatform Web (Wasm) | Compose HTML (Kotlin/JS) |
+|---|---|---|
+| 내려받는 크기 | 약 12MB (skiko.wasm 8.25MB) | 시제품 526KB, 완성본 약 920KB (gzip 전송) |
+| 그리기 | canvas | 브라우저 DOM |
+| 한글 입력 (데스크톱 Chromium) | 됨 | 됨 |
+| 문제 | 코드 글꼴(monospace) 미적용, 버튼 글자 잘림, Markdown 렌더러·텍스트 선택 직접 구현 필요, iOS는 Safari 18.2+(WasmGC), 휴대폰 IME 미확인 | 없음 (브라우저 기본 IME·선택·복사) |
+
+완료 조건이 "휴대폰 브라우저에서 대화·승인"이라 **Compose HTML 채택** (사용자 결정). Kotlin·Compose 런타임은 그대로 쓴다.
+
+#### 완료
+- **빌드**: `api-model`을 KMP(JVM + JS)로 전환(`vesta.kotlin-multiplatform`), core 타입 변환은 `app-common`의 `ApiMapping.kt`로 이동. `web-ui` 모듈(`vesta.compose-web`), Node.js·Yarn 배포본 저장소는 `settings.gradle.kts`에 선언(프로젝트 저장소 금지 유지), `kotlin-js-store/yarn.lock` 커밋. `app-server`의 `processResources`가 `web-ui` 빌드 결과를 클래스패스 `web/`에 넣어 서빙(gzip, `Cache-Control: no-cache`).
+- **로그인** (6.3, U-02):
+  - `vesta passwd`: 이 Mac 터미널에서만 비밀번호 설정(8자 이상). **Argon2id**(m=64MiB, t=3, p=1, PHC 문자열)로 `users.password_hash`에 저장. 바꾸면 모든 기기 로그아웃.
+  - `POST /api/login` → 무작위 32바이트 세션 쿠키 `vesta_session`(HttpOnly, SameSite=Strict, HTTPS면 Secure, 30일). DB(`web_session`, schema v8)에는 SHA-256만 저장.
+  - 연속 5번 실패하면 1분부터 두 배씩(최대 15분) 잠금. 없는 사용자도 해시를 계산해 시간 차를 없앰.
+  - **CSRF**: 쿠키 인증 요청 중 GET 외에는 `X-Vesta-CSRF` 헤더가 세션 값과 같아야 함(로그인·`GET /api/me` 응답으로 받음). SameSite=Strict와 이중 방어.
+  - Bearer 토큰(CLI)도 계속 받는다. `/v1/…`(OpenAI 호환)은 Bearer만, 쿠키로는 열 수 없음.
+- **보안 헤더·Host 검사**: 모든 응답에 CSP(`default-src 'self'`), `X-Frame-Options: DENY`, `nosniff`, `no-referrer`. Host가 localhost·127.0.0.1·`*.ts.net`·`server.allowedHosts`가 아니면 403 (서버 쪽 DNS 리바인딩 방지).
+- **API 추가**: `POST /api/login`·`/api/logout`, `GET /api/me`, `GET /api/collections`(문서·조각 수), `GET /api/dashboard`(엔진 상태, 역할별 모델, 로드된 모델·메모리 예산).
+- **웹 UI 화면**:
+  - 로그인.
+  - 대화: SSE 스트리밍(fetch 스트림, 중지하면 요청을 끊어 서버도 생성 중단), 라우팅 표시, 도구 실행 줄, 출처(답변에 인용된 번호만, 웹 출처는 링크), 근거 미확인 문장 경고(D7), 생각 중·상태 표시.
+  - 승인 카드: 위험도, D8 경고, 셸은 명령 수정 후 승인, 거부. 처리 결과·만료 표시.
+  - 대화 목록(휴대폰은 서랍), 기록 불러오기, 새 대화.
+  - 컬렉션: 목록, 누르면 `@이름`을 입력란에 넣음.
+  - 상태: 엔진·모델·메모리.
+- **Markdown**: 직접 만든 파서(제목·목록·인용·표·코드 블록·굵게·기울임·인라인 코드·링크·출처 번호·`$수식$`)가 DOM 요소를 만든다. **HTML 문자열을 끼워 넣지 않아** 답변·웹 자료 속 HTML·스크립트는 글자로만 보이고, 링크는 http(s)만.
+- **입력**: 한글 조합 중 Enter는 보내지 않음(`isComposing`·keyCode 229). 터치 기기는 Enter가 줄바꿈, 보내기는 버튼. iOS 확대 방지(16px), 안전 영역(notch) 여백.
+- **원격 접속**: `scripts/tailscale-serve.sh` — 서버는 127.0.0.1에 둔 채 `tailscale serve`가 tailnet 안에서만 HTTPS로 넘긴다(Funnel·포트 개방 없음).
+- **테스트**: 서버(로그인·쿠키·CSRF 거부·로그아웃·잠금·Host 거부·CSP), 저장소(세션 만료·비밀번호 변경 시 삭제), Argon2(검증·형식 오류), Markdown 파서(Node.js, 위험한 링크는 글자로).
+
+#### 확인 (Playwright, 390×844 휴대폰 화면, 평가용 홈 `~/.vesta-eval`·포트 8790)
+- 틀린 비밀번호 → "비밀번호가 맞지 않습니다", 맞으면 대화 화면.
+- 코드 질문 → 코드 도우미, 코드 블록·표 정상 스트리밍.
+- 셸 요청 → 승인 카드 → 명령을 `ls -la` → `ls -l`로 **고쳐서 승인** → 고친 명령으로 실행(점 파일 없는 결과).
+- 셸 요청 → **거부** → 실행 안 됨(파일 생성 안 됨), "※ 실행하지 않은 작업" 표시.
+- `@b` 문서 질문 → 출처 번호·출처 목록. 대화 목록 서랍·기록 불러오기, 컬렉션·상태 화면.
+- 모델에게 `<img onerror=…>`를 그대로 출력시킴 → 글자로만 표시, 스크립트 실행 안 됨.
+- 데스크톱 폭(1280px)에서 대화 목록이 옆에 고정.
+
+#### 발견·수정
+- Compose HTML 이벤트 핸들러가 이전 화면의 값을 잡고 있어 Enter로 보내지지 않음 → 보낼 때 입력란 값을 직접 읽음. 같은 이유로 **승인 버튼이 수정 전 명령으로 승인할 위험** → 누를 때 수정 여부를 다시 계산.
+- JS 정규식(u 플래그)에서 이스케이프하지 않은 `]`가 오류 → 화면 전체가 그려지지 않음. 수정.
+- 승인 카드가 화면 아래에 가려짐 → 도구·승인 요청이 오면 항상 맨 아래로 스크롤.
+- 세션 시각이 UTC로 보임 → 브라우저 시간대로.
+
+#### 남은 일
+- **실기기 확인**: 이 Mac에 Tailscale이 설치돼 있지 않다. 설치·로그인 후 `scripts/tailscale-serve.sh` → 휴대폰에서 접속해 한글 입력·승인 확인.
+- 휴대폰 화면이 꺼지면 SSE 연결이 끊겨 진행 중인 답변이 멈춘다(승인 대기도 취소). 다시 연결해 이어 받기는 아직 없음.
+- 코드 하이라이트, 컬렉션 추가·재색인을 웹에서, 설정·라우팅 로그 화면 (6.3 관리 항목 일부).
+
 ---
 
 ## 14. 결정 사항 / 남은 질문
@@ -1561,7 +1617,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 채널 구조: 모든 채널이 ConversationService 공유, 어댑터만 추가
 - 메신저 1순위: Telegram (long polling, 공개 주소 불필요). 카카오톡·LINE·WhatsApp은 보류/제외
 - 데스크톱 앱(Compose Desktop): 보류, 웹 UI로 대체
-- Kotlin 우선 원칙: 웹 UI도 Compose Multiplatform Web(Kotlin/Wasm), 서버·웹 공유 모델은 KMP `api-model`
+- Kotlin 우선 원칙: 웹 UI도 Kotlin — **Compose HTML(Kotlin/JS)** (v3.0, Wasm 시제품 비교 후 변경), 서버·웹 공유 모델은 KMP `api-model`
 - 메신저: Telegram → Discord · Slack 순. Signal·Matrix 보류
 - 메신저 답변에 로컬 문서·코드 내용 포함 허용
 - 메신저 셸 승인 허용 (OWNER 계정만, 1회용, 5분 만료, 차단 목록 동일 적용)
@@ -1574,7 +1630,8 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 없음. M0(준비) 단계 진행 가능.
 
 ### 구현 중 확인할 리스크
-- Compose Multiplatform Web(Wasm)의 Markdown·코드 하이라이트·텍스트 선택 품질 (M9 초반에 시제품으로 확인)
+- ~~Compose Multiplatform Web(Wasm)의 Markdown·텍스트 선택 품질~~ → M9 시제품으로 확인, Compose HTML로 변경 (13.11)
+- 휴대폰 실기기(iOS Safari·Android Chrome)의 한글 입력·SSE 스트리밍·화면 잠금 시 연결 끊김 (데스크톱 Chromium 390px 화면으로만 확인, Tailscale 설치 후 실기기 확인 필요)
 - Laya 한국어 정확도 (M4, 부족하면 `decider`)
 - Ollama MLX 엔진이 아직 프리뷰 (M0 벤치마크에서 안정성 확인)
 - Orchard는 v0.6.x 초기 버전이라 도구 이름·스키마가 바뀔 수 있음. 시작 시 `tools/list`로 받고, 그룹 분류는 이름 접두사 규칙으로 처리해 변경에 견디게 한다

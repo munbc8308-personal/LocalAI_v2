@@ -133,3 +133,16 @@ object ToolRuns : LongIdTable("tool_run") {
     val durationMs = long("duration_ms")
     val createdAt = timestamp("created_at")
 }
+
+/**
+ * 웹 UI 로그인 세션 (M9, PROJECT.md 6.3·U-02). 쿠키 값은 저장하지 않고 SHA-256 해시만 둔다.
+ * [csrf]는 쿠키로 인증한 POST 요청이 `X-Vesta-CSRF` 헤더로 함께 보내야 하는 값.
+ */
+object WebSessions : LongIdTable("web_session") {
+    val tokenHash = varchar("token_hash", 64).uniqueIndex()
+    val userId = long("user_id").index()
+    val csrf = varchar("csrf", 64)
+    val userAgent = varchar("user_agent", 255).nullable()
+    val createdAt = timestamp("created_at")
+    val expiresAt = timestamp("expires_at")
+}

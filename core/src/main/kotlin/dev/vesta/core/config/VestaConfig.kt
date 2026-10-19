@@ -19,6 +19,8 @@ data class VestaConfig(
 data class ServerConfig(
     val host: String = "127.0.0.1",
     val port: Int = 8787,
+    /** 웹 UI를 받을 추가 Host 이름 (DNS 리바인딩 방지). localhost·127.0.0.1·Tailscale `*.ts.net`은 항상 허용 */
+    val allowedHosts: List<String> = emptyList(),
 ) {
     val baseUrl: String get() = "http://$host:$port"
 }

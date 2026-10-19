@@ -41,3 +41,6 @@ infra/searxng/.env
 ### IntelliJ (로컬 설정) ###
 .idea/
 *.iml
+
+### Playwright (시제품 확인용) ###
+.playwright-mcp/

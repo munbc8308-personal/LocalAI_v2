@@ -1,12 +1,13 @@
 package dev.vesta.api
 
-import dev.vesta.core.agent.AgentEvent
-import dev.vesta.core.decision.RoutingDecision
-import dev.vesta.core.decision.RoutingStage
-import dev.vesta.core.knowledge.Evidence
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+/**
+ * 서버(JVM)·CLI·웹 UI(JS)가 함께 쓰는 API 형식 (PROJECT.md 1.4, 10장). Kotlin Multiplatform 공통 코드라 JVM 전용 타입을 쓰지 않는다.
+ * core 타입과의 변환은 app-common `ApiMapping.kt`에 있다.
+ */
 
 /** Vesta API JSON (`/api/…`). 이벤트는 `type` 필드로 구분한다. */
 val ApiJson = Json {
@@ -70,59 +71,44 @@ sealed interface EventDto {
     @Serializable @SerialName("error") data class Error(val message: String) : EventDto
 }
 
-fun AgentEvent.toDto(): EventDto = when (this) {
-    is AgentEvent.SessionReady -> EventDto.Session(sessionId.value, title, created)
-    is AgentEvent.Routed -> EventDto.Routed(decision.toDto())
-    is AgentEvent.Status -> EventDto.Status(text)
-    is AgentEvent.Reasoning -> EventDto.Reasoning(text)
-    is AgentEvent.Sources -> EventDto.Sources(evidence.map { it.toDto() })
-    is AgentEvent.ToolStarted -> EventDto.ToolStarted(callId, tool, risk.name, summary)
-    is AgentEvent.ToolFinished -> EventDto.ToolFinished(callId, tool, ok, summary)
-    is AgentEvent.ApprovalRequested -> EventDto.Approval(
-        requestId, tool, risk.name, details.title, details.body, details.warning, reason, editableField, editableValue,
-    )
-    is AgentEvent.Grounding -> EventDto.Grounding(checked, unsupported)
-    is AgentEvent.Token -> EventDto.Token(text)
-    is AgentEvent.Done -> EventDto.Done(agent.name, model, usage?.promptTokens, usage?.completionTokens)
-    is AgentEvent.Error -> EventDto.Error(message)
-}
+// --- 웹 UI (M9) ---
 
-fun Evidence.toDto() = EvidenceDto(citation, source.name, ref, title, location)
+@Serializable
+data class LoginDto(val password: String, /** 없으면 OWNER */ val name: String? = null)
 
-fun RoutingDecision.toDto() = RoutingDto(agent.name, requested?.name, stage.name, confidence, collections, latencyMs)
+/** 로그인한 사용자. [csrf]는 쿠키로 인증한 POST 요청의 `X-Vesta-CSRF` 헤더 값 */
+@Serializable
+data class MeDto(val name: String, val role: String, val csrf: String)
 
-/** 클라이언트(CLI 원격 모드)가 받은 이벤트를 다시 AgentEvent로 */
-fun EventDto.toEvent(): AgentEvent = when (this) {
-    is EventDto.Session -> AgentEvent.SessionReady(dev.vesta.core.SessionId(sessionId), title, created)
-    is EventDto.Routed -> AgentEvent.Routed(
-        RoutingDecision(
-            agent = dev.vesta.core.AgentType.valueOf(routing.agent),
-            confidence = routing.confidence,
-            stage = RoutingStage.valueOf(routing.stage),
-            collections = routing.collections,
-            question = "",
-            latencyMs = routing.latencyMs,
-            requested = routing.requested?.let { dev.vesta.core.AgentType.valueOf(it) },
-        ),
-    )
-    is EventDto.Status -> AgentEvent.Status(text)
-    is EventDto.Reasoning -> AgentEvent.Reasoning(text)
-    is EventDto.Sources -> AgentEvent.Sources(evidence.map {
-        Evidence(dev.vesta.core.SourceType.valueOf(it.source), it.ref, it.title, it.location, "", 0.0, it.citation)
-    })
-    is EventDto.ToolStarted -> AgentEvent.ToolStarted(callId, tool, dev.vesta.core.RiskLevel.valueOf(risk), summary)
-    is EventDto.ToolFinished -> AgentEvent.ToolFinished(callId, tool, ok, summary)
-    is EventDto.Approval -> AgentEvent.ApprovalRequested(
-        requestId, tool, dev.vesta.core.RiskLevel.valueOf(risk), dev.vesta.core.tools.ApprovalDetails(title, body, warning), reason, editableField, editableValue,
-    )
-    is EventDto.Grounding -> AgentEvent.Grounding(checked, unsupported)
-    is EventDto.Token -> AgentEvent.Token(text)
-    is EventDto.Done -> AgentEvent.Done(
-        dev.vesta.core.AgentType.valueOf(agent), model,
-        if (promptTokens != null && completionTokens != null) dev.vesta.core.inference.Usage(promptTokens, completionTokens) else null,
-    )
-    is EventDto.Error -> AgentEvent.Error(message)
-}
+@Serializable
+data class CollectionDto(
+    val name: String,
+    /** DOCS / CODE */
+    val kind: String,
+    val description: String?,
+    val rootPath: String?,
+    val embeddingModel: String,
+    val documents: Long,
+    val chunks: Long,
+)
+
+@Serializable
+data class LoadedModelDto(val name: String, val sizeBytes: Long, val gpuBytes: Long)
+
+@Serializable
+data class DashboardDto(
+    val version: String,
+    /** 엔진·서비스 이름 → 상태 설명 */
+    val checks: Map<String, String>,
+    /** 역할(general, code, embedding, decision…) → 모델 이름 */
+    val models: Map<String, String>,
+    val loaded: List<LoadedModelDto>,
+    val memoryTotalBytes: Long,
+    val memoryBudgetBytes: Long,
+)
+
+/** 쿠키 인증 POST 요청에 붙이는 CSRF 헤더 */
+const val CSRF_HEADER = "X-Vesta-CSRF"
 
 // --- OpenAI 호환 API (I-03, 필요한 필드만) ---
 

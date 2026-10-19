@@ -75,6 +75,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val owner = UserContext(database.ensureOwner(System.getProperty("user.name") ?: "owner"), UserRole.OWNER)
 
     val sessions = ExposedSessionRepository(database.db)
+    /** 웹 UI 비밀번호·로그인 세션 (M9) */
+    val webAuth = dev.vesta.storage.WebAuthRepository(database.db)
     val messages = ExposedMessageRepository(database.db)
     val inference = OpenAiCompatibleClient(config.inference.baseUrl, http)
     val modelManager = ModelManager(
