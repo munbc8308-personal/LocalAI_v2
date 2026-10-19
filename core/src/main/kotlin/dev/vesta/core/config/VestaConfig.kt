@@ -12,7 +12,16 @@ data class VestaConfig(
     val memory: MemoryConfig = MemoryConfig(),
     val mcp: McpConfig = McpConfig(),
     val tools: ToolsConfig = ToolsConfig(),
+    val server: ServerConfig = ServerConfig(),
 )
+
+/** 상시 실행 서버 (PROJECT.md 6.2, I-02·I-03). 기본은 이 Mac에서만 접속. */
+data class ServerConfig(
+    val host: String = "127.0.0.1",
+    val port: Int = 8787,
+) {
+    val baseUrl: String get() = "http://$host:$port"
+}
 
 /** 작업 도구 (PROJECT.md 7.7, 셸 실행 정책). */
 data class ToolsConfig(

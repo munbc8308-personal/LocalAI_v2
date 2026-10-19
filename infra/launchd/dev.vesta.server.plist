@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Vesta 상시 실행 서버 (PROJECT.md 6.2, I-02). 로그인 시 시작, 죽으면 다시 띄움, 실행 중 유휴 잠자기 방지(caffeinate -i).
+     scripts/install-vesta.sh가 __HOME__·__JAVA_HOME__을 바꿔 설치한다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>__HOME__/.vesta/app/server/bin/vesta-server</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JAVA_HOME</key>
+        <string>__JAVA_HOME__</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key>
+        <string>ko_KR.UTF-8</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/server.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/server.err.log</string>
+</dict>
+</plist>

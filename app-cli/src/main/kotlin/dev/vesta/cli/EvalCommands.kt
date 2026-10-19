@@ -1,5 +1,8 @@
 package dev.vesta.cli
 
+import dev.vesta.app.AppContainer
+import dev.vesta.app.MacSystem
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.parameters.options.default

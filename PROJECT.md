@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M7 완료 (v2.8, 2026-10-19)
+> 상태: M0~M8 완료 (v2.9, 2026-10-19)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -34,6 +34,7 @@
 | v2.6 | 2026-10-18 | **M6 작업 에이전트**: 도구 호출 루프, 승인 정책(WRITE 승인·EXEC 매번 승인·셸 수정 후 승인), 경로 제한, 기본 도구 11종, 셸 정책, TaskAgent, tool_run 기록. 13.7 진행 기록 |
 | v2.7 | 2026-10-19 | **M6a Apple 앱 연동**: MCP stdio 클라이언트, Orchard 도구 52개를 위험 등급 매핑해 연결, PersonalAgent(D11 앱 그룹 선택), OWNER 전용, 거부된 작업 시스템 표시. 13.8 진행 기록 |
 | v2.8 | 2026-10-19 | **M7 품질 고도화**: 결정 모델 판정 D4·D6·D7·D8·D10, 질의 재작성(K-09)·재검색(W-10), 후속 질문 이어가기, git diff 리뷰(D-05)·패치 적용(D-06), `vesta eval all`. 12장 품질 목표 4개 모두 충족. 13.9 진행 기록 |
+| v2.9 | 2026-10-19 | **M8 서버·API**: app-server(Ktor, 127.0.0.1:8787), Vesta API(SSE)·OpenAI 호환 API, 키체인 토큰, CLI 원격/임베디드 자동 선택, launchd 상시 실행. 13.10 진행 기록 |
 
 ---
 
@@ -1504,6 +1505,39 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 
 #### 남은 일 (이전 기록에서 M7로 미뤘던 것 중)
 - 출처 DB 저장(11장 Evidence), 리랭커 재평가(문서가 늘면), 검색어에 로컬 문서 문장이 섞였는지 검사, DNS rebinding용 연결 IP 고정, 파일 쓰기 승인 화면의 diff 표시.
+
+### 13.10 M8 진행 기록 (2026-10-19)
+
+#### 완료
+- **모듈**: `app-common`(AppContainer·MacSystem·ApiToken — CLI와 서버가 같은 구성을 씀), `api-model`(이벤트·요청 DTO, `type` 필드로 구분. M9에서 KMP로 전환), `app-server`(Ktor CIO).
+- **API** (기본 `127.0.0.1:8787`, `server.host`·`server.port`):
+
+  | 경로 | 내용 | 인증 |
+  |------|------|------|
+  | `GET /api/health` | 버전, Ollama·Orchard 상태 | 없음 (서버가 떠 있는지 확인용) |
+  | `POST /api/chat` | `{text, sessionId?, channel}` → SSE `data: {"type":"token",…}` (session·routed·status·sources·tool_started·tool_finished·approval·grounding·token·done·error) | Bearer |
+  | `POST /api/approvals/{id}` | `{decision: approve/deny/edit, edited}` | Bearer |
+  | `GET /api/sessions`, `/api/sessions/{id}/messages` | 세션·메시지 | Bearer |
+  | `GET /v1/models`, `POST /v1/chat/completions` | OpenAI 호환 (stream/비stream), `X-Vesta-Session`으로 대화 이어가기(스트리밍은 첫 조각의 `vesta_session`) | Bearer |
+
+- **OpenAI 호환 경로의 승인**: 승인 화면이 없으므로 쓰기·셸·보내기 도구는 **자동 거부**("CLI·웹 UI에서 요청하세요").
+- **인증**: 모든 요청에 Bearer 토큰(localhost 포함). 토큰은 서버가 처음 뜰 때 만들어 **macOS 키체인**(서비스 `dev.vesta`, 계정 `api-token`)에 저장, 고정 시간 비교. 확인: `security find-generic-password -s dev.vesta -a api-token -w`.
+- **CLI**: `vesta chat`은 서버가 떠 있고 토큰이 있으면 **원격 모드**(서버의 클라이언트), 아니면 **임베디드 모드**. `--local`·`--model`이면 항상 임베디드. 원격에서도 스트리밍·승인·세션 이어가기 동일.
+- **상시 실행**: `scripts/install-vesta.sh` → `~/.vesta/app/{cli,server}` 설치, `~/.local/bin/vesta` 링크, launchd `dev.vesta.server` 등록(로그인 시 시작 `RunAtLoad`, 죽으면 재시작 `KeepAlive`, `caffeinate -i`로 실행 중 유휴 잠자기 방지, `JAVA_HOME` 지정). `scripts/install-launchd.sh`는 bootout 완료를 기다린 뒤 재시도하며 등록.
+- **`vesta status`**: 서버 실행·토큰 여부 표시.
+- **테스트**: 99개 통과 (Ktor testApplication: 인증, SSE, 승인, OpenAI 호환·자동 거부).
+
+#### 확인
+- 토큰 없이 `/v1/models` → 401. 토큰으로 OpenAI 호환 호출(비스트리밍·스트리밍) 성공, 세션 헤더 반환.
+- `vesta chat`(설치본) → "서버 http://127.0.0.1:8787" 원격 모드 → 작업 에이전트 → 셸 승인 화면 → 승인 → 실행 결과.
+- 서버 프로세스 `kill -9` → launchd가 다시 띄움(`runs = 2`), health 정상.
+- 재부팅: LaunchAgent는 **사용자 로그인 시** 시작된다(키체인 토큰도 로그인 세션에서 열림). 직접 재부팅 시험은 하지 않았다 — 로그아웃·로그인 또는 재부팅 후 `vesta status`로 확인 필요.
+
+#### 발견·수정
+- `install-launchd.sh`가 `bootout` 직후 `bootstrap`해 오류 5로 실패하고, `set -e`로 멈추면서 **Ollaya가 내려간 채로 남음** → 내려갈 때까지 기다리고 최대 5회 재시도. 즉시 복구함.
+
+#### 남은 일
+- 메신저·웹 UI가 붙을 채널 어댑터 구조(M9·M10), 서버에서 Orchard 상태 시험 호출, 로그 보관 정책.
 
 ---
 

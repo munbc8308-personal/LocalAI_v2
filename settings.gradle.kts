@@ -34,5 +34,8 @@ include(
     "mcp",
     "agents",
     "conversation",
+    "app-common",
+    "api-model",
     "app-cli",
+    "app-server",
 )

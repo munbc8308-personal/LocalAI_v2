@@ -17,13 +17,22 @@ for template in $TEMPLATES; do
     label=$(basename "$template" .plist)
     target="$AGENTS/$label.plist"
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+    # bootout은 비동기라, 완전히 내려간 뒤에 다시 올려야 bootstrap이 실패하지 않는다 (오류 5)
+    i=0
+    while launchctl print "$DOMAIN/$label" >/dev/null 2>&1 && [ $i -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
     if [ "${1:-}" = "--uninstall" ]; then
         rm -f "$target"
         echo "제거: $label"
         continue
     fi
-    sed "s|__HOME__|$HOME|g" "$template" >"$target"
+    JAVA_HOME_DIR=${JAVA_HOME:-$(/usr/libexec/java_home 2>/dev/null || true)}
+    sed -e "s|__HOME__|$HOME|g" -e "s|__JAVA_HOME__|$JAVA_HOME_DIR|g" "$template" >"$target"
     plutil -lint "$target" >/dev/null
-    launchctl bootstrap "$DOMAIN" "$target"
+    n=0
+    until launchctl bootstrap "$DOMAIN" "$target" 2>/dev/null; do
+        n=$((n + 1))
+        [ $n -ge 5 ] && { echo "등록 실패: $label (launchctl bootstrap $DOMAIN $target)" >&2; exit 1; }
+        sleep 1
+    done
     echo "설치·시작: $label ($target)"
 done

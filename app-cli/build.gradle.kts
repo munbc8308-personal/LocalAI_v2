@@ -4,19 +4,10 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":core"))
-    implementation(project(":inference"))
-    implementation(project(":storage"))
-    implementation(project(":agents"))
-    implementation(project(":conversation"))
-    implementation(project(":knowledge"))
-    implementation(project(":retrieval"))
-    implementation(project(":web"))
-    implementation(project(":decision"))
-    implementation(project(":router"))
-    implementation(project(":tools"))
-    implementation(project(":mcp"))
+    implementation(project(":app-common"))
+    implementation(project(":api-model"))
     implementation(libs.clikt)
+    implementation(libs.bundles.ktor.client)
     implementation(libs.jline)
     implementation(libs.kotlin.logging)
     runtimeOnly(libs.logback.classic)

@@ -1,4 +1,4 @@
-package dev.vesta.cli
+package dev.vesta.app
 
 import dev.vesta.agents.ChatAgent
 import dev.vesta.agents.CodeAgent
@@ -68,7 +68,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
 
     private val http = HttpClients.local(config.inference.requestTimeoutSeconds)
     /** 평가 명령이 결정 모델을 바꿔 가며 만들 때 쓴다 */
-    internal val httpForEval get() = http
+    val httpForEval get() = http
     private val database = VestaDatabase.open(paths.database).also { it.migrate() }
 
     /** 단일 사용자 동안은 OWNER 한 명 (PROJECT.md 7.12). */

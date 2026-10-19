@@ -1,5 +1,8 @@
 package dev.vesta.cli
 
+import dev.vesta.app.AppContainer
+import dev.vesta.app.MacSystem
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import dev.vesta.core.config.ConfigLoader
@@ -42,6 +45,7 @@ class StatusCommand : CliktCommand(name = "status") {
                 async { checkOllaya(config, http) },
                 async { checkSearxng(config, http) },
                 async { checkOrchard(config) },
+                async { checkServer(config, http) },
             ).awaitAll()
         }
         checks.forEach { echo(it.format()) }
@@ -65,6 +69,13 @@ class StatusCommand : CliktCommand(name = "status") {
         require(response.status.isSuccess()) { "HTTP ${response.status.value} (JSON 형식이 꺼져 있으면 403)" }
         val results = Json.parseToJsonElement(response.bodyAsText()).jsonObject["results"]
         "JSON 검색 응답 정상 (결과 ${(results as? kotlinx.serialization.json.JsonArray)?.size ?: 0}건)"
+    }
+
+    private suspend fun checkServer(config: VestaConfig, http: HttpClient) = check("서버", config.server.baseUrl) {
+        val body = http.get("${config.server.baseUrl}/api/health").bodyAsText()
+        val version = Json.parseToJsonElement(body).jsonObject["version"]?.jsonPrimitive?.content
+        val token = if (dev.vesta.app.ApiToken.read() != null) "토큰 키체인에 있음" else "토큰 없음"
+        "v$version 실행 중 (launchd dev.vesta.server) · $token · vesta chat은 서버에 붙음"
     }
 
     private fun checkOrchard(config: VestaConfig): Check {
@@ -102,10 +113,3 @@ class StatusCommand : CliktCommand(name = "status") {
 }
 
 internal fun gb(bytes: Long) = "%.1fGB".format(bytes / 1024.0 / 1024.0 / 1024.0)
-
-internal object MacSystem {
-    fun totalMemoryBytes(): Long = runCatching {
-        val process = ProcessBuilder("/usr/sbin/sysctl", "-n", "hw.memsize").start()
-        process.inputStream.bufferedReader().readText().trim().toLong()
-    }.getOrElse { Runtime.getRuntime().maxMemory() }
-}

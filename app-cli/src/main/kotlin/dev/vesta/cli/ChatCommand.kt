@@ -1,5 +1,8 @@
 package dev.vesta.cli
 
+import dev.vesta.app.AppContainer
+import dev.vesta.app.MacSystem
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
@@ -33,30 +36,27 @@ class ChatCommand : CliktCommand(name = "chat") {
     private val model by option("--model", "-m", help = "이번 실행에서 쓸 메인 모델 (설정 대신)")
     private val showThinking by option("--show-thinking", help = "추론 모델의 생각 과정 표시").flag()
 
+    private val local by option("--local", help = "서버가 떠 있어도 이 프로세스에서 직접 실행 (임베디드)").flag()
+
     override fun run() = runBlocking {
-        AppContainer(generalOverride = model).use { app ->
-            val general = app.config.models.general
-            if (general == null || general.name.isBlank()) {
-                echo("메인 모델이 설정되지 않았습니다. ~/.vesta/config.yaml의 models.general을 설정하거나 --model을 주세요.", err = true)
-                throw ProgramResult(1)
-            }
+        openBackend().use { backend ->
             val terminal = TerminalBuilder.builder().system(true).build()
             val reader = LineReaderBuilder.builder()
                 .terminal(terminal)
                 .appName("vesta")
-                .variable(LineReader.HISTORY_FILE, app.paths.home.resolve("cli-history"))
+                .variable(LineReader.HISTORY_FILE, backend.home.resolve("cli-history"))
                 .build()
             val out = terminal.writer()
 
             var session: Session? = when {
-                sessionOption != null -> app.sessions.find(app.owner.userId, SessionId(sessionOption!!))
+                sessionOption != null -> backend.find(SessionId(sessionOption!!))
                     ?: run { echo("세션을 찾을 수 없습니다: $sessionOption", err = true); throw ProgramResult(1) }
-                continueLast -> app.sessions.listRecent(app.owner.userId, 1).firstOrNull()
+                continueLast -> backend.recent(1).firstOrNull()
                 else -> null
             }
 
-            out.println(dim("Vesta · 모델 ${general.name}${general.reasoningEffort?.let { " (생각 $it)" }.orEmpty()} · /help 명령 보기 · Ctrl+D 종료"))
-            session?.let { printHistory(out, app, it) }
+            out.println(dim("Vesta · ${backend.description} · /help 명령 보기 · Ctrl+D 종료"))
+            session?.let { printHistory(out, backend, it) }
             out.flush()
 
             while (true) {
@@ -79,22 +79,22 @@ class ChatCommand : CliktCommand(name = "chat") {
                             session = null
                             out.println(dim("새 대화를 시작합니다."))
                         }
-                        "/sessions" -> listSessions(out, app)
+                        "/sessions" -> listSessions(out, backend)
                         "/resume" -> {
-                            val target = resolveSession(app, arg)
+                            val target = resolveSession(backend, arg)
                             if (target == null) out.println(red("세션을 찾을 수 없습니다: ${arg.orEmpty()}"))
                             else {
                                 session = target
-                                printHistory(out, app, target)
+                                printHistory(out, backend, target)
                             }
                         }
-                        "/history" -> session?.let { printHistory(out, app, it) } ?: out.println(dim("아직 대화가 없습니다."))
+                        "/history" -> session?.let { printHistory(out, backend, it) } ?: out.println(dim("아직 대화가 없습니다."))
                     }
                     out.flush()
                     continue
                 }
 
-                session = generate(terminal, reader, app, session, line) ?: session
+                session = generate(terminal, reader, backend, session, line) ?: session
             }
             out.println(dim("종료합니다."))
             out.flush()
@@ -103,20 +103,36 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     /** 답변 하나를 스트리밍으로 출력한다. 생성 중 Ctrl+C면 중단한다. 이번 턴의 세션을 돌려준다. */
-    private suspend fun generate(terminal: Terminal, reader: LineReader, app: AppContainer, session: Session?, text: String): Session? {
+    /** 서버가 떠 있으면 원격, 아니면(또는 --local·--model) 임베디드 (PROJECT.md 6.2) */
+    private suspend fun openBackend(): ChatBackend {
+        if (!local && model == null) {
+            val config = dev.vesta.core.config.ConfigLoader.load(dev.vesta.core.config.VestaPaths.default().configFile)
+            RemoteBackend.connect(config.server.baseUrl, dev.vesta.app.ApiToken.read())?.let { return it }
+        }
+        val app = AppContainer(generalOverride = model)
+        val general = app.config.models.general
+        if (general == null || general.name.isBlank()) {
+            app.close()
+            echo("메인 모델이 설정되지 않았습니다. ~/.vesta/config.yaml의 models.general을 설정하거나 --model을 주세요.", err = true)
+            throw ProgramResult(1)
+        }
+        return EmbeddedBackend(app)
+    }
+
+    private suspend fun generate(terminal: Terminal, reader: LineReader, backend: ChatBackend, session: Session?, text: String): Session? {
         val out = terminal.writer()
         val renderer = StreamRenderer(out, showThinking)
         var current = session
         val start = TimeSource.Monotonic.markNow()
         val job = kotlinx.coroutines.coroutineScope {
             launch {
-                app.conversation.send(app.owner, ChannelType.CLI, session?.id, UserInput(text)).collect { event ->
+                backend.send(session?.id, text).collect { event ->
                     if (event is AgentEvent.SessionReady && event.created) {
-                        current = app.sessions.find(app.owner.userId, event.sessionId)
+                        current = backend.find(event.sessionId)
                     }
                     renderer.render(event, start.elapsedNow())
                     if (event is AgentEvent.ApprovalRequested) {
-                        app.conversation.resolveApproval(app.owner, event.requestId, Approvals.ask(reader, out, event))
+                        backend.resolveApproval(event.requestId, Approvals.ask(reader, out, event))
                     }
                 }
             }.also { job ->
@@ -132,8 +148,8 @@ class ChatCommand : CliktCommand(name = "chat") {
         return current
     }
 
-    private suspend fun listSessions(out: java.io.PrintWriter, app: AppContainer) {
-        val recent = app.sessions.listRecent(app.owner.userId, 10)
+    private suspend fun listSessions(out: java.io.PrintWriter, backend: ChatBackend) {
+        val recent = backend.recent(10)
         if (recent.isEmpty()) {
             out.println(dim("저장된 세션이 없습니다."))
             return
@@ -144,15 +160,15 @@ class ChatCommand : CliktCommand(name = "chat") {
         out.println(dim("/resume <번호> 로 이어하기"))
     }
 
-    private suspend fun resolveSession(app: AppContainer, arg: String?): Session? {
-        if (arg.isNullOrBlank()) return app.sessions.listRecent(app.owner.userId, 1).firstOrNull()
-        arg.toIntOrNull()?.let { return app.sessions.listRecent(app.owner.userId, 10).getOrNull(it - 1) }
-        return app.sessions.listRecent(app.owner.userId, 200).firstOrNull { it.id.value.startsWith(arg) }
+    private suspend fun resolveSession(backend: ChatBackend, arg: String?): Session? {
+        if (arg.isNullOrBlank()) return backend.recent(1).firstOrNull()
+        arg.toIntOrNull()?.let { return backend.recent(10).getOrNull(it - 1) }
+        return backend.recent(200).firstOrNull { it.id.value.startsWith(arg) }
     }
 
-    private suspend fun printHistory(out: java.io.PrintWriter, app: AppContainer, session: Session) {
+    private suspend fun printHistory(out: java.io.PrintWriter, backend: ChatBackend, session: Session) {
         out.println(dim("── ${session.title ?: "대화"} ──"))
-        app.messages.list(session.id).forEach { m ->
+        backend.messages(session.id).forEach { m ->
             when (m.role) {
                 ChatRole.USER -> out.println(bold("› ") + m.content)
                 ChatRole.ASSISTANT -> out.println(m.content + if (m.interrupted) dim(" (중단됨)") else "")
