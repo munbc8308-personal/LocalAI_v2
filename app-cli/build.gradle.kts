@@ -15,6 +15,7 @@ dependencies {
     implementation(project(":decision"))
     implementation(project(":router"))
     implementation(project(":tools"))
+    implementation(project(":mcp"))
     implementation(libs.clikt)
     implementation(libs.jline)
     implementation(libs.kotlin.logging)

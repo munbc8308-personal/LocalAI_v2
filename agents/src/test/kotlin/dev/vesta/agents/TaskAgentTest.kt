@@ -108,7 +108,18 @@ class TaskAgentTest : FunSpec({
         val model = ScriptedModel(turns(listOf(ToolCall("c1", "run_shell", """{"command":"ls"}"""))))
         TaskAgent(model, models, ToolRegistry(listOf(shell)), AutoBroker(ApprovalDecision.Deny("싫음"))).handle(request).toList()
         shell.calls.size shouldBe 0
-        model.requests[1].messages.last().content shouldContain "거부"
+        model.requests[1].messages.last().content shouldContain "실행되지 않았다"
+    }
+
+    test("거부된 작업은 모델 답변과 상관없이 마지막에 시스템이 표시한다") {
+        val send = RecordingTool("mail_send", RiskLevel.EXEC)
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("c1", "mail_send", "{}"))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("메일을 보냈습니다."), ChatChunk.Done("stop", null)), // 모델이 거짓으로 말하는 경우
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(send)), AutoBroker(ApprovalDecision.Deny("싫음"))).handle(request).toList()
+        send.calls.size shouldBe 0
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "실행하지 않은 작업"
     }
 
     test("셸은 수정 후 승인한 명령으로 실행한다") {

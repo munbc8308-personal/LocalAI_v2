@@ -37,7 +37,7 @@ import kotlin.time.TimeSource
 private val log = KotlinLogging.logger {}
 
 /**
- * 작업 에이전트 (PROJECT.md 4.8 TaskAgent, 7.7).
+ * 작업 에이전트 (PROJECT.md 4.8 TaskAgent, 7.7). 같은 도구 루프를 PersonalAgent(Apple 앱)도 쓴다 — [type]·[rules]·[toolsFor]만 다르다.
  * 모델이 도구를 고르고 → 실행(위험 등급에 따라 승인) → 결과를 다시 모델에 → 끝날 때까지 반복 (최대 [maxSteps]).
  * 실행 전에 짧은 계획을 먼저 말하게 한다 (T-09). 모든 도구 호출은 ToolRun에 기록한다 (T-08).
  */
@@ -52,17 +52,23 @@ class TaskAgent(
     private val maxToolOutputChars: Int = 12_000,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val zone: ZoneId = ZoneId.systemDefault(),
+    override val type: AgentType = AgentType.TASK,
+    private val rules: String = Prompts.TASK_RULES,
+    /** 이번 요청에 모델에게 줄 도구 (기본: 전부) */
+    private val toolsFor: suspend (AgentRequest) -> List<Tool> = { tools.all },
 ) : Agent {
-    override val type = AgentType.TASK
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val spec = models.acquire(ModelRole.GENERAL)
-        val system = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + Prompts.TASK_RULES
+        val system = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + rules
+        val available = toolsFor(request).associateBy { it.spec.name }
+        if (available.isNotEmpty()) emit(AgentEvent.Status("도구: ${available.keys.joinToString()}"))
         val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, system))
         messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)
         val context = ToolContext(request.user)
         var usage: Usage? = null
         val taint = Taint()
+        val denied = mutableListOf<String>()
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
@@ -77,7 +83,7 @@ class TaskAgent(
                     maxTokens = spec.maxTokens,
                     reasoningEffort = spec.reasoningEffort,
                     keepAlive = spec.keepAlive,
-                    tools = tools.all.map { it.spec },
+                    tools = available.values.map { it.spec },
                 ),
             ).collect { chunk ->
                 when (chunk) {
@@ -89,13 +95,16 @@ class TaskAgent(
             }
             filter.flush().takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
             if (calls.isEmpty()) {
+                // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
+                if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))
                 emit(AgentEvent.Done(type, spec.name, usage))
                 return@flow
             }
             if (text.isNotEmpty()) emit(AgentEvent.Token("\n"))
             messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
             for (call in calls) {
-                val result = runTool(call, request, context, taint)
+                val result = runTool(call, request, context, taint, available)
+                if (result.summary == DENIED) denied += available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name
                 messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
             }
         }
@@ -103,11 +112,22 @@ class TaskAgent(
         emit(AgentEvent.Done(type, spec.name, usage))
     }
 
+    private companion object {
+        const val DENIED = "거부됨"
+    }
+
     /** 이번 작업에서 로컬 데이터를 읽었는지 */
     private class Taint(var tainted: Boolean = false)
 
-    private suspend fun FlowCollector<AgentEvent>.runTool(call: ToolCall, request: AgentRequest, context: ToolContext, taint: Taint): ToolResult {
-        val tool = tools[call.name] ?: return ToolResult("오류: 없는 도구 ${call.name}", isError = true)
+    private suspend fun FlowCollector<AgentEvent>.runTool(
+        call: ToolCall,
+        request: AgentRequest,
+        context: ToolContext,
+        taint: Taint,
+        available: Map<String, Tool>,
+    ): ToolResult {
+        // 이번 요청에 주지 않은 도구는 모델이 이름을 알아도 실행하지 않는다
+        val tool = available[call.name] ?: return ToolResult("오류: 없는 도구 ${call.name}", isError = true)
         var arguments = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrElse {
             return ToolResult("오류: 인자 JSON을 읽지 못함 (${it.message})", isError = true)
         }
@@ -118,8 +138,13 @@ class TaskAgent(
                 // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다
                 is ApprovalDecision.ApproveEdited -> { arguments = JsonObject(arguments + decision.editedArguments); approved = true }
                 is ApprovalDecision.Deny -> {
-                    val denied = ToolResult("사용자가 실행을 거부했다: ${decision.reason}. 다른 방법을 쓰거나 사용자에게 물어볼 것.", isError = true, summary = "거부됨")
-                    emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = false, summary = "거부됨 (${decision.reason})"))
+                    val denied = ToolResult(
+                        "실행되지 않았다. 사용자가 승인을 거부했다(${decision.reason}). 이 작업은 일어나지 않았으므로 했다고 말하지 말고, " +
+                            "하지 않았다고 사용자에게 알린다. 다른 방법이 필요하면 사용자에게 묻는다.",
+                        isError = true,
+                        summary = DENIED,
+                    )
+                    emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = false, summary = "$DENIED (${decision.reason})"))
                     runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, false, denied, 0)
                     return denied
                 }

@@ -3,6 +3,9 @@ package dev.vesta.cli
 import dev.vesta.agents.ChatAgent
 import dev.vesta.agents.CodeAgent
 import dev.vesta.agents.TaskAgent
+import dev.vesta.agents.AppGroupSelector
+import dev.vesta.agents.Prompts
+import dev.vesta.mcp.McpToolSource
 import dev.vesta.conversation.InMemoryApprovalBroker
 import dev.vesta.core.config.WebMode
 import dev.vesta.storage.ExposedToolRunLog
@@ -123,9 +126,16 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     )
     val approvals = InMemoryApprovalBroker()
 
+    /** Apple 앱 (Orchard MCP, PROJECT.md 7.7a). 실행 파일이 있을 때만. 서버는 처음 쓸 때 띄운다. */
+    val orchard: McpToolSource? = config.mcp.servers["orchard"]
+        ?.takeIf { it.enabled && java.io.File(it.command).canExecute() }
+        ?.let { McpToolSource("orchard", it, config.tools.maxOutputChars) }
+    private val decisionClient = OllayaClient(config.decision.baseUrl, config.decision.model, http)
+    private val appGroups = AppGroupSelector(decisionClient.takeIf { config.decision.enabled })
+
     val router = Router(
         config = config.decision,
-        decision = OllayaClient(config.decision.baseUrl, config.decision.model, http),
+        decision = decisionClient,
         llm = LlmRouter(inference, modelManager),
     )
     val conversation = DefaultConversationService(
@@ -137,6 +147,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         availability = { user ->
             buildSet {
                 addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE, AgentType.TASK))
+                // Apple 앱은 Mac 주인 계정의 데이터 → OWNER만 (7.12)
+                if (orchard != null && user.role == UserRole.OWNER) add(AgentType.PERSONAL)
                 if (knowledge.listCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
             }
         },
@@ -150,6 +162,19 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever),
             AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever),
+            AgentType.PERSONAL to TaskAgent(
+                inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
+                maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
+                maxToolOutputChars = config.tools.maxOutputChars,
+                type = AgentType.PERSONAL,
+                rules = Prompts.PERSONAL_RULES,
+                // D11로 고른 앱 그룹의 Orchard 도구만 준다
+                toolsFor = { request ->
+                    val all = orchard?.tools().orEmpty()
+                    val groups = appGroups.select(request.history.last().content, all.map { it.group }.toSet())
+                    all.filter { it.group in groups }
+                },
+            ),
             AgentType.TASK to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
@@ -163,6 +188,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     override fun close() {
         http.close()
         webHttp.close()
+        orchard?.close()
     }
 
     companion object {

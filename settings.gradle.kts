@@ -31,6 +31,7 @@ include(
     "decision",
     "router",
     "tools",
+    "mcp",
     "agents",
     "conversation",
     "app-cli",
