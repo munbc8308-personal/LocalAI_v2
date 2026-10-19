@@ -31,6 +31,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.time.Instant
@@ -142,6 +143,18 @@ class ApiTest : FunSpec({
         repeat(5) { client.post("/api/login") { setBody("""{"password":"x"}""") } }
         client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.TooManyRequests
     } }
+
+    test("동시에 보낸 로그인도 잠금 한도를 넘지 못한다") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val repo = WebAuthRepository(db.db)
+        repo.setPasswordHash(db.ensureOwner("owner"), PasswordHasher.hash("correct horse"))
+        val auth = WebAuth(repo)
+        val results = kotlinx.coroutines.coroutineScope {
+            (1..20).map { async(kotlinx.coroutines.Dispatchers.Default) { auth.login(null, "wrong$it", null) } }.map { it.await() }
+        }
+        results.count { it == LoginResult.Invalid } shouldBe 5
+        auth.login(null, "correct horse", null)::class shouldBe LoginResult.Locked::class
+    }
 
     test("모르는 Host는 거부한다 (DNS 리바인딩 방지)") { testApplication {
         application { vestaApi(deps) }

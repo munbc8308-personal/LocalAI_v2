@@ -1558,7 +1558,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **로그인** (6.3, U-02):
   - `vesta passwd`: 이 Mac 터미널에서만 비밀번호 설정(8자 이상). **Argon2id**(m=64MiB, t=3, p=1, PHC 문자열)로 `users.password_hash`에 저장. 바꾸면 모든 기기 로그아웃.
   - `POST /api/login` → 무작위 32바이트 세션 쿠키 `vesta_session`(HttpOnly, SameSite=Strict, HTTPS면 Secure, 30일). DB(`web_session`, schema v8)에는 SHA-256만 저장.
-  - 연속 5번 실패하면 1분부터 두 배씩(최대 15분) 잠금. 없는 사용자도 해시를 계산해 시간 차를 없앰.
+  - 연속 5번 실패하면 1분부터 두 배씩(최대 15분) 잠금. 없는 사용자도 해시를 계산해 시간 차를 없앰. 로그인 확인은 Mutex로 한 번에 하나씩 처리해, 동시 요청으로 잠금 검사를 함께 통과하는 우회를 막음(보안 리뷰 반영).
   - **CSRF**: 쿠키 인증 요청 중 GET 외에는 `X-Vesta-CSRF` 헤더가 세션 값과 같아야 함(로그인·`GET /api/me` 응답으로 받음). SameSite=Strict와 이중 방어.
   - Bearer 토큰(CLI)도 계속 받는다. `/v1/…`(OpenAI 호환)은 Bearer만, 쿠키로는 열 수 없음.
 - **보안 헤더·Host 검사**: 모든 응답에 CSP(`default-src 'self'`), `X-Frame-Options: DENY`, `nosniff`, `no-referrer`. Host가 localhost·127.0.0.1·`*.ts.net`·`server.allowedHosts`가 아니면 403 (서버 쪽 DNS 리바인딩 방지).
