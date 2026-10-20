@@ -43,9 +43,13 @@ fun main() {
             val ollaya = async { probe { check(app.httpForEval.get("${app.config.decision.baseUrl}/api/version").status.isSuccess()); "정상 (${app.config.decision.model})" } }
             val searxng = async { probe { check(app.httpForEval.get("${app.config.web.searxngUrl}/healthz").status.isSuccess()); "정상" } }
             val loaded = async { withTimeoutOrNull(2_000) { runCatching { ollama.loadedModels() }.getOrNull() }.orEmpty() }
+            val worker = async { withTimeoutOrNull(1_500) { app.speechToText?.health() } }
             val total = MacSystem.totalMemoryBytes()
             val models = with(app.config.models) {
-                listOfNotNull(general?.let { "general" to it.name }, code?.let { "code" to it.name }, embedding?.let { "embedding" to it.name }, reranker?.let { "reranker" to it.name })
+                listOfNotNull(
+                    general?.let { "general" to it.name }, code?.let { "code" to it.name }, embedding?.let { "embedding" to it.name },
+                    reranker?.let { "reranker" to it.name }, vision?.let { "vision" to it.name }, stt?.let { "stt" to it.name }, tts?.let { "tts" to "say ${it.name}" },
+                )
             }.toMap() + ("decision" to app.config.decision.model)
             DashboardDto(
                 version = VERSION,
@@ -54,9 +58,15 @@ fun main() {
                     "Ollaya (결정 모델)" to if (app.config.decision.enabled) ollaya.await() else "꺼짐",
                     "SearXNG" to searxng.await(),
                     "Orchard" to if (app.orchard != null) "설정됨" else "없음",
+                    "음성 인식 (미디어 워커)" to when {
+                        app.speechToText == null -> "꺼짐"
+                        else -> worker.await()?.stt?.let { if (it.loaded) "정상 (모델 올라감)" else "정상 (대기, 처음 쓸 때 올림)" } ?: "응답 없음"
+                    },
                 ),
                 models = models,
-                loaded = loaded.await().map { LoadedModelDto(it.name, it.sizeBytes, it.gpuBytes) },
+                // 미디어 워커가 올린 음성 인식 모델도 메모리 사용량에 보인다
+                loaded = loaded.await().map { LoadedModelDto(it.name, it.sizeBytes, it.gpuBytes) } +
+                    listOfNotNull(worker.await()?.stt?.takeIf { it.loaded }?.let { LoadedModelDto(it.model.substringAfterLast('/'), it.bytes, it.bytes) }),
                 memoryTotalBytes = total,
                 memoryBudgetBytes = total * app.config.memory.budgetPercent / 100,
             )
@@ -83,6 +93,10 @@ fun main() {
             }
         },
         dashboard = dashboard,
+        speechToText = app.speechToText,
+        textToSpeech = app.textToSpeech,
+        media = app.mediaStore,
+        mediaLimits = app.config.media,
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )

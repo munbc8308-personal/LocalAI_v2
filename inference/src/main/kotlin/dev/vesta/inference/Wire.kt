@@ -23,7 +23,8 @@ internal data class WireModel(val id: String, @SerialName("owned_by") val ownedB
 @Serializable
 internal data class WireMessage(
     val role: String,
-    val content: String,
+    /** 글만 있으면 문자열, 이미지가 있으면 [{type:text}, {type:image_url}] 배열 */
+    val content: JsonElement,
     @SerialName("tool_calls") val toolCalls: List<WireToolCall>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
 )
@@ -61,6 +62,21 @@ internal data class ChatCompletionRequest(
     @SerialName("keep_alive") val keepAlive: JsonElement? = null,
     val tools: List<WireTool>? = null,
 )
+
+/** 이미지는 data URL(base64)로 넣는다. Ollama OpenAI 호환 API가 받는 형식 */
+internal fun contentJson(text: String, images: List<dev.vesta.core.media.ImageInput>): JsonElement =
+    if (images.isEmpty()) JsonPrimitive(text)
+    else kotlinx.serialization.json.buildJsonArray {
+        images.forEach { image ->
+            add(kotlinx.serialization.json.buildJsonObject {
+                put("type", JsonPrimitive("image_url"))
+                put("image_url", kotlinx.serialization.json.buildJsonObject {
+                    put("url", JsonPrimitive("data:${image.mime};base64," + java.util.Base64.getEncoder().encodeToString(image.bytes)))
+                })
+            })
+        }
+        add(kotlinx.serialization.json.buildJsonObject { put("type", JsonPrimitive("text")); put("text", JsonPrimitive(text)) })
+    }
 
 internal fun keepAliveJson(value: String?): JsonElement? = when (value) {
     null -> null

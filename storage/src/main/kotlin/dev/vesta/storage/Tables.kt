@@ -169,3 +169,17 @@ object ChannelPairings : LongIdTable("channel_pairing") {
     val codeHash = varchar("code_hash", 64)
     val expiresAt = timestamp("expires_at")
 }
+
+/** 미디어 (PROJECT.md 11장 MediaAsset, M12). 파일은 `~/.vesta/media/<사용자>/`에, 여기는 정보만 */
+object MediaAssets : org.jetbrains.exposed.v1.core.Table("media_asset") {
+    val id = varchar("id", 36)
+    val userId = long("user_id").index()
+    /** 붙인 메시지. 메시지를 지우면(세션 삭제) 함께 지운다 */
+    val messageId = reference("message_id", Messages.id, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).nullable().index()
+    val kind = varchar("kind", 16)
+    val mime = varchar("mime", 64)
+    val path = text("path")
+    val size = long("size")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+}

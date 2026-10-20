@@ -4,12 +4,16 @@ import dev.vesta.channels.ChannelApiException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.serialization.KSerializer
@@ -39,6 +43,8 @@ interface TelegramApi {
     suspend fun setCommands(commands: List<Pair<String, String>>)
     /** [maxBytes]를 넘으면 받지 않는다 */
     suspend fun download(fileId: String, maxBytes: Long): ByteArray
+    /** OGG/Opus 음성 메시지 (V-03) */
+    suspend fun sendVoice(chatId: Long, ogg: ByteArray)
 }
 
 /** Bot API 오류. 429면 [retryAfterSeconds]만큼 기다려야 한다 */
@@ -61,6 +67,33 @@ data class TgDocument(
     @SerialName("file_size") val fileSize: Long? = null,
 )
 
+/** 음성 메시지 (OGG/Opus) */
+@Serializable
+data class TgVoice(
+    @SerialName("file_id") val fileId: String,
+    val duration: Int = 0,
+    @SerialName("mime_type") val mimeType: String? = null,
+    @SerialName("file_size") val fileSize: Long? = null,
+)
+
+/** 음악·녹음 파일 */
+@Serializable
+data class TgAudio(
+    @SerialName("file_id") val fileId: String,
+    @SerialName("file_name") val fileName: String? = null,
+    @SerialName("mime_type") val mimeType: String? = null,
+    @SerialName("file_size") val fileSize: Long? = null,
+)
+
+/** 사진 한 크기. 사진은 여러 크기로 온다 */
+@Serializable
+data class TgPhotoSize(
+    @SerialName("file_id") val fileId: String,
+    val width: Int = 0,
+    val height: Int = 0,
+    @SerialName("file_size") val fileSize: Long? = null,
+)
+
 @Serializable
 data class TgMessage(
     @SerialName("message_id") val messageId: Long,
@@ -71,6 +104,9 @@ data class TgMessage(
     val text: String? = null,
     val caption: String? = null,
     val document: TgDocument? = null,
+    val voice: TgVoice? = null,
+    val audio: TgAudio? = null,
+    val photo: List<TgPhotoSize> = emptyList(),
 )
 
 @Serializable
@@ -184,6 +220,23 @@ class HttpTelegramApi(
             val response = http.get("$baseUrl/file/bot$token/$path")
             if (!response.status.isSuccess()) throw IOException("파일 받기 실패: ${response.status.value}")
             response.bodyAsBytes().also { if (it.size > maxBytes) throw IOException("파일이 너무 큽니다") }
+        }
+    }
+
+    override suspend fun sendVoice(chatId: Long, ogg: ByteArray) {
+        guarded {
+            val text = http.submitFormWithBinaryData(
+                "$baseUrl/bot$token/sendVoice",
+                formData {
+                    append("chat_id", chatId.toString())
+                    append("voice", ogg, Headers.build {
+                        append(HttpHeaders.ContentType, "audio/ogg")
+                        append(HttpHeaders.ContentDisposition, "filename=\"answer.ogg\"")
+                    })
+                },
+            ).bodyAsText()
+            val response = json.decodeFromString(TgResponse.serializer(), text)
+            if (!response.ok) throw TelegramException(response.errorCode ?: 0, response.description.orEmpty(), response.parameters?.retryAfter)
         }
     }
 

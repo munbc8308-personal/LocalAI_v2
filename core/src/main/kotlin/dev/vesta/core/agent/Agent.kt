@@ -23,4 +23,5 @@ data class AgentRequest(
     val routing: dev.vesta.core.decision.RoutingDecision? = null,
 )
 
-data class UserInput(val text: String)
+/** 사용자 입력. [images]는 이번 질문에 붙인 이미지 (V-04) */
+data class UserInput(val text: String, val images: List<dev.vesta.core.media.ImageInput> = emptyList())

@@ -35,4 +35,6 @@ class FakeTelegram : TelegramApi {
     override suspend fun sendTyping(chatId: Long) = Unit
     override suspend fun setCommands(commands: List<Pair<String, String>>) { this.commands = commands }
     override suspend fun download(fileId: String, maxBytes: Long) = file
+    val voices = mutableListOf<ByteArray>()
+    override suspend fun sendVoice(chatId: Long, ogg: ByteArray) { voices += ogg }
 }

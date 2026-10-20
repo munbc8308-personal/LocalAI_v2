@@ -41,7 +41,7 @@ class OpenAiCompatibleClient(
             messages = request.messages.map { message ->
                 WireMessage(
                     role = message.role.name.lowercase(),
-                    content = message.content,
+                    content = contentJson(message.content, message.images),
                     toolCalls = message.toolCalls.takeIf { it.isNotEmpty() }
                         ?.map { WireToolCall(id = it.id, type = "function", function = WireFunctionCall(it.name, it.arguments)) },
                     toolCallId = message.toolCallId,

@@ -8,6 +8,7 @@ import dev.vesta.core.agent.AgentRequest
 import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRole
 import dev.vesta.core.inference.InferenceClient
+import dev.vesta.core.model.ModelNotConfiguredException
 import dev.vesta.core.model.ModelProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
@@ -26,9 +27,17 @@ class ChatAgent(
     override val type = AgentType.CHAT
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
-        val spec = models.acquire(ModelRole.GENERAL)
+        val history = HistoryWindow.fit(request.history, contextChars)
+        // 이미지가 있으면 비전 모델 (V-04). 설정에 없으면 메인 모델 (Gemma 4는 메인 모델이 비전 지원)
+        val spec = if (history.any { it.images.isNotEmpty() }) {
+            try {
+                models.acquire(ModelRole.VISION)
+            } catch (_: ModelNotConfiguredException) {
+                models.acquire(ModelRole.GENERAL)
+            }
+        } else models.acquire(ModelRole.GENERAL)
         val system = request.session.systemPrompt ?: Prompts.base(clock, zone)
-        val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + HistoryWindow.fit(request.history, contextChars)
+        val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + history
         emit(AgentEvent.Status("생성 중"))
         emitAll(Generation.stream(inference, spec, messages, type))
     }

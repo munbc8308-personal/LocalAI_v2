@@ -15,6 +15,12 @@ models:
   # reranker: { name: "bge-reranker-v2-m3", engine: llama-server, baseUrl: "http://127.0.0.1:8082" }
   # embedding: { name: "<임베딩 모델>", keepAlive: forever }
   # reranker:  { name: "<리랭커 모델>", keepAlive: forever }
+  # 비전: Gemma 4가 이미지를 직접 읽으므로 메인 모델과 같게 (추가 메모리 없음, M12)
+  vision:    { name: "gemma4:26b-mxfp8", keepAlive: forever, reasoningEffort: none }
+  # 음성 인식: 미디어 워커(media-worker, uv)의 mlx-whisper. 30분 안 쓰면 워커가 내린다 (약 1.6GB)
+  stt:       { name: "mlx-community/whisper-large-v3-turbo", engine: mlx-whisper, baseUrl: "http://127.0.0.1:11436", keepAlive: 30m }
+  # 읽어 주기: macOS say (추가 메모리 0)
+  tts:       { name: "Yuna", engine: say }
 
 decision:
   engine: ollaya
@@ -32,6 +38,13 @@ web:
 
 memory:
   budgetPercent: 70
+
+# 음성·이미지 입력 (PROJECT.md 7.11, M12)
+media:
+  ffmpeg: /opt/homebrew/bin/ffmpeg
+  maxAudioSeconds: 300        # 넘으면 앞부분만 인식
+  maxImageMegabytes: 10
+  maxImages: 4                # 질문 하나에 붙일 수 있는 이미지 수
 
 # 메신저 (PROJECT.md 6.5·6.6). 봇 토큰은 여기 쓰지 않는다: vesta telegram token (키체인 저장)
 channels:

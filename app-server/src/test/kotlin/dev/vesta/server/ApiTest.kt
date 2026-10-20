@@ -40,8 +40,10 @@ import kotlin.io.path.createTempDirectory
 private class FakeConversation : ConversationService {
     val decisions = mutableListOf<Pair<String, ApprovalDecision>>()
     var lastChannel: ChannelType? = null
+    var lastInput: UserInput? = null
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
         lastChannel = channel
+        lastInput = input
         emit(AgentEvent.SessionReady(SessionId("s1"), "제목", true))
         if (input.text == "위험") emit(AgentEvent.ApprovalRequested("r1", "run_shell", RiskLevel.EXEC, ApprovalDetails("셸", "ls"), null))
         emit(AgentEvent.Token("안녕"))
@@ -163,4 +165,49 @@ class ApiTest : FunSpec({
         client.get("/api/health") { header("Host", "mac.tail1234.ts.net") }.status shouldBe HttpStatusCode.OK
         client.get("/api/health").headers["Content-Security-Policy"].orEmpty() shouldContain "default-src 'self'"
     } }
+
+    test("이미지 질문: 형식·개수·크기를 확인해 대화 엔진에 넘긴다") { testApplication {
+        application { vestaApi(deps) }
+        val png = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 1))
+        client.post("/api/chat") { bearerAuth("secret"); setBody("""{"text":"뭐야","images":["data:image/png;base64,$png"]}""") }.status shouldBe HttpStatusCode.OK
+        conversation.lastInput!!.images.single().mime shouldBe "image/png"
+        val html = java.util.Base64.getEncoder().encodeToString("<html><script>".toByteArray())
+        client.post("/api/chat") { bearerAuth("secret"); setBody("""{"text":"x","images":["$html"]}""") }.let {
+            it.status shouldBe HttpStatusCode.BadRequest
+            it.bodyAsText() shouldContain "PNG"
+        }
+        client.post("/api/chat") { bearerAuth("secret"); setBody("""{"text":"x","images":["$png","$png","$png","$png","$png"]}""") }.status shouldBe HttpStatusCode.BadRequest
+    } }
+
+    test("음성 인식·읽어 주기·미디어: 설정이 없으면 503, 있으면 처리하고 미디어는 본인 것만") { testApplication {
+        val owner = UserContext(UserId(1), UserRole.OWNER)
+        val store = object : dev.vesta.core.media.MediaStore {
+            override suspend fun save(userId: UserId, kind: dev.vesta.core.media.MediaKind, mime: String, bytes: ByteArray) = error("x")
+            override suspend fun load(userId: UserId, id: String) =
+                if (userId == owner.userId && id == "a1") dev.vesta.core.media.MediaAsset("a1", userId, dev.vesta.core.media.MediaKind.IMAGE, "image/png", 3) to byteArrayOf(1, 2, 3) else null
+        }
+        val full = ServerDeps(
+            conversation, NoSessions, NoMessages, owner, token = "secret", version = "t",
+            speechToText = object : dev.vesta.core.media.SpeechToText { override suspend fun transcribe(audio: ByteArray, language: String) = "음성 ${audio.size}" },
+            textToSpeech = object : dev.vesta.core.media.TextToSpeech { override suspend fun synthesize(text: String, format: dev.vesta.core.media.AudioFormat) = "m4a".toByteArray() },
+            media = store,
+            mediaLimits = dev.vesta.core.config.MediaConfig(maxAudioMegabytes = 1),
+        )
+        application { vestaApi(full) }
+        client.post("/api/stt") { bearerAuth("secret"); setBody(ByteArray(10)) }.bodyAsText() shouldBe """{"text":"음성 10"}"""
+        client.post("/api/stt") { bearerAuth("secret"); setBody(ByteArray(2 * 1024 * 1024)) }.status shouldBe HttpStatusCode.PayloadTooLarge
+        client.post("/api/speech") { bearerAuth("secret"); setBody("""{"text":"안녕"}""") }.let {
+            it.status shouldBe HttpStatusCode.OK
+            it.headers["Content-Type"] shouldBe "audio/mp4"
+        }
+        client.get("/api/media/a1") { bearerAuth("secret") }.headers["Content-Type"] shouldBe "image/png"
+        client.get("/api/media/zz") { bearerAuth("secret") }.status shouldBe HttpStatusCode.NotFound
+        client.get("/api/media/a1").status shouldBe HttpStatusCode.Unauthorized
+    } }
+
+    test("음성 설정이 없으면 503") { testApplication {
+        application { vestaApi(deps) }
+        client.post("/api/stt") { bearerAuth("secret"); setBody(ByteArray(10)) }.status shouldBe HttpStatusCode.ServiceUnavailable
+    } }
+
 })

@@ -22,6 +22,8 @@ class ModelManager(
     private val budgetBytes: Long,
     private val runtime: ModelRuntime,
     private val clock: Clock = Clock.systemUTC(),
+    /** Ollama 밖에서 쓰는 메모리 (미디어 워커의 음성 인식 모델 등, M12). 예산 계산에 더한다 */
+    private val externalBytes: suspend () -> Long = { 0L },
 ) : ModelProvider {
     private val mutex = Mutex()
     private val lastUsed = mutableMapOf<String, Instant>()
@@ -53,7 +55,7 @@ class ModelManager(
         val loaded = runtime.loadedModels()
         if (loaded.any { sameModel(it.name, model) }) return
         val needed = runtime.localModelSizes().entries.firstOrNull { sameModel(it.key, model) }?.value ?: 0
-        var used = loaded.sumOf { it.sizeBytes }
+        var used = loaded.sumOf { it.sizeBytes } + runCatching { externalBytes() }.getOrDefault(0L)
         val candidates = loaded
             .filterNot { loadedModel -> alwaysOnNames.any { sameModel(loadedModel.name, it) } }
             .sortedBy { lastUsed[it.name] ?: lastUsed.entries.firstOrNull { e -> sameModel(e.key, it.name) }?.value ?: Instant.EPOCH }

@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9 완료, M10·M11 구현(실제 Telegram·Discord·Slack 확인 남음) (v3.2, 2026-10-21)
+> 상태: M0~M9 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.3, 2026-10-21)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -38,6 +38,7 @@
 | v3.0 | 2026-10-19 | **M9 웹 UI**: 시제품 비교로 웹 UI 기술을 Compose Multiplatform Web(Wasm) → **Compose HTML(Kotlin/JS, DOM)** 로 변경(사용자 결정). `api-model` KMP(JVM + JS), `web-ui` 모듈, 비밀번호 로그인(Argon2id)·세션 쿠키·CSRF·Host 검사, `vesta passwd`, Tailscale serve 스크립트. 13.11 진행 기록 |
 | v3.1 | 2026-10-19 | **M10 Telegram**: `channel-core`·`channel-telegram` 모듈(Bot API 직접 호출, long polling), 일회용 코드로 계정 연결(`vesta telegram pair`), 메시지 수정 스트리밍·분할, 인라인 버튼 승인(셸 수정 후 승인), 파일 첨부(질문·컬렉션 추가), 봇 토큰 키체인 저장. schema v9. 13.12 진행 기록 |
 | v3.2 | 2026-10-21 | **M11 Discord·Slack**: Kord·Bolt 대신 **Ktor로 직접**(Discord Gateway WebSocket·REST, Slack Socket Mode·Web API). 메신저 공통 동작을 `channel-core`의 `ChannelBot`으로 모으고 Telegram도 그 위로 옮김. 버튼 승인, 셸 수정은 입력 창(모달), 메시지 분할(Discord 2000자·Slack 블록 3000자), `!` 명령, 코드만 보내도 계정 연결. `vesta discord`·`vesta slack` 명령(token·pair·list·unlink·off), `vesta slack manifest`. 13.13 진행 기록 |
+| v3.3 | 2026-10-21 | **M12 음성·비전 입력**: 미디어 워커(`media-worker`, uv + Python 3.12, mlx-whisper large-v3-turbo, 127.0.0.1:11436, 30분 유휴 시 내림), `media` 모듈(ffmpeg 변환·워커 클라이언트·`say` 읽어 주기), 비전은 메인 모델 Gemma 4가 직접(추가 메모리 0). `media_asset`(schema v10)에 입력 이미지 보관. 웹 UI 🎤·📎(붙여넣기·끌어 놓기)·🔊 읽기, 메신저 음성·사진, Telegram `/voice` 음성 답변. 13.14 진행 기록 |
 
 ---
 
@@ -134,7 +135,7 @@ Kotlin(JVM)으로 만드는, **Apple Silicon Mac에서 동작하는 로컬 우�
 | 항목 | 예상 사용량 | 로드 정책 |
 |------|------------|-----------|
 | 이미지 생성 (FLUX.1-schnell, 4bit) | ~10GB | `/image` 요청 시, 10분 미사용 시 언로드. 코드 모델과 동시 로드 시 코드 모델을 내림 |
-| 음성 인식 STT (Whisper large-v3-turbo) | ~2GB | 음성 입력 시, 30분 미사용 시 언로드 |
+| 음성 인식 STT (Whisper large-v3-turbo) | ~1.6GB (M12 측정) | 음성 입력 시 미디어 워커가 올리고, 30분 미사용 시 언로드. 메모리 예산 계산에 포함 |
 | 음성 합성 TTS (MeloTTS-KR) | ~1GB | 음성 답변 시. macOS `say`는 추가 메모리 없음 |
 | 학습 작업 (LoRA/QLoRA) | 20~45GB | **유지보수 시간대에만**. 학습 중에는 코드·이미지 모델을 내리고, 메인 모델은 학습 대상이면 내린다 (7.10) |
 
@@ -164,9 +165,9 @@ Kotlin(JVM)으로 만드는, **Apple Silicon Mac에서 동작하는 로컬 우�
 | 인젝션 탐지 | Qwen3Guard | Apache 2.0 | 로컬 | |
 | 학습 | **mlx-lm** (`mlx_lm.lora`, `mlx_lm.fuse`), PyTorch(MPS) + Hugging Face Transformers·Optimum(ONNX 내보내기) | MIT / BSD / Apache 2.0 | 로컬 | Python 환경은 **uv**(MIT)로 관리 |
 | 이미지 생성 | **mflux** (MLX용 FLUX) + FLUX.1-schnell | MIT / Apache 2.0 | 로컬 | FLUX.1-dev는 비상업 라이선스라 제외 |
-| 비전 입력 | 비전 지원 생성 모델 (Qwen 계열 VL 등, M0에서 확정) | Apache 2.0 | 로컬 | |
-| 음성 인식 | **mlx-whisper** 또는 whisper.cpp + Whisper large-v3-turbo | MIT | 로컬 | |
-| 음성 합성 | macOS `say`(한국어 음성 내장) → MeloTTS(한국어) | OS 내장 / MIT | 로컬 | |
+| 비전 입력 | **메인 모델 Gemma 4가 직접** (M12 확정, OpenAI 호환 `image_url`) | Apache 2.0 | 로컬 | 별도 비전 모델·추가 메모리 없음 |
+| 음성 인식 | **mlx-whisper** + Whisper large-v3-turbo (M12 확정) | MIT | 로컬 | 미디어 워커(uv, Python 3.12). 받은 뒤에는 인식할 때 외부 통신 없음 |
+| 음성 합성 | macOS `say` Yuna (M12) → MeloTTS(한국어, 보류) | OS 내장 / MIT | 로컬 | ffmpeg로 m4a(웹)·ogg Opus(Telegram) |
 | 오디오 변환 | ffmpeg | LGPL/GPL, 무료 | 로컬 | 메신저 음성(OGG/Opus) ↔ WAV |
 | 컨테이너 런타임 | **Colima** + Docker CLI | MIT / Apache 2.0, 무료 | 로컬 VM | Docker Desktop은 조건부 무료·비공개라 쓰지 않음. VM 메모리 2GB 상한 |
 | 웹 검색 | SearXNG | AGPL-3.0, 무료 | 로컬 컨테이너 | API 키 불필요. 검색 결과는 외부 검색 엔진에서 가져옴 |
@@ -1694,6 +1695,49 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
   - Slack: `vesta slack manifest`로 앱 만들기 → 워크스페이스에 설치 → 앱 토큰(`connections:write`) 만들기 → `vesta slack token` → `vesta slack pair` → 앱 메시지 탭에 코드 → 대화·셸 승인.
 - Slack 무료 플랜은 기록 90일 보관(6.4). Discord는 봇과 같은 서버에 있어야 DM 가능.
 - 음성·사진(M12), 알림(P2).
+
+### 13.14 M12 진행 기록 (2026-10-21)
+
+#### 완료
+- **미디어 워커** (`media-worker/`, PROJECT.md 7.11):
+  - uv 프로젝트, Python 3.12 고정(시스템 Python 3.15에는 torch 휠이 없음). mlx-whisper + `mlx-community/whisper-large-v3-turbo`.
+  - `127.0.0.1:11436`, `POST /stt`(16kHz 모노 WAV만), `GET /health`(올라간 모델·메모리), `POST /unload`.
+  - 모델은 처음 요청 때 올리고 30분 안 쓰면 내린다. 받아 둔 모델은 로컬 경로로 써서 인식할 때 Hugging Face에 묻지 않는다.
+  - launchd `dev.vesta.media`. `scripts/install-vesta.sh`가 `~/.vesta/media-worker`에 복사하고 `uv sync --frozen`.
+- **`media` 모듈**: `Ffmpeg`(아무 형식 → 16kHz WAV, 최대 5분 / aiff → m4a·ogg Opus, 인자 목록으로 실행), `WorkerSpeechToText`, `SayTextToSpeech`(`say -v Yuna -f 파일`), `SpeechText`(읽어 주기용 글: 코드·표 → "(코드 생략)"·"(표 생략)", 출처 번호·주소·서식 기호 빼기, 1,500자에서 문장 끝으로 자름).
+- **비전**: `ChatMessage.images` → OpenAI 호환 `content` 배열(`image_url` data URL). Gemma 4(메인 모델)가 직접 읽어 추가 메모리 없음(`models.vision`이 없으면 메인 모델).
+  - 이미지를 붙인 질문은 일반 대화(ChatAgent)로 보낸다(다른 에이전트는 이미지를 못 읽음). 글 없이 이미지만 보내면 "이 이미지를 설명해 줘".
+  - 이미지는 `media_asset`(schema v10) + `~/.vesta/media/<사용자>/`(파일 권한 600)에 저장하고 메시지에 연결. 조회는 본인 것만.
+  - 후속 질문에는 가장 최근에 이미지를 붙인 질문의 이미지만 다시 보낸다. 이전 이미지는 "[이미지 N장 첨부]"로만.
+  - 이미지 형식은 파일 앞부분으로 확인(PNG·JPEG·WebP·GIF). 한 질문에 4장, 장당 10MB까지.
+- **메모리 예산**: 미디어 워커가 올린 음성 인식 모델(약 1.6GB)을 `ModelManager` 예산 계산에 더한다. 대시보드·`/status`에 워커 상태와 메모리 표시.
+- **서버 API**: `POST /api/chat`에 `images`(base64), `POST /api/stt`(녹음 파일 → 글, 25MB까지), `POST /api/speech`(글 → m4a), `GET /api/media/{id}`(본인 이미지만, 저장 때 확인한 이미지 형식으로만 응답). CSP에 `blob:`(미리보기·재생) 추가.
+- **웹 UI**:
+  - 🎤: 녹음(MediaRecorder, 크롬 webm/opus·사파리 mp4) → 인식한 글을 입력란에 넣고, 사용자가 확인한 뒤 보낸다 (V-02).
+  - 📎·붙여넣기·끌어 놓기로 이미지 첨부. 1.5MB 넘는 사진은 긴 변 1600px JPEG로 줄여 보낸다. 미리보기와 빼기 버튼.
+  - 질문 말풍선에 이미지, 기록을 다시 열어도 보인다. 답변마다 🔊 읽기(다시 누르면 멈춤).
+- **메신저**:
+  - 음성 메시지(Telegram voice·audio, Discord 음성 메시지 `audio/ogg`, Slack 오디오 파일) → 인식 → "🎤 인식한 글"을 먼저 보낸 뒤 그 글로 묻는다. 승인은 음성이 아니라 버튼으로만 (V-02).
+  - 사진(Telegram photo는 여러 크기 중 한도 안 가장 큰 것, 문서로 보낸 이미지도) → 설명(캡션)을 질문으로 비전 질문.
+  - Telegram `/voice`: 음성으로 물으면 답도 음성 메시지(ogg Opus)로. 대화방마다 켜고 끔(서버를 다시 시작하면 `voiceReply` 설정값). Discord·Slack은 음성 답변 없음.
+- **설정**: `models.stt`·`models.tts`는 설정 파일에 없어도 기본값으로 켜진다(기존 설정을 고치지 않아도 됨). `media`(ffmpeg 경로, 최대 길이·크기·이미지 수, 읽어 주기 글자 수).
+- **테스트**: 미디어 저장(본인 것만·권한 600·메시지 연결), 대화 엔진(이미지 → 일반 대화, 저장, 후속 질문에 다시 붙임, 이미지만 보낸 경우), 미디어 모듈(읽기용 글, 이미지 형식 확인, 실제 ffmpeg·say 변환, 워커 호출·오류), 서버 API(이미지 형식·개수, 음성 인식·읽어 주기·미디어 권한, 크기 제한), Telegram(음성 → 인식 글 → 질문, `/voice` 음성 답변, 사진·문서 이미지), Discord(음성·이미지 첨부).
+
+#### 확인 (평가용 홈 `~/.vesta-eval`, 실제 모델·워커)
+- 워커: `say`로 만든 한국어 음성 4.2초 → 0.13~0.49초에 정확히 인식. 1.6GB 올라가고, 유휴 시간 뒤 내려감.
+- Gemma 4 비전: 오류 스크린샷 → "Java heap space 부족" 1.5초.
+- Telegram(가짜 Bot API): 음성으로 "등록한 문서에서 텔레그램 메시지 길이 제한…" → 인식 글 표시 → 문서 질의(PROJECT.md 6.5 출처, 4096자). `/voice` 켠 뒤 음성 질문 → 음성 메시지 답(ogg). 오류 스크린샷 + 캡션 → 원인·해결 방법. 후속 질문 "첫 줄 글자" → 이미지를 다시 읽어 정확히 답함.
+- 웹 UI(Playwright): 📎로 스크린샷 첨부 → 질문 → 답, 🔊 읽기 재생·멈춤, 새로 고침 뒤 기록에서 이미지가 `/api/media/…`로 보임. `/api/stt`에 webm/opus·m4a 모두 인식.
+
+#### 발견·수정
+- 웹 UI: 파일을 고른 뒤 입력란을 비우면 FileList도 비어 이미지가 안 붙음 → 먼저 옮겨 둔다. Kotlin/JS `as` 형 검사가 브라우저 객체에서 실패 → `unsafeCast`.
+- `default-config.yaml`은 `vesta config init` 템플릿이라 기존 설정에는 `stt`·`tts`가 없어 음성 인식이 꺼져 있었음 → 코드 기본값으로.
+- 합성 음성(say)을 다시 인식하면 "수도 → 소도", "자 → 차"처럼 틀릴 때가 있다. 실제 목소리로 확인 필요.
+
+#### 남은 일
+- **실제 확인** (M12 완료 조건): 휴대폰 Telegram에서 음성으로 묻고 답 받기, 스크린샷 질문. 웹 UI 마이크는 휴대폰 브라우저(Tailscale HTTPS)에서 확인 — 마이크는 HTTPS나 localhost에서만 열린다.
+- CLI에서 이미지·음성 입력은 아직 없음(웹·메신저만).
+- MeloTTS(V-03 2차), 이미지 속 문자 인식으로 컬렉션 추가(V-05)는 이후.
 
 ---
 

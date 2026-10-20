@@ -12,6 +12,10 @@ import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.AgentRequest
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.inference.ChatRole
+import dev.vesta.core.media.ImageInput
+import dev.vesta.core.media.MediaAsset
+import dev.vesta.core.media.MediaKind
+import dev.vesta.core.media.MediaStore
 import dev.vesta.core.session.MessageRepository
 import dev.vesta.core.session.NewMessage
 import dev.vesta.core.session.Session
@@ -39,11 +43,20 @@ private class MemorySessions : SessionRepository {
     override suspend fun updateTitle(userId: UserId, id: SessionId, title: String) = Unit
 }
 
-private class MemoryMessages : MessageRepository {
+private class MemoryMedia : MediaStore {
+    val items = mutableMapOf<String, Pair<MediaAsset, ByteArray>>()
+    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray) =
+        MediaAsset("a${items.size}", userId, kind, mime, bytes.size.toLong()).also { items[it.id] = it to bytes }
+    override suspend fun load(userId: UserId, id: String) = items[id]?.takeIf { it.first.userId == userId }
+}
+
+private class MemoryMessages(private val media: MemoryMedia? = null) : MessageRepository {
     val items = mutableListOf<StoredMessage>()
     override suspend fun append(sessionId: SessionId, message: NewMessage) =
-        StoredMessage(items.size.toLong() + 1, sessionId, message.role, message.content, message.agent, message.model, message.interrupted, Instant.EPOCH)
-            .also { items += it }
+        StoredMessage(
+            items.size.toLong() + 1, sessionId, message.role, message.content, message.agent, message.model, message.interrupted, Instant.EPOCH,
+            message.attachments.mapNotNull { media?.items?.get(it)?.first },
+        ).also { items += it }
     override suspend fun list(sessionId: SessionId) = items.filter { it.sessionId == sessionId }
 }
 
@@ -115,6 +128,43 @@ class DefaultConversationServiceTest : FunSpec({
         val service = DefaultConversationService(sessions, MemoryMessages(), mapOf(AgentType.CHAT to ScriptedAgent {}))
         shouldThrow<SessionNotFoundException> {
             service.send(user, ChannelType.CLI, other.id, UserInput("hi")).toList()
+        }
+    }
+
+    test("이미지를 붙이면 저장하고 일반 대화로 보낸다. 후속 질문에는 마지막 이미지를 다시 붙인다") {
+        val media = MemoryMedia()
+        val messages = MemoryMessages(media)
+        val chat = ScriptedAgent { emit(AgentEvent.Token("오류입니다")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val web = object : Agent {
+            override val type = AgentType.WEB
+            override fun handle(request: AgentRequest): Flow<AgentEvent> = flow { error("웹으로 가면 안 됨") }
+        }
+        val service = DefaultConversationService(MemorySessions(), messages, mapOf(AgentType.CHAT to chat, AgentType.WEB to web), media = media)
+        val png = ImageInput.of(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 0))!!
+
+        val events = service.send(user, ChannelType.WEB, null, UserInput("/web 이 화면 뭐야?", listOf(png))).toList()
+        val session = events.filterIsInstance<AgentEvent.SessionReady>().single().sessionId
+        events.filterIsInstance<AgentEvent.Routed>().single().decision.agent shouldBe AgentType.CHAT
+        chat.requests.single().history.last().let {
+            it.content shouldBe "이 화면 뭐야?"
+            it.images.single().mime shouldBe "image/png"
+        }
+        media.items.size shouldBe 1
+        messages.items.first().attachments.single().mime shouldBe "image/png"
+
+        service.send(user, ChannelType.WEB, session, UserInput("두 번째 줄은?")).toList()
+        val second = chat.requests.last().history
+        second.first().images.size shouldBe 1
+        second.last().images.shouldBeEmpty()
+    }
+
+    test("글 없이 이미지만 보내면 설명을 부탁한 것으로 본다") {
+        val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat))
+        service.send(user, ChannelType.WEB, null, UserInput("", listOf(ImageInput("image/jpeg", byteArrayOf(1))))).toList()
+        chat.requests.single().history.last().let {
+            it.content shouldBe "이 이미지를 설명해 줘."
+            it.images.size shouldBe 1
         }
     }
 })

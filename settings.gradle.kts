@@ -56,6 +56,7 @@ include(
     "decision",
     "router",
     "tools",
+    "media",
     "mcp",
     "agents",
     "conversation",

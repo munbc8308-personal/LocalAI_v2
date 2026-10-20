@@ -3,11 +3,14 @@ package dev.vesta.channels.slack
 import dev.vesta.channels.ButtonReply
 import dev.vesta.channels.ChannelBot
 import dev.vesta.channels.ChannelFiles
+import dev.vesta.channels.FileKind
 import dev.vesta.channels.Inbound
 import dev.vesta.channels.InboundFile
 import dev.vesta.core.channel.ChannelBindingStore
 import dev.vesta.core.config.SlackConfig
+import dev.vesta.core.config.MediaConfig
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.media.SpeechToText
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,8 +51,11 @@ class SlackBot(
     status: suspend () -> String = { "정상" },
     clock: Clock = Clock.systemUTC(),
     nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    speechToText: SpeechToText? = null,
+    mediaLimits: MediaConfig = MediaConfig(),
 ) {
-    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis)
+    // 음성 답변은 보내지 않는다 (Slack 음성 메시지 형식은 따로 만들어야 함)
+    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits)
     internal var selfId: String? = null
 
     /** 끝날 때까지 Socket Mode 연결을 유지한다. 토큰이 거부되면 멈춘다 */
@@ -109,7 +115,7 @@ class SlackBot(
                 sentAt = event.string("ts")?.substringBefore('.')?.toLongOrNull()?.let(Instant::ofEpochSecond),
                 file = file?.let { f ->
                     val url = f.string("url_private_download") ?: f.string("url_private")
-                    InboundFile(f.string("name") ?: "file", f["size"]?.jsonPrimitive?.longOrNull) { max ->
+                    InboundFile(f.string("name") ?: "file", f["size"]?.jsonPrimitive?.longOrNull, kindOf(f.string("mimetype"))) { max ->
                         api.download(url ?: throw IOException("파일 주소 없음"), max)
                     }
                 },
@@ -194,4 +200,12 @@ class SlackBot(
         /** plain_text_input 한도 */
         const val EDIT_MAX = 3_000
     }
+}
+
+/** 플랫폼이 알려 준 형식으로 음성·이미지를 가린다 */
+private fun kindOf(mime: String?) = when {
+    mime == null -> FileKind.DOCUMENT
+    mime.startsWith("audio/") -> FileKind.VOICE
+    mime.startsWith("image/") -> FileKind.IMAGE
+    else -> FileKind.DOCUMENT
 }

@@ -15,6 +15,11 @@ case "${1:-}" in
 esac
 for template in $TEMPLATES; do
     label=$(basename "$template" .plist)
+    # 미디어 워커는 Python 환경이 있을 때만 (install-vesta.sh가 만든다)
+    if [ "$label" = "dev.vesta.media" ] && [ "${1:-}" != "--uninstall" ] && [ ! -x "$HOME/.vesta/media-worker/.venv/bin/python" ]; then
+        echo "건너뜀: $label (미디어 워커 환경 없음)"
+        continue
+    fi
     target="$AGENTS/$label.plist"
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
     # bootout은 비동기라, 완전히 내려간 뒤에 다시 올려야 bootstrap이 실패하지 않는다 (오류 5)

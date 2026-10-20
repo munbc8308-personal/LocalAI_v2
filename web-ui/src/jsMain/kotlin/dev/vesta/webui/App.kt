@@ -30,6 +30,7 @@ import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.Form
 import org.jetbrains.compose.web.dom.H2
+import org.jetbrains.compose.web.dom.Img
 import org.jetbrains.compose.web.dom.Input
 import org.jetbrains.compose.web.dom.Li
 import org.jetbrains.compose.web.dom.P
@@ -150,7 +151,7 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
                 if (chat.turns.isEmpty()) {
                     Div({ classes("empty") }) {
                         P { Text("무엇이든 물어보세요.") }
-                        P({ classes("muted", "small") }) { Text("/web 웹 검색 · /docs 문서 · @컬렉션 이름 · /chat 일반 대화") }
+                        P({ classes("muted", "small") }) { Text("/web 웹 검색 · /docs 문서 · @컬렉션 이름 · /chat 일반 대화 · 🎤 음성 · 📎 이미지(붙여넣기·끌어 놓기)") }
                     }
                 }
                 chat.loadError?.let { P({ classes("error") }) { Text(it) } }
@@ -174,21 +175,113 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
 private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> Unit) {
     // 터치 기기에서는 Enter가 줄바꿈, 보내기는 버튼
     val touch = remember { window.matchMedia("(pointer: coarse)").matches }
+    val scope = rememberCoroutineScope()
+    val recorder = remember { Recorder() }
+    var recording by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    var mediaError by remember { mutableStateOf<String?>(null) }
     // 이벤트 핸들러가 이전 화면의 draft 값을 붙잡고 있을 수 있어 입력란에서 직접 읽는다
     fun submit() {
         val area = document.getElementById("composer") as? HTMLTextAreaElement ?: return
         val text = area.value
-        if (chat.busy || text.isBlank()) return
+        if (chat.busy || (text.isBlank() && chat.pendingImages.isEmpty())) return
         chat.send(text)
         setDraft("")
         area.value = ""
         area.style.height = ""
     }
-    Div({ classes("composer") }) {
+    fun addImages(files: dynamic) {
+        val count: Int = (files?.length ?: 0).unsafeCast<Int>()
+        // FileList는 입력란을 비우면 같이 비므로 먼저 옮겨 둔다
+        val picked = (0 until count).map { files.item(it).unsafeCast<org.w3c.files.File>() }
+        scope.launch {
+            for (file in picked) {
+                if (!file.type.startsWith("image/")) continue
+                if (chat.pendingImages.size >= MAX_IMAGES) { mediaError = "이미지는 ${MAX_IMAGES}장까지 붙일 수 있습니다"; break }
+                runCatching { Images.prepare(file) }.onSuccess { chat.pendingImages += it; mediaError = null }.onFailure { mediaError = it.message }
+            }
+        }
+    }
+    // 녹음 → 인식한 글을 입력란에 넣는다. 확인하고 보내기를 누른다 (V-02)
+    fun toggleRecording() = scope.launch {
+        mediaError = null
+        if (!recording) {
+            runCatching { recorder.start() }.onSuccess { recording = true }.onFailure { mediaError = "마이크를 열지 못했습니다: ${it.message}" }
+            return@launch
+        }
+        recording = false
+        transcribing = true
+        try {
+            val text = MediaApi.transcribe(recorder.stop())
+            if (text.isBlank()) mediaError = "알아듣지 못했습니다. 다시 말해 주세요"
+            else {
+                val area = document.getElementById("composer") as? HTMLTextAreaElement
+                val joined = listOf(area?.value.orEmpty(), text).filter { it.isNotBlank() }.joinToString(" ")
+                area?.value = joined
+                setDraft(joined)
+                area?.focus()
+            }
+        } catch (e: Throwable) {
+            mediaError = e.message
+        } finally {
+            transcribing = false
+        }
+    }
+    if (chat.pendingImages.isNotEmpty() || mediaError != null) Div({ classes("attachments") }) {
+        chat.pendingImages.forEach { image ->
+            Div({ classes("thumb") }) {
+                Img(image.dataUrl, "붙인 이미지")
+                Button({ classes("remove"); attr("aria-label", "빼기"); onClick { chat.pendingImages.remove(image) } }) { Text("×") }
+            }
+        }
+        mediaError?.let { Span({ classes("error", "small") }) { Text(it) } }
+    }
+    Div({
+        classes("composer")
+        // 이미지를 끌어다 놓기
+        onDragOver { it.preventDefault() }
+        onDrop { event ->
+            event.preventDefault()
+            addImages(event.nativeEvent.asDynamic().dataTransfer?.files)
+        }
+    }) {
+        Input(InputType.File) {
+            id("image-input")
+            attr("accept", "image/*")
+            attr("multiple", "")
+            style { property("display", "none") }
+            onChange { event ->
+                val input = event.target.asDynamic()
+                addImages(input.files)
+                input.value = ""
+            }
+        }
+        Button({
+            classes("icon")
+            attr("title", "이미지 붙이기")
+            attr("aria-label", "이미지 붙이기")
+            onClick { (document.getElementById("image-input") as? HTMLElement)?.click() }
+        }) { Text("📎") }
+        Button({
+            classes("icon")
+            if (recording) classes("recording")
+            attr("title", if (recording) "녹음 끝내기" else "음성으로 입력")
+            attr("aria-label", if (recording) "녹음 끝내기" else "음성으로 입력")
+            if (transcribing) disabled()
+            onClick { toggleRecording() }
+        }) { Text(if (transcribing) "…" else if (recording) "■" else "🎤") }
         TextArea(draft) {
             id("composer")
             attr("rows", "1")
-            placeholder("메시지")
+            placeholder(if (recording) "녹음 중… ■를 누르면 끝" else if (transcribing) "음성 인식 중…" else "메시지")
+            // 스크린샷 붙여넣기
+            onPaste { event ->
+                val files = event.nativeEvent.asDynamic().clipboardData?.files
+                if ((files?.length ?: 0).unsafeCast<Int>() > 0) {
+                    event.preventDefault()
+                    addImages(files)
+                }
+            }
             onInput { event ->
                 setDraft(event.value)
                 val area = event.target
@@ -211,7 +304,10 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
 
 @Composable
 private fun TurnView(chat: ChatController, turn: Turn) {
-    if (turn.question.isNotEmpty()) Div({ classes("bubble", "user") }) { Text(turn.question) }
+    if (turn.question.isNotEmpty() || turn.images.isNotEmpty()) Div({ classes("bubble", "user") }) {
+        if (turn.images.isNotEmpty()) Div({ classes("bubble-images") }) { turn.images.forEach { Img(it, "질문에 붙인 이미지") } }
+        if (turn.question.isNotEmpty()) Text(turn.question)
+    }
     Div({ classes("bubble", "assistant") }) {
         val agent = turn.routing?.agent ?: turn.agent
         if (agent != null) Div({ classes("meta") }) {
@@ -259,7 +355,57 @@ private fun TurnView(chat: ChatController, turn: Turn) {
                 Text(listOfNotNull(d.model, d.completionTokens?.let { "$it 토큰" }).joinToString(" · "))
             }
         }
+        // 읽어 주기 (V-03): 코드·표·출처는 서버가 빼고 읽는다
+        if (turn.answer.isNotBlank() && !(chat.busy && turn === chat.turns.lastOrNull())) SpeakButton(turn)
     }
+}
+
+/** 한 번에 답변 하나만 읽는다 */
+private object Speaker {
+    var playing by mutableStateOf<Turn?>(null)
+    var loading by mutableStateOf<Turn?>(null)
+    private var audio: dynamic = null
+
+    fun stop() {
+        audio?.pause()
+        audio = null
+        playing = null
+    }
+
+    suspend fun play(turn: Turn) {
+        stop()
+        loading = turn
+        val url = try {
+            MediaApi.speech(turn.answer)
+        } finally {
+            loading = null
+        }
+        val player: dynamic = js("new Audio(url)")
+        player.onended = { _: dynamic -> if (playing === turn) playing = null; org.w3c.dom.url.URL.revokeObjectURL(url) }
+        audio = player
+        playing = turn
+        player.play()
+    }
+}
+
+@Composable
+private fun SpeakButton(turn: Turn) {
+    val scope = rememberCoroutineScope()
+    var error by remember { mutableStateOf<String?>(null) }
+    val label = when {
+        Speaker.loading === turn -> "🔊 준비 중…"
+        Speaker.playing === turn -> "■ 멈춤"
+        else -> "🔊 읽기"
+    }
+    Button({
+        classes("link", "small")
+        onClick {
+            error = null
+            if (Speaker.playing === turn) Speaker.stop()
+            else scope.launch { runCatching { Speaker.play(turn) }.onFailure { error = it.message } }
+        }
+    }) { Text(label) }
+    error?.let { Span({ classes("error", "small") }) { Text(" $it") } }
 }
 
 @Composable
@@ -379,6 +525,9 @@ private fun DashboardView(me: MeDto) {
 
 // JS 정규식(u 플래그)은 닫는 ]도 이스케이프해야 한다
 private val citation = Regex("\\[(\\d+(?:\\s*,\\s*\\d+)*)\\]")
+
+/** 서버 설정(media.maxImages) 기본값과 같게 */
+private const val MAX_IMAGES = 4
 
 private fun citedNumbers(answer: String): Set<Int> =
     citation.findAll(answer).flatMap { m -> m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() } }.toSet()

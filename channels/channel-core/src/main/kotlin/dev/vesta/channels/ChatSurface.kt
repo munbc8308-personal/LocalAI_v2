@@ -45,6 +45,12 @@ interface ChatSurface {
 
     /** 입력 창이 없는 플랫폼(Telegram): 수정한 값을 다음 메시지로 보내 달라고 한다 */
     suspend fun askEdit(chat: String, current: String)
+
+    /** 음성 메시지로 답할 수 있는지 (V-03) */
+    val supportsVoice: Boolean get() = false
+
+    /** OGG/Opus 음성 메시지를 보낸다 */
+    suspend fun sendVoice(chat: String, ogg: ByteArray) {}
 }
 
 enum class ButtonStyle { NORMAL, PRIMARY, DANGER }
@@ -103,7 +109,15 @@ sealed interface Inbound {
     ) : Inbound
 }
 
-class InboundFile(val name: String, val size: Long?, val download: suspend (maxBytes: Long) -> ByteArray)
+class InboundFile(
+    val name: String,
+    val size: Long?,
+    /** 플랫폼이 알려 준 종류. 문서로 와도 이름이 이미지면 이미지로 본다 */
+    val kind: FileKind = FileKind.DOCUMENT,
+    val download: suspend (maxBytes: Long) -> ByteArray,
+)
+
+enum class FileKind { DOCUMENT, VOICE, IMAGE }
 
 /** 버튼 누름에 대한 응답. 플랫폼마다 정해진 시간 안에 한 번 답해야 한다 */
 interface ButtonReply {

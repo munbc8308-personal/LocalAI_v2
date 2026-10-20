@@ -14,6 +14,25 @@ data class VestaConfig(
     val tools: ToolsConfig = ToolsConfig(),
     val server: ServerConfig = ServerConfig(),
     val channels: ChannelsConfig = ChannelsConfig(),
+    val media: MediaConfig = MediaConfig(),
+)
+
+/**
+ * 음성·이미지 입력 (PROJECT.md 7.11, M12). 음성 인식 모델·워커 주소는 `models.stt`, 읽어 주기 음성은 `models.tts`.
+ */
+data class MediaConfig(
+    /** 음성을 16kHz WAV로, 합성 음성을 m4a·ogg로 바꾼다 */
+    val ffmpeg: String = "/opt/homebrew/bin/ffmpeg",
+    /** 이보다 긴 음성은 앞부분만 인식한다 */
+    val maxAudioSeconds: Int = 300,
+    /** 받을 음성 파일 최대 크기 */
+    val maxAudioMegabytes: Int = 25,
+    /** 받을 이미지 최대 크기 */
+    val maxImageMegabytes: Int = 10,
+    /** 질문 하나에 붙일 수 있는 이미지 수 */
+    val maxImages: Int = 4,
+    /** 읽어 줄 글자 수 상한 (넘으면 앞부분만 읽는다) */
+    val ttsMaxChars: Int = 1_500,
 )
 
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */
@@ -37,6 +56,8 @@ interface MessengerConfig {
     val maxFileMegabytes: Int
     /** API 주소 (시험용 가짜 서버를 쓸 때만 바꾼다) */
     val apiUrl: String
+    /** 음성으로 물으면 답도 음성으로 보낼지 (V-03, 지원하는 메신저만). `/voice`로 대화방마다 바꿀 수 있다 */
+    val voiceReply: Boolean get() = false
 }
 
 data class TelegramConfig(
@@ -49,6 +70,7 @@ data class TelegramConfig(
     override val maxFileMegabytes: Int = 20,
     /** 직접 띄운 Bot API 서버나 시험용 가짜 서버를 쓸 때만 바꾼다 */
     override val apiUrl: String = "https://api.telegram.org",
+    override val voiceReply: Boolean = false,
 ) : MessengerConfig
 
 data class DiscordConfig(
@@ -124,10 +146,18 @@ data class ModelsConfig(
     val code: ModelSpec? = null,
     val embedding: ModelSpec? = null,
     val reranker: ModelSpec? = null,
+    /** 없으면 메인 모델이 이미지를 읽는다 (Gemma 4는 비전 지원) */
     val vision: ModelSpec? = null,
     val image: ModelSpec? = null,
-    val stt: ModelSpec? = null,
-    val tts: ModelSpec? = null,
+    /** 음성 인식: 미디어 워커의 mlx-whisper (M12). 설정 파일에 없어도 켜진다 */
+    val stt: ModelSpec? = ModelSpec(
+        name = "mlx-community/whisper-large-v3-turbo",
+        keepAlive = "30m",
+        engine = "mlx-whisper",
+        baseUrl = "http://127.0.0.1:11436",
+    ),
+    /** 읽어 주기: macOS say 한국어 음성 */
+    val tts: ModelSpec? = ModelSpec(name = "Yuna", engine = "say"),
 )
 
 data class DecisionThresholds(

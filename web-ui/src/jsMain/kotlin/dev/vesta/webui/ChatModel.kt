@@ -17,8 +17,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 
-/** 질문 하나와 그 답변 (화면의 한 묶음) */
-class Turn(val question: String) {
+/** 질문 하나와 그 답변 (화면의 한 묶음). [images]는 질문에 붙인 이미지 주소 (data: 또는 /api/media/…) */
+class Turn(val question: String, val images: List<String> = emptyList()) {
     var answer by mutableStateOf("")
     var routing by mutableStateOf<RoutingDto?>(null)
     var status by mutableStateOf<String?>(null)
@@ -53,6 +53,8 @@ class ChatController(private val scope: CoroutineScope) {
     var sessionId by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var loadError by mutableStateOf<String?>(null)
+    /** 다음 질문에 붙일 이미지 (V-04) */
+    val pendingImages = mutableStateListOf<PendingImage>()
     private var job: Job? = null
 
     fun refreshSessions() = scope.launch {
@@ -64,6 +66,7 @@ class ChatController(private val scope: CoroutineScope) {
         stop()
         sessionId = null
         turns.clear()
+        pendingImages.clear()
         loadError = null
     }
 
@@ -80,13 +83,15 @@ class ChatController(private val scope: CoroutineScope) {
     }
 
     fun send(text: String) {
-        if (busy || text.isBlank()) return
-        val turn = Turn(text.trim())
+        val images = pendingImages.map { it.dataUrl }
+        if (busy || (text.isBlank() && images.isEmpty())) return
+        val turn = Turn(text.trim(), images)
+        pendingImages.clear()
         turns += turn
         busy = true
         job = scope.launch {
             try {
-                Http.chat(ChatRequestDto(turn.question, sessionId)).collect { apply(turn, it) }
+                Http.chat(ChatRequestDto(turn.question, sessionId, images = images.map { it.substringAfter("base64,") })).collect { apply(turn, it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 turn.error = "중지함"
                 throw e
@@ -146,7 +151,7 @@ class ChatController(private val scope: CoroutineScope) {
     private fun history(messages: List<MessageDto>): List<Turn> {
         val out = mutableListOf<Turn>()
         for (m in messages) when (m.role) {
-            "USER" -> out += Turn(m.content)
+            "USER" -> out += Turn(m.content, m.attachments.filter { it.mime.startsWith("image/") }.map { "/api/media/${it.id}" })
             "ASSISTANT" -> {
                 val turn = out.lastOrNull()?.takeIf { it.answer.isEmpty() } ?: Turn("").also { out += it }
                 turn.answer = m.content

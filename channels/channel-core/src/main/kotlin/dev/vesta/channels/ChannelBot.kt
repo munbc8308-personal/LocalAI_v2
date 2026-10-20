@@ -6,9 +6,15 @@ import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.channel.ChannelBinding
 import dev.vesta.core.channel.ChannelBindingStore
+import dev.vesta.core.config.MediaConfig
 import dev.vesta.core.config.MessengerConfig
 import dev.vesta.core.conversation.ConversationService
 import dev.vesta.core.knowledge.Evidence
+import dev.vesta.core.media.AudioFormat
+import dev.vesta.core.media.ImageInput
+import dev.vesta.core.media.MediaException
+import dev.vesta.core.media.SpeechToText
+import dev.vesta.core.media.TextToSpeech
 import dev.vesta.core.tools.ApprovalDecision
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +48,11 @@ class ChannelBot(
     private val status: suspend () -> String = { "정상" },
     private val clock: Clock = Clock.systemUTC(),
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** 음성 메시지 인식 (V-01). 없으면 음성은 받지 않는다 */
+    private val speechToText: SpeechToText? = null,
+    /** 음성 답변 (V-03). 음성으로 물었고 `/voice`를 켰을 때만 */
+    private val textToSpeech: TextToSpeech? = null,
+    private val mediaLimits: MediaConfig = MediaConfig(),
 ) {
     private val channel = surface.channel
     private val chats = mutableMapOf<String, ChatState>()
@@ -67,6 +78,8 @@ class ChannelBot(
         var attachment: Attachment? = null
         val approvals = mutableMapOf<String, ApprovalMessage>()
         val offers = LinkedHashMap<String, FileOffer>()
+        /** 음성으로 물으면 음성으로도 답할지 (`/voice`로 바꾼다. 서버를 다시 시작하면 설정값으로) */
+        var voiceReply: Boolean? = null
     }
 
     /** 받은 일 하나 처리. 답변 생성처럼 오래 걸리는 일은 [scope]에 띄운다 */
@@ -102,7 +115,7 @@ class ChannelBot(
         }
         val state = chats.getOrPut(chat) { ChatState() }
         if (message.file != null) return onFile(binding, state, chat, message.file, text, scope)
-        if (text.isNullOrEmpty()) return send(chat, "글이나 문서 파일(.txt .md .pdf)을 보내 주세요.")
+        if (text.isNullOrEmpty()) return send(chat, "글·음성·사진이나 문서 파일(.txt .md .pdf)을 보내 주세요.")
 
         when (command(text)) {
             "start", "help" -> return send(chat, help())
@@ -118,6 +131,12 @@ class ChannelBot(
                 return
             }
             "status" -> return send(chat, runCatching { status() }.getOrElse { "상태 확인 실패: ${it.message}" })
+            "voice" -> {
+                if (!surface.supportsVoice || textToSpeech == null) return send(chat, "이 메신저에서는 음성 답변을 쓸 수 없습니다.")
+                val on = !(state.voiceReply ?: config.voiceReply)
+                state.voiceReply = on
+                return send(chat, if (on) "음성으로 물으면 음성으로도 답합니다." else "음성 답변을 껐습니다.")
+            }
         }
         state.pendingEdit?.let { id ->
             state.pendingEdit = null
@@ -128,7 +147,7 @@ class ChannelBot(
         state.attachment = null
         val question = routed(text)
         val input = if (attachment != null) withFile(chat, attachment, question) ?: return else question
-        startTurn(binding, state, chat, input, scope)
+        startTurn(binding, state, chat, UserInput(input), scope)
     }
 
     /** `/new`, `!new`, `/new@봇이름` → "new". 엔진 명령이 아니면 null */
@@ -171,11 +190,12 @@ class ChannelBot(
         send(chat, "연결됐습니다.\n\n${help()}")
     }
 
-    private fun startTurn(binding: ChannelBinding, state: ChatState, chat: String, input: String, scope: CoroutineScope) {
-        state.job = scope.launch { runTurn(binding, state, chat, input) }
+    /** [voice]면 음성으로 들어온 질문 (음성 답변 대상) */
+    private fun startTurn(binding: ChannelBinding, state: ChatState, chat: String, input: UserInput, scope: CoroutineScope, voice: Boolean = false) {
+        state.job = scope.launch { runTurn(binding, state, chat, input, voice) }
     }
 
-    private suspend fun runTurn(binding: ChannelBinding, state: ChatState, chat: String, input: String) {
+    private suspend fun runTurn(binding: ChannelBinding, state: ChatState, chat: String, input: UserInput, voice: Boolean) {
         fun newReply() = LiveReply(surface, chat, config.streamIntervalMillis, nowMillis).also {
             // 로컬 자료를 보내지 않는 설정이면 어느 에이전트가 맡을지 알기 전까지 글자를 보여 주지 않는다
             it.streaming = config.allowLocalSources
@@ -192,7 +212,7 @@ class ChannelBot(
         val opened = mutableListOf<String>()
         try {
             reply.start("생각 중…")
-            conversation.send(binding.user, channel, binding.sessionId, UserInput(input)).collect { event ->
+            conversation.send(binding.user, channel, binding.sessionId, input).collect { event ->
                 when (event) {
                     is AgentEvent.SessionReady -> if (event.sessionId != binding.sessionId) {
                         bindings.setSession(channel, binding.externalUserId, event.sessionId)
@@ -244,6 +264,20 @@ class ChannelBot(
                 }
                 runCatching { reply.finish(body, if (withheld) null else footer(answer, evidence, done, unsupported)) }
                     .onFailure { log.warn { "${surface.name} 답변 마무리 실패: ${it.message}" } }
+            }
+        }
+        // 음성으로 물었으면 답도 읽어 준다 (코드·표·출처는 읽지 않음, V-03)
+        val tts = textToSpeech
+        if (voice && !cancelled && !withheld && tts != null && surface.supportsVoice && (state.voiceReply ?: config.voiceReply)) {
+            val answer = earlier.toString() + reply.answer
+            if (answer.isNotBlank()) {
+                try {
+                    surface.sendVoice(chat, tts.synthesize(answer, AudioFormat.OGG_OPUS))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log.warn { "${surface.name} 음성 답변 실패: ${e.message}" }
+                }
             }
         }
     }
@@ -370,9 +404,49 @@ class ChannelBot(
         state.approvals.remove(id)
     }
 
+    /** 음성 (V-01·V-02): 인식한 글을 먼저 보여 주고 그 글로 묻는다. 승인은 음성이 아니라 버튼으로만 받는다 */
+    private suspend fun onVoice(binding: ChannelBinding, state: ChatState, chat: String, file: InboundFile, scope: CoroutineScope) {
+        val stt = speechToText ?: return send(chat, "음성 인식이 꺼져 있습니다. 글로 보내 주세요.")
+        if (state.job?.isActive == true) return send(chat, "앞 질문에 답하는 중입니다. 멈추려면 ${surface.commandPrefix}cancel")
+        val maxBytes = mediaLimits.maxAudioMegabytes * 1024L * 1024
+        if ((file.size ?: 0) > maxBytes) return send(chat, "음성이 너무 깁니다 (최대 ${mediaLimits.maxAudioMegabytes}MB).")
+        val text = try {
+            stt.transcribe(file.download(maxBytes))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: MediaException) {
+            return send(chat, e.message ?: "음성을 알아듣지 못했습니다.")
+        } catch (e: Exception) {
+            log.warn { "${surface.name} 음성 인식 실패: ${e.message}" }
+            return send(chat, "음성을 받지 못했습니다: ${e.message}")
+        }
+        if (text.isBlank()) return send(chat, "음성을 알아듣지 못했습니다. 다시 말하거나 글로 보내 주세요.")
+        send(chat, "🎤 $text")
+        startTurn(binding, state, chat, UserInput(text), scope, voice = true)
+    }
+
+    /** 사진·스크린샷 (V-04): 설명(캡션)을 질문으로, 없으면 이미지 설명 */
+    private suspend fun onImage(binding: ChannelBinding, state: ChatState, chat: String, file: InboundFile, caption: String?, scope: CoroutineScope) {
+        if (state.job?.isActive == true) return send(chat, "앞 질문에 답하는 중입니다. 멈추려면 ${surface.commandPrefix}cancel")
+        val maxBytes = mediaLimits.maxImageMegabytes * 1024L * 1024
+        if ((file.size ?: 0) > maxBytes) return send(chat, "이미지가 너무 큽니다 (최대 ${mediaLimits.maxImageMegabytes}MB).")
+        val image = try {
+            ImageInput.of(file.download(maxBytes))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn { "${surface.name} 이미지 받기 실패: ${e.message}" }
+            return send(chat, "이미지를 받지 못했습니다: ${e.message}")
+        } ?: return send(chat, "PNG·JPEG·WebP·GIF 이미지만 읽을 수 있습니다.")
+        startTurn(binding, state, chat, UserInput(caption?.let(::routed).orEmpty(), listOf(image)), scope)
+    }
+
     /** 문서 파일 (PROJECT.md 6.5 파일 첨부): 설명(캡션)이 있으면 바로 질문, 없으면 질문/컬렉션 추가를 고르게 한다 */
     private suspend fun onFile(binding: ChannelBinding, state: ChatState, chat: String, file: InboundFile, caption: String?, scope: CoroutineScope) {
         val name = file.name
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (file.kind == FileKind.VOICE || (file.kind == FileKind.DOCUMENT && ext in AUDIO_EXTENSIONS)) return onVoice(binding, state, chat, file, scope)
+        if (file.kind == FileKind.IMAGE || ext in IMAGE_EXTENSIONS) return onImage(binding, state, chat, file, caption, scope)
         if (!files.supports(name)) return send(chat, "읽을 수 있는 파일은 .txt .md .pdf 입니다.")
         val maxBytes = config.maxFileMegabytes * 1024L * 1024
         if ((file.size ?: 0) > maxBytes) return send(chat, "파일이 너무 큽니다 (최대 ${config.maxFileMegabytes}MB).")
@@ -388,7 +462,7 @@ class ChannelBot(
         if (!caption.isNullOrEmpty()) {
             if (state.job?.isActive == true) return send(chat, "앞 질문에 답하는 중입니다. 멈추려면 ${surface.commandPrefix}cancel")
             val input = withFile(chat, attachment, caption) ?: return
-            return startTurn(binding, state, chat, input, scope)
+            return startTurn(binding, state, chat, UserInput(input), scope)
         }
         val collections = files.collections(binding.user).take(MAX_COLLECTION_BUTTONS)
         val key = UUID.randomUUID().toString().take(8)
@@ -451,7 +525,9 @@ class ChannelBot(
         private const val MAX_OFFERS = 10
 
         private val PREFIXES = setOf('/', '!')
-        private val ENGINE_COMMANDS = setOf("start", "help", "new", "cancel", "status")
+        private val ENGINE_COMMANDS = setOf("start", "help", "new", "cancel", "status", "voice")
+        private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif")
+        private val AUDIO_EXTENSIONS = setOf("ogg", "oga", "opus", "m4a", "mp3", "wav", "webm")
         private val ROUTE_COMMANDS = setOf("web", "docs", "chat")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */
@@ -468,6 +544,7 @@ class ChannelBot(
             "chat" to "일반 대화",
             "cancel" to "답변 멈추기",
             "status" to "Vesta 상태",
+            "voice" to "음성으로 물으면 음성으로도 답하기 (켜기/끄기)",
             "help" to "사용법",
         )
 
@@ -478,6 +555,7 @@ class ChannelBot(
             • ${prefix}docs 질문, @컬렉션 질문 — 문서 검색
             • ${prefix}chat 질문 — 일반 대화
             • 문서 파일(.txt .md .pdf)을 보내면 그 파일에 대해 묻거나 컬렉션에 추가할 수 있습니다.
+            • 음성 메시지로 물어도 됩니다. 사진·스크린샷에 설명을 붙여 보내면 그 이미지에 대해 답합니다.
             • ${prefix}new 새 대화 · ${prefix}cancel 답변 멈춤 · ${prefix}status 상태
         """.trimIndent()
     }

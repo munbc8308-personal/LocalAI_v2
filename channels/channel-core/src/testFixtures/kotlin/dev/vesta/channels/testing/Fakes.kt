@@ -48,6 +48,7 @@ class FakeConversation(
     private val script: suspend FlowCollector<AgentEvent>.(UserInput, FakeConversation) -> Unit,
 ) : ConversationService {
     val inputs = mutableListOf<String>()
+    val userInputs = mutableListOf<UserInput>()
     val sessions = mutableListOf<SessionId?>()
     val decisions = mutableMapOf<String, CompletableDeferred<ApprovalDecision>>()
 
@@ -55,6 +56,7 @@ class FakeConversation(
 
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
         inputs += input.text
+        userInputs += input
         sessions += sessionId
         script(input, this@FakeConversation)
     }
@@ -72,5 +74,23 @@ class FakeFiles : ChannelFiles {
     override suspend fun addToCollection(user: UserContext, collection: String, path: Path): String {
         added += collection to path
         return "색인 완료 (청크 3개)"
+    }
+}
+
+/** 정해 둔 글을 돌려주는 음성 인식 */
+class FakeSpeechToText(var text: String = "내일 회의 몇 시야") : dev.vesta.core.media.SpeechToText {
+    val received = mutableListOf<ByteArray>()
+    override suspend fun transcribe(audio: ByteArray, language: String): String {
+        received += audio
+        return text
+    }
+}
+
+/** 읽은 글을 기록하는 음성 합성 */
+class FakeTextToSpeech : dev.vesta.core.media.TextToSpeech {
+    val spoken = mutableListOf<String>()
+    override suspend fun synthesize(text: String, format: dev.vesta.core.media.AudioFormat): ByteArray {
+        spoken += text
+        return "OggS".toByteArray()
     }
 }

@@ -3,11 +3,15 @@ package dev.vesta.channels.telegram
 import dev.vesta.channels.ButtonReply
 import dev.vesta.channels.ChannelBot
 import dev.vesta.channels.ChannelFiles
+import dev.vesta.channels.FileKind
 import dev.vesta.channels.Inbound
 import dev.vesta.channels.InboundFile
 import dev.vesta.core.channel.ChannelBindingStore
+import dev.vesta.core.config.MediaConfig
 import dev.vesta.core.config.TelegramConfig
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.media.SpeechToText
+import dev.vesta.core.media.TextToSpeech
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,8 +40,12 @@ class TelegramBot(
     status: suspend () -> String = { "정상" },
     clock: Clock = Clock.systemUTC(),
     nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    speechToText: SpeechToText? = null,
+    textToSpeech: TextToSpeech? = null,
+    mediaLimits: MediaConfig = MediaConfig(),
 ) {
-    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis)
+    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits)
+    private val maxImageBytes = mediaLimits.maxImageMegabytes * 1024L * 1024
 
     /** 끝날 때까지 long polling. 토큰이 거부되면 멈춘다 */
     suspend fun run() = withContext(Dispatchers.Default.limitedParallelism(1)) {
@@ -102,7 +110,6 @@ class TelegramBot(
     internal suspend fun handle(update: TgUpdate, scope: CoroutineScope) {
         update.message?.let { message ->
             val from = message.from ?: return@let
-            val document = message.document
             bot.handle(
                 Inbound.Message(
                     userId = from.id.toString(),
@@ -111,7 +118,7 @@ class TelegramBot(
                     text = message.text ?: message.caption,
                     direct = message.chat.type == "private",
                     sentAt = message.date.takeIf { it > 0 }?.let(Instant::ofEpochSecond),
-                    file = document?.let { d -> InboundFile(d.fileName ?: "file", d.fileSize) { max -> api.download(d.fileId, max) } },
+                    file = file(message),
                 ),
                 scope,
             )
@@ -122,6 +129,17 @@ class TelegramBot(
             }
             bot.handle(Inbound.Button(query.from.id.toString(), query.from.username, query.message?.chat?.id?.toString(), query.data.orEmpty(), reply), scope)
         }
+    }
+
+    /** 문서·음성·녹음 파일·사진 중 하나 */
+    private fun file(message: TgMessage): InboundFile? {
+        message.document?.let { d -> return InboundFile(d.fileName ?: "file", d.fileSize) { max -> api.download(d.fileId, max) } }
+        message.voice?.let { v -> return InboundFile("voice.ogg", v.fileSize, FileKind.VOICE) { max -> api.download(v.fileId, max) } }
+        message.audio?.let { a -> return InboundFile(a.fileName ?: "audio", a.fileSize, FileKind.VOICE) { max -> api.download(a.fileId, max) } }
+        // 사진은 여러 크기로 온다: 한도 안에서 가장 큰 것
+        val photo = message.photo.filter { (it.fileSize ?: 0) <= maxImageBytes }.maxByOrNull { it.width * it.height }
+            ?: message.photo.minByOrNull { it.width * it.height }
+        return photo?.let { p -> InboundFile("photo.jpg", p.fileSize, FileKind.IMAGE) { max -> api.download(p.fileId, max) } }
     }
 
     companion object {

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Vesta M0 인프라 설치 (PROJECT.md 2.4 로컬·무료 원칙). 여러 번 실행해도 안전하다.
-#   1. Homebrew로 Ollama·Colima·Docker CLI·docker-compose·zstd·ffmpeg 설치
+#   1. Homebrew로 Ollama·Colima·Docker CLI·docker-compose·zstd·ffmpeg·uv(미디어 워커) 설치
 #   2. Colima(컨테이너 VM, 메모리 2GB) 시작·자동 시작 등록
 #   3. Ollama 서비스 시작 (brew services)
 #   4. Ollaya 설치 (~/.local, sudo 없음) + 리랭커 모델(bge-reranker-v2-m3) + launchd 등록
@@ -11,7 +11,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 step() { printf '\n==> %s\n' "$*"; }
 
 step "Homebrew 패키지"
-brew install ollama colima docker docker-compose zstd ffmpeg llama.cpp
+brew install ollama colima docker docker-compose zstd ffmpeg llama.cpp uv
 
 # brew로 설치한 docker-compose를 `docker compose` 플러그인으로 쓰기 위한 설정
 DOCKER_CONFIG_FILE="$HOME/.docker/config.json"

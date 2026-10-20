@@ -3,6 +3,8 @@ package dev.vesta.channels.telegram
 import dev.vesta.channels.PairingCode
 import dev.vesta.channels.testing.FakeConversation
 import dev.vesta.channels.testing.FakeFiles
+import dev.vesta.channels.testing.FakeSpeechToText
+import dev.vesta.channels.testing.FakeTextToSpeech
 import dev.vesta.channels.testing.MemoryBindings
 import dev.vesta.core.AgentType
 import dev.vesta.core.ChannelType
@@ -50,7 +52,9 @@ private class Harness(
     }
     val conversation = FakeConversation(script)
     val files = FakeFiles()
-    val bot = TelegramBot(api, conversation, bindings, files, config, nowMillis = { 0L })
+    val stt = FakeSpeechToText()
+    val tts = FakeTextToSpeech()
+    val bot = TelegramBot(api, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt, textToSpeech = tts)
 
     suspend fun TestScope.send(update: TgUpdate) {
         bot.handle(update, this)
@@ -281,4 +285,59 @@ class TelegramBotTest : FunSpec({
             }
         }
     }
+
+    test("음성: 인식한 글을 먼저 보여 주고 그 글로 묻는다. /voice를 켜면 답도 음성으로") {
+        runTest {
+            val h = Harness({ _, _ -> emit(AgentEvent.Token("**오후 3시**입니다 [1]")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
+            with(h) {
+                api.file = "OggS-voice".toByteArray()
+                val voice = TgUpdate(5, message = TgMessage(7, TgChat(ME, "private"), TgUser(ME), voice = TgVoice("v1", 3, "audio/ogg", 9)))
+                send(voice)
+                stt.received.single().decodeToString() shouldBe "OggS-voice"
+                api.messages.first().text shouldBe "🎤 내일 회의 몇 시야"
+                conversation.inputs.single() shouldBe "내일 회의 몇 시야"
+                api.voices.shouldBeEmpty()
+
+                send(text("/voice"))
+                api.messages.last().text shouldContain "음성으로도 답합니다"
+                send(voice)
+                tts.spoken.single() shouldBe "**오후 3시**입니다 [1]"
+                api.voices.size shouldBe 1
+
+                // 글로 물으면 음성으로 답하지 않는다
+                send(text("다음 질문"))
+                api.voices.size shouldBe 1
+
+                stt.text = ""
+                send(voice)
+                api.messages.last().text shouldContain "알아듣지 못했습니다"
+            }
+        }
+    }
+
+    test("사진: 설명을 질문으로, 가장 큰 사진을 이미지로 붙인다. 이미지가 아니면 거절") {
+        runTest {
+            val h = Harness({ _, _ -> emit(AgentEvent.Token("메모리 부족 오류입니다")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
+            with(h) {
+                api.file = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 1)
+                val photo = TgMessage(
+                    8, TgChat(ME, "private"), TgUser(ME), caption = "이 오류 뭐야?",
+                    photo = listOf(TgPhotoSize("small", 90, 90, 100), TgPhotoSize("big", 1280, 960, 90_000)),
+                )
+                send(TgUpdate(6, message = photo))
+                conversation.userInputs.single().let {
+                    it.text shouldBe "이 오류 뭐야?"
+                    it.images.single().mime shouldBe "image/jpeg"
+                }
+                api.messages.last().text shouldContain "메모리 부족"
+
+                // 문서로 보낸 이미지도 이미지로
+                api.file = "<html>".toByteArray()
+                send(TgUpdate(7, message = TgMessage(9, TgChat(ME, "private"), TgUser(ME), document = TgDocument("d1", "shot.png", 6))))
+                api.messages.last().text shouldContain "PNG·JPEG"
+                conversation.userInputs.size shouldBe 1
+            }
+        }
+    }
+
 })

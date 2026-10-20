@@ -2,6 +2,9 @@ package dev.vesta.server
 
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ApprovalDto
+import dev.vesta.api.AttachmentDto
+import dev.vesta.api.SpeechRequestDto
+import dev.vesta.api.TranscriptDto
 import dev.vesta.api.CSRF_HEADER
 import dev.vesta.api.ChatRequestDto
 import dev.vesta.api.CollectionDto
@@ -19,7 +22,14 @@ import dev.vesta.core.SessionId
 import dev.vesta.core.UserContext
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.UserInput
+import dev.vesta.core.config.MediaConfig
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.media.AudioFormat
+import dev.vesta.core.media.ImageInput
+import dev.vesta.core.media.MediaException
+import dev.vesta.core.media.MediaStore
+import dev.vesta.core.media.SpeechToText
+import dev.vesta.core.media.TextToSpeech
 import dev.vesta.core.session.MessageRepository
 import dev.vesta.core.session.SessionRepository
 import dev.vesta.core.tools.ApprovalDecision
@@ -43,7 +53,11 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
 import io.ktor.server.request.host
 import io.ktor.server.request.httpMethod
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveText
+import io.ktor.server.response.respondBytes
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
@@ -81,6 +95,11 @@ class ServerDeps(
     val allowedHosts: Set<String> = emptySet(),
     /** 웹 UI 정적 파일(클래스패스 `web/`)을 서빙할지 */
     val serveWebUi: Boolean = false,
+    /** 음성·이미지 (M12). 없으면 해당 API는 503 */
+    val speechToText: SpeechToText? = null,
+    val textToSpeech: TextToSpeech? = null,
+    val media: MediaStore? = null,
+    val mediaLimits: MediaConfig = MediaConfig(),
 )
 
 /**
@@ -113,7 +132,7 @@ fun Application.vestaApi(deps: ServerDeps) {
         call.response.header("Referrer-Policy", "no-referrer")
         call.response.header(
             "Content-Security-Policy",
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         )
     }
     routing {
@@ -159,9 +178,13 @@ fun Application.vestaApi(deps: ServerDeps) {
             post("/chat") {
                 val user = call.principal(deps) ?: return@post
                 val request = ApiJson.decodeFromString(ChatRequestDto.serializer(), call.receiveText())
+                val images = when (val decoded = decodeImages(request.images, deps.mediaLimits)) {
+                    is ImagesResult.Ok -> decoded.images
+                    is ImagesResult.Invalid -> return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", decoded.message) }.toString())
+                }
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
-                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text))
+                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images))
                         .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                 }
             }
@@ -189,8 +212,45 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.respondJson(HttpStatusCode.NotFound, """{"error":"세션 없음"}""")
                     return@get
                 }
-                val list = deps.messages.list(id).map { MessageDto(it.role.name, it.content, it.agent?.name, it.model, it.interrupted, it.createdAt.toString()) }
+                val list = deps.messages.list(id).map {
+                    MessageDto(it.role.name, it.content, it.agent?.name, it.model, it.interrupted, it.createdAt.toString(), it.attachments.map { a -> AttachmentDto(a.id, a.mime) })
+                }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(MessageDto.serializer()), list))
+            }
+            // 음성 인식 (V-01): 본문은 녹음 파일 그대로 (webm·ogg·m4a·wav). 인식한 글만 돌려주고, 질문은 사용자가 확인한 뒤 보낸다 (V-02)
+            post("/stt") {
+                val user = call.principal(deps) ?: return@post
+                val stt = deps.speechToText ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"음성 인식이 설정돼 있지 않습니다 (models.stt)"}""")
+                val audio = call.receiveLimited(deps.mediaLimits.maxAudioMegabytes) ?: return@post
+                try {
+                    val text = stt.transcribe(audio)
+                    log.info { "음성 인식 ${audio.size} bytes → ${text.length}자 (user ${user.userId.value})" }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TranscriptDto.serializer(), TranscriptDto(text)))
+                } catch (e: MediaException) {
+                    call.respondJson(HttpStatusCode.UnprocessableEntity, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
+                }
+            }
+            // 읽어 주기 (V-03): audio/mp4
+            post("/speech") {
+                call.principal(deps) ?: return@post
+                val tts = deps.textToSpeech ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"읽어 주기가 설정돼 있지 않습니다 (models.tts)"}""")
+                val dto = ApiJson.decodeFromString(SpeechRequestDto.serializer(), call.receiveText())
+                if (dto.text.length > 50_000) return@post call.respondJson(HttpStatusCode.PayloadTooLarge, """{"error":"글이 너무 깁니다"}""")
+                try {
+                    call.respondBytes(tts.synthesize(dto.text, AudioFormat.M4A), ContentType.parse(AudioFormat.M4A.mime))
+                } catch (e: MediaException) {
+                    call.respondJson(HttpStatusCode.UnprocessableEntity, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
+                }
+            }
+            // 메시지에 붙인 이미지 (본인 것만)
+            get("/media/{id}") {
+                val user = call.principal(deps) ?: return@get
+                val (asset, bytes) = deps.media?.load(user.userId, call.parameters["id"].orEmpty())
+                    ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
+                call.response.header(HttpHeaders.CacheControl, "private, max-age=86400")
+                // 저장할 때 확인한 이미지 형식만 그대로 보낸다 (HTML 등으로 해석되지 않게)
+                val type = asset.mime.takeIf { it in IMAGE_TYPES } ?: "application/octet-stream"
+                call.respondBytes(bytes, ContentType.parse(type))
             }
             get("/collections") {
                 val user = call.principal(deps) ?: return@get
@@ -272,6 +332,45 @@ fun Application.vestaApi(deps: ServerDeps) {
 }
 
 private const val MODEL_ID = "vesta"
+private val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
+
+internal sealed interface ImagesResult {
+    data class Ok(val images: List<ImageInput>) : ImagesResult
+    data class Invalid(val message: String) : ImagesResult
+}
+
+/** base64 이미지 확인: 개수·크기·형식(파일 앞부분) */
+internal fun decodeImages(encoded: List<String>, limits: MediaConfig): ImagesResult {
+    if (encoded.size > limits.maxImages) return ImagesResult.Invalid("이미지는 ${limits.maxImages}장까지 붙일 수 있습니다")
+    val images = encoded.map { data ->
+        val bytes = runCatching { java.util.Base64.getDecoder().decode(data.substringAfter("base64,")) }.getOrNull()
+            ?: return ImagesResult.Invalid("이미지를 읽지 못했습니다 (base64)")
+        if (bytes.size > limits.maxImageMegabytes * 1024L * 1024) return ImagesResult.Invalid("이미지가 너무 큽니다 (최대 ${limits.maxImageMegabytes}MB)")
+        ImageInput.of(bytes) ?: return ImagesResult.Invalid("PNG·JPEG·WebP·GIF 이미지만 붙일 수 있습니다")
+    }
+    return ImagesResult.Ok(images)
+}
+
+/** 본문을 [megabytes]까지만 받는다. 넘으면 413을 보내고 null */
+private suspend fun ApplicationCall.receiveLimited(megabytes: Int): ByteArray? {
+    val max = megabytes * 1024L * 1024
+    val declared = request.header(HttpHeaders.ContentLength)?.toLongOrNull()
+    if (declared != null && declared > max) {
+        respondJson(HttpStatusCode.PayloadTooLarge, """{"error":"파일이 너무 큽니다 (최대 ${megabytes}MB)"}""")
+        return null
+    }
+    val channel = receiveChannel()
+    val bytes = channel.readRemaining(max + 1).readByteArray()
+    if (bytes.size > max) {
+        respondJson(HttpStatusCode.PayloadTooLarge, """{"error":"파일이 너무 큽니다 (최대 ${megabytes}MB)"}""")
+        return null
+    }
+    if (bytes.isEmpty()) {
+        respondJson(HttpStatusCode.BadRequest, """{"error":"빈 파일"}""")
+        return null
+    }
+    return bytes
+}
 internal const val SESSION_COOKIE = "vesta_session"
 
 /** localhost·루프백과 Tailscale MagicDNS 이름, 설정에 적은 이름만 받는다 */

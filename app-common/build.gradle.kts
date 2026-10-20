@@ -16,6 +16,7 @@ dependencies {
     api(project(":router"))
     api(project(":tools"))
     api(project(":mcp"))
+    api(project(":media"))
     api(project(":api-model"))
     implementation(libs.kotlin.logging)
     implementation(libs.bouncycastle)

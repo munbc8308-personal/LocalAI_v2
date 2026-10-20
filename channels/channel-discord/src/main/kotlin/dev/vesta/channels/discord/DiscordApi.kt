@@ -60,7 +60,14 @@ class DiscordException(val code: Int, val description: String, retryAfterMillis:
 data class DcUser(val id: String, val username: String? = null, val bot: Boolean = false)
 
 @Serializable
-data class DcAttachment(val id: String, val filename: String, val size: Long? = null, val url: String)
+data class DcAttachment(
+    val id: String,
+    val filename: String,
+    val size: Long? = null,
+    val url: String,
+    /** 음성 메시지는 audio/ogg */
+    @SerialName("content_type") val contentType: String? = null,
+)
 
 @Serializable
 data class DcMessage(

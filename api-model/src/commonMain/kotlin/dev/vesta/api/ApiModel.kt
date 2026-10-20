@@ -18,7 +18,26 @@ val ApiJson = Json {
 }
 
 @Serializable
-data class ChatRequestDto(val text: String, val sessionId: String? = null, /** CLI / WEB */ val channel: String = "WEB")
+data class ChatRequestDto(
+    val text: String,
+    val sessionId: String? = null,
+    /** CLI / WEB */
+    val channel: String = "WEB",
+    /** 질문에 붙인 이미지 (base64, PNG·JPEG·WebP·GIF). 형식은 서버가 파일 앞부분으로 확인한다 (V-04) */
+    val images: List<String> = emptyList(),
+)
+
+/** 메시지에 붙인 미디어. 내용은 `GET /api/media/{id}` */
+@Serializable
+data class AttachmentDto(val id: String, val mime: String)
+
+/** 음성 인식 결과 (`POST /api/stt`) */
+@Serializable
+data class TranscriptDto(val text: String)
+
+/** 읽어 주기 요청 (`POST /api/speech`, 응답은 audio/mp4) */
+@Serializable
+data class SpeechRequestDto(val text: String)
 
 @Serializable
 data class ApprovalDto(
@@ -33,7 +52,15 @@ data class ApprovalDto(
 data class SessionDto(val id: String, val title: String?, val channel: String, val updatedAt: String)
 
 @Serializable
-data class MessageDto(val role: String, val content: String, val agent: String?, val model: String?, val interrupted: Boolean, val createdAt: String)
+data class MessageDto(
+    val role: String,
+    val content: String,
+    val agent: String?,
+    val model: String?,
+    val interrupted: Boolean,
+    val createdAt: String,
+    val attachments: List<AttachmentDto> = emptyList(),
+)
 
 @Serializable
 data class HealthDto(val status: String, val version: String, val checks: Map<String, String>)

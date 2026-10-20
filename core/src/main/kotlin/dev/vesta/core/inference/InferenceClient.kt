@@ -20,6 +20,8 @@ data class ChatMessage(
     val toolCalls: List<dev.vesta.core.tools.ToolCall> = emptyList(),
     /** role TOOL일 때 어느 호출의 결과인지 */
     val toolCallId: String? = null,
+    /** 사용자 메시지에 붙인 이미지 (비전 모델용, V-04) */
+    val images: List<dev.vesta.core.media.ImageInput> = emptyList(),
 )
 
 data class ChatRequest(

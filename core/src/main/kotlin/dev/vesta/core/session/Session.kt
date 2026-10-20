@@ -27,6 +27,8 @@ data class StoredMessage(
     /** 생성이 중간에 멈췄으면 true (사용자 중단·오류). */
     val interrupted: Boolean,
     val createdAt: Instant,
+    /** 붙인 이미지 등 (MediaAsset) */
+    val attachments: List<dev.vesta.core.media.MediaAsset> = emptyList(),
 )
 
 data class NewMessage(
@@ -37,6 +39,8 @@ data class NewMessage(
     val interrupted: Boolean = false,
     val promptTokens: Int? = null,
     val completionTokens: Int? = null,
+    /** 이 메시지에 붙일, 이미 저장한 MediaAsset ID */
+    val attachments: List<String> = emptyList(),
 )
 
 /** 세션 저장소. 조회는 항상 사용자 범위로 제한한다 (PROJECT.md U-03). */

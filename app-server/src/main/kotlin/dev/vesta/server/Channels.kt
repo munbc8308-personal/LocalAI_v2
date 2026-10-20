@@ -41,7 +41,10 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
         !telegram.enabled -> log.info { "Telegram 꺼짐 (channels.telegram.enabled: false)" }
         telegramToken == null -> log.info { "Telegram 토큰 없음 — 켜려면 vesta telegram token" }
         else -> {
-            val bot = TelegramBot(HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status)
+            val bot = TelegramBot(
+                HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status,
+                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media,
+            )
             scope.launch { bot.run() }
         }
     }
@@ -54,7 +57,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
         else -> {
             val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
             val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() })
-            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status)
+            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media)
             scope.launch { bot.run() }
         }
     }
@@ -67,7 +70,10 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
         slackBot == null || slackApp == null -> log.info { "Slack 토큰 없음 — 켜려면 vesta slack token" }
         else -> {
             val api = HttpSlackApi(slackBot, slackApp, baseUrl = slack.apiUrl)
-            val bot = SlackBot(api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status)
+            val bot = SlackBot(
+                api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status,
+                speechToText = app.speechToText, mediaLimits = app.config.media,
+            )
             scope.launch { bot.run() }
         }
     }

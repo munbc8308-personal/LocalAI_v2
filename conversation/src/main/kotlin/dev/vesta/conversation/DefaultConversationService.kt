@@ -18,6 +18,9 @@ import dev.vesta.router.ExplicitRoute
 import dev.vesta.router.Router
 import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRole
+import dev.vesta.core.media.ImageInput
+import dev.vesta.core.media.MediaKind
+import dev.vesta.core.media.MediaStore
 import dev.vesta.core.session.MessageRepository
 import dev.vesta.core.session.NewMessage
 import dev.vesta.core.session.SessionRepository
@@ -48,6 +51,8 @@ class DefaultConversationService(
     private val mentionAgent: suspend (UserContext, List<String>) -> AgentType? = { _, _ -> null },
     /** 도구 승인 중계 (M6). 에이전트와 같은 인스턴스를 써야 한다. */
     private val approvals: ApprovalBroker? = null,
+    /** 질문에 붙인 이미지 보관 (M12). null이면 이미지는 이번 질문에만 쓰고 저장하지 않는다 */
+    private val media: MediaStore? = null,
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -59,16 +64,30 @@ class DefaultConversationService(
 
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }
-        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text))
+        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else "" }))
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
 
-        messages.append(session.id, NewMessage(ChatRole.USER, input.text))
-        val history = messages.list(session.id)
-            .filter { it.content.isNotBlank() }
-            .map { ChatMessage(it.role, ExplicitRoute.parse(it.content)?.question?.ifBlank { null } ?: it.content) }
+        val saved = input.images.mapNotNull { image ->
+            media?.let { runCatching { it.save(user.userId, MediaKind.IMAGE, image.mime, image.bytes) }.onFailure { e -> log.warn(e) { "이미지 저장 실패" } }.getOrNull() }
+        }
+        val current = messages.append(session.id, NewMessage(ChatRole.USER, input.text, attachments = saved.map { it.id }))
+        val stored = messages.list(session.id).filter { it.content.isNotBlank() || it.attachments.isNotEmpty() || it.id == current.id }
+        // 이미지는 가장 최근에 이미지를 붙인 질문 것만 다시 보낸다 (후속 질문 "그럼 두 번째 줄은?"용, 문맥·메모리 절약)
+        val lastWithImages = stored.lastOrNull { it.role == ChatRole.USER && it.attachments.isNotEmpty() }?.id
+        val history = stored.map { message ->
+            val text = ExplicitRoute.parse(message.content)?.question?.ifBlank { null } ?: message.content
+            val images = when {
+                message.id != lastWithImages -> emptyList()
+                message.id == current.id && input.images.isNotEmpty() -> input.images
+                else -> message.attachments.mapNotNull { asset -> media?.load(user.userId, asset.id)?.second?.let(ImageInput::of) }
+            }
+            ChatMessage(message.role, if (message.attachments.isNotEmpty() && images.isEmpty()) "$text\n[이미지 ${message.attachments.size}장 첨부]".trim() else text, images = images)
+        }.let { if (input.images.isNotEmpty() && saved.isEmpty()) it.dropLast(1) + it.last().copy(images = input.images) else it }
 
         val available = availability(user).filter { it in agents }.toSet()
-        val routed = router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
+        // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
+        val routed = if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
+            else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
         val decision = if (routed.collections.isEmpty()) routed
@@ -83,7 +102,7 @@ class DefaultConversationService(
         val answer = StringBuilder()
         var done: AgentEvent.Done? = null
         try {
-            agent.handle(AgentRequest(user, session, history.dropLast(1) + ChatMessage(ChatRole.USER, route.question.ifBlank { input.text }), route.collections, route))
+            agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))
@@ -120,6 +139,11 @@ class DefaultConversationService(
     /** 첫 질문의 첫 줄로 제목을 만든다. */
     private fun titleOf(text: String): String =
         text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.let { if (it.length > 40) it.take(40) + "…" else it } ?: "새 대화"
+
+    private companion object {
+        /** 글 없이 이미지만 보냈을 때 */
+        const val DEFAULT_IMAGE_QUESTION = "이 이미지를 설명해 줘."
+    }
 }
 
 class SessionNotFoundException(id: SessionId) : NoSuchElementException("세션을 찾을 수 없습니다: ${id.value}")

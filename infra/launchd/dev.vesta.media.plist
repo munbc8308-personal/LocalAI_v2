@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 미디어 워커(mlx-whisper 음성 인식, PROJECT.md 7.11) 상시 실행. 모델은 처음 쓸 때 올리고 30분 안 쓰면 내린다.
+     scripts/install-vesta.sh가 ~/.vesta/media-worker에 uv 환경을 만든 뒤 설치한다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.media</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.vesta/media-worker/.venv/bin/python</string>
+        <string>__HOME__/.vesta/media-worker/server.py</string>
+        <string>--port</string>
+        <string>11436</string>
+        <string>--idle</string>
+        <string>1800</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/.vesta/media-worker</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/media.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/media.err.log</string>
+</dict>
+</plist>

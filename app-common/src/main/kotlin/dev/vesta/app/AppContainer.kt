@@ -80,11 +80,21 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 메신저 계정 연결 (M10) */
     val channelBindings = dev.vesta.storage.ExposedChannelBindingStore(database.db)
     val messages = ExposedMessageRepository(database.db)
+    /** 질문에 붙인 이미지 등 (M12) */
+    val mediaStore = dev.vesta.storage.FileMediaStore(database.db, paths.home.resolve("media"))
+    val ffmpeg = dev.vesta.media.Ffmpeg(config.media.ffmpeg)
+    /** 음성 인식: 미디어 워커 (models.stt, engine: mlx-whisper) */
+    val speechToText: dev.vesta.media.WorkerSpeechToText? = config.models.stt?.takeIf { it.baseUrl != null }
+        ?.let { dev.vesta.media.WorkerSpeechToText(it.baseUrl!!, http, ffmpeg, config.media.maxAudioSeconds) }
+    /** 읽어 주기: macOS say (models.tts, engine: say) */
+    val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.takeIf { it.engine == "say" }
+        ?.let { dev.vesta.media.SayTextToSpeech(it.name, ffmpeg, config.media.ttsMaxChars) }
     val inference = OpenAiCompatibleClient(config.inference.baseUrl, http)
     val modelManager = ModelManager(
         models = config.models,
         budgetBytes = MacSystem.totalMemoryBytes() * config.memory.budgetPercent / 100,
         runtime = OllamaAdmin(config.inference.ollamaUrl, http),
+        externalBytes = { speechToText?.health()?.stt?.bytes ?: 0L },
     )
     val knowledge = KnowledgeRepository(database.db)
     val indexer = Indexer(knowledge, inference)
@@ -166,6 +176,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             if (named.isNotEmpty() && named.all { it.kind == CollectionKind.CODE }) AgentType.CODE else null
         },
         approvals = approvals,
+        media = mediaStore,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),

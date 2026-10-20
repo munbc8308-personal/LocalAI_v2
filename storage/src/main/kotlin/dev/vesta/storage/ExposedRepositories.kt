@@ -17,6 +17,8 @@ import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
@@ -100,10 +102,21 @@ class ExposedMessageRepository(
         }.value
         // 세션 목록이 최근 사용 순으로 정렬되도록 갱신
         Sessions.update({ Sessions.id eq sessionId.value }) { it[updatedAt] = now }
-        StoredMessage(id, sessionId, message.role, message.content, message.agent, message.model, message.interrupted, now)
+        // 이 세션 주인의 것인 미디어만 붙인다
+        val owner = Sessions.selectAll().where { Sessions.id eq sessionId.value }.single()[Sessions.userId].value
+        if (message.attachments.isNotEmpty()) {
+            MediaAssets.update({ (MediaAssets.id inList message.attachments) and (MediaAssets.userId eq owner) and MediaAssets.messageId.isNull() }) {
+                it[messageId] = id
+            }
+        }
+        val attachments = MediaAssets.selectAll().where { MediaAssets.messageId eq id }.map { it.toAsset() }
+        StoredMessage(id, sessionId, message.role, message.content, message.agent, message.model, message.interrupted, now, attachments)
     }
 
     override suspend fun list(sessionId: SessionId): List<StoredMessage> = db.io {
+        val attachments = (MediaAssets innerJoin Messages).selectAll()
+            .where { Messages.sessionId eq sessionId.value }
+            .groupBy({ it[MediaAssets.messageId]!!.value }, { it.toAsset() })
         Messages.selectAll()
             .where { Messages.sessionId eq sessionId.value }
             .orderBy(Messages.id, SortOrder.ASC)
@@ -117,6 +130,7 @@ class ExposedMessageRepository(
                     model = it[Messages.model],
                     interrupted = it[Messages.interrupted],
                     createdAt = it[Messages.createdAt],
+                    attachments = attachments[it[Messages.id].value].orEmpty(),
                 )
             }
     }

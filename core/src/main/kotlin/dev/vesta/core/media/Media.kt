@@ -1,0 +1,49 @@
+package dev.vesta.core.media
+
+import dev.vesta.core.UserId
+
+/** 질문에 붙인 이미지 (PROJECT.md V-04). [mime]은 image/png·image/jpeg·image/webp·image/gif */
+class ImageInput(val mime: String, val bytes: ByteArray) {
+    companion object {
+        /** 파일 앞부분으로 형식을 확인한다 (확장자·Content-Type은 믿지 않는다). 이미지가 아니면 null */
+        fun sniff(bytes: ByteArray): String? = when {
+            bytes.startsWith(0x89, 0x50, 0x4E, 0x47) -> "image/png"
+            bytes.startsWith(0xFF, 0xD8, 0xFF) -> "image/jpeg"
+            bytes.startsWith(0x47, 0x49, 0x46, 0x38) -> "image/gif"
+            bytes.size > 12 && bytes.startsWith(0x52, 0x49, 0x46, 0x46) && String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+            else -> null
+        }
+
+        /** 형식을 확인해 만든다. 이미지가 아니면 null */
+        fun of(bytes: ByteArray): ImageInput? = sniff(bytes)?.let { ImageInput(it, bytes) }
+
+        private fun ByteArray.startsWith(vararg prefix: Int) = size >= prefix.size && prefix.indices.all { this[it] == prefix[it].toByte() }
+    }
+}
+
+enum class MediaKind { IMAGE, AUDIO }
+
+/** 저장한 미디어 (PROJECT.md 11장 MediaAsset). 파일은 `~/.vesta/media/<사용자>/`에 둔다 */
+data class MediaAsset(val id: String, val userId: UserId, val kind: MediaKind, val mime: String, val size: Long)
+
+/** 미디어 저장소. 조회는 항상 사용자 범위로 제한한다 (U-03) */
+interface MediaStore {
+    suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray): MediaAsset
+    /** 다른 사용자의 것이면 null */
+    suspend fun load(userId: UserId, id: String): Pair<MediaAsset, ByteArray>?
+}
+
+/** 음성 인식 (PROJECT.md 8장, V-01). [audio]는 형식 상관없음 (ffmpeg로 바꾼다) */
+interface SpeechToText {
+    suspend fun transcribe(audio: ByteArray, language: String = "ko"): String
+}
+
+/** 음성 합성 (V-03). 돌려주는 형식은 [format] (m4a: 웹, ogg: Telegram 음성 메시지) */
+interface TextToSpeech {
+    suspend fun synthesize(text: String, format: AudioFormat): ByteArray
+}
+
+enum class AudioFormat(val mime: String) { M4A("audio/mp4"), OGG_OPUS("audio/ogg") }
+
+/** 미디어 처리 중 사용자에게 보여 줄 실패 (짧은 한국어 문장) */
+class MediaException(message: String, cause: Throwable? = null) : Exception(message, cause)

@@ -67,7 +67,8 @@ private class Harness(
     }
     val conversation = FakeConversation(script)
     val files = FakeFiles()
-    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L })
+    val stt = dev.vesta.channels.testing.FakeSpeechToText()
+    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt)
 
     suspend fun TestScope.send(type: String, data: JsonObject) {
         bot.dispatch(type, data, this)
@@ -269,4 +270,24 @@ class DiscordBotTest : FunSpec({
             }
         }
     }
+
+    test("음성 메시지(audio/ogg 첨부)는 인식해서 묻고, 이미지 첨부는 비전 질문으로") {
+        runTest {
+            val h = Harness({ _, _ -> emit(AgentEvent.Token("3시")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
+            with(h) {
+                api.file = "OggS".toByteArray()
+                send("MESSAGE_CREATE", message("", attachment = """{"id":"a1","filename":"voice-message.ogg","size":4,"url":"https://cdn.discordapp.com/v.ogg","content_type":"audio/ogg"}"""))
+                api.messages.first().content shouldContain "내일 회의 몇 시야"
+                conversation.inputs.single() shouldBe "내일 회의 몇 시야"
+
+                api.file = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0)
+                send("MESSAGE_CREATE", message("!web 이거 뭐야", attachment = """{"id":"a2","filename":"shot.png","size":5,"url":"https://cdn.discordapp.com/s.png","content_type":"image/png"}"""))
+                conversation.userInputs.last().let {
+                    it.text shouldBe "/web 이거 뭐야"
+                    it.images.single().mime shouldBe "image/png"
+                }
+            }
+        }
+    }
+
 })

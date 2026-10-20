@@ -52,6 +52,10 @@ internal class TelegramSurface(private val api: TelegramApi) : ChatSurface {
         api.editMessage(chat.toLong(), messageId.toLong(), cardHtml(card) + "\n\n<b>→ $label</b>", html = true)
     }
 
+    override val supportsVoice = true
+
+    override suspend fun sendVoice(chat: String, ogg: ByteArray) = api.sendVoice(chat.toLong(), ogg)
+
     override suspend fun askEdit(chat: String, current: String) {
         api.sendMessage(chat.toLong(), "수정한 명령을 보내 주세요. 지금 명령:\n<pre>${escape(current)}</pre>", html = true, forceReply = true)
     }

@@ -3,11 +3,14 @@ package dev.vesta.channels.discord
 import dev.vesta.channels.ButtonReply
 import dev.vesta.channels.ChannelBot
 import dev.vesta.channels.ChannelFiles
+import dev.vesta.channels.FileKind
 import dev.vesta.channels.Inbound
 import dev.vesta.channels.InboundFile
 import dev.vesta.core.channel.ChannelBindingStore
 import dev.vesta.core.config.DiscordConfig
+import dev.vesta.core.config.MediaConfig
 import dev.vesta.core.conversation.ConversationService
+import dev.vesta.core.media.SpeechToText
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,8 +44,11 @@ class DiscordBot(
     status: suspend () -> String = { "정상" },
     clock: Clock = Clock.systemUTC(),
     nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    speechToText: SpeechToText? = null,
+    mediaLimits: MediaConfig = MediaConfig(),
 ) {
-    private val bot = ChannelBot(DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis)
+    // 음성 답변은 보내지 않는다 (Discord 음성 메시지 형식은 따로 만들어야 함)
+    private val bot = ChannelBot(DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits)
     private val json = Json { ignoreUnknownKeys = true }
     private var selfId: String? = null
 
@@ -79,7 +85,7 @@ class DiscordBot(
                 text = message.content.ifEmpty { null },
                 direct = message.guildId == null,
                 sentAt = message.timestamp?.let { runCatching { OffsetDateTime.parse(it).toInstant() }.getOrNull() },
-                file = attachment?.let { a -> InboundFile(a.filename, a.size) { max -> api.download(a.url, max) } },
+                file = attachment?.let { a -> InboundFile(a.filename, a.size, kindOf(a.contentType)) { max -> api.download(a.url, max) } },
             ),
             scope,
         )
@@ -182,4 +188,12 @@ class DiscordBot(
         /** 승인 카드에 보여 줄 수 있는 명령 길이와 같게 */
         const val EDIT_MAX = 1_200
     }
+}
+
+/** 플랫폼이 알려 준 형식으로 음성·이미지를 가린다 */
+private fun kindOf(mime: String?) = when {
+    mime == null -> FileKind.DOCUMENT
+    mime.startsWith("audio/") -> FileKind.VOICE
+    mime.startsWith("image/") -> FileKind.IMAGE
+    else -> FileKind.DOCUMENT
 }
