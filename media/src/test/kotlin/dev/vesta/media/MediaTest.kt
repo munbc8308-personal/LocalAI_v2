@@ -54,18 +54,24 @@ class MediaTest : FunSpec({
         val wav = ffmpeg.toWav16k(ogg, 1)
         String(wav, 0, 4) shouldBe "RIFF"
         shouldThrow<MediaException> { ffmpeg.toWav16k("not audio".toByteArray(), 5) }.message shouldContain "읽을 수 없는"
+        // 재생 목록(HLS)으로 다른 파일을 읽게 하는 입력은 형식 확인에서 막힌다
+        shouldThrow<MediaException> { ffmpeg.toWav16k("#EXTM3U\n#EXTINF:1,\nfile:///etc/passwd\n".toByteArray(), 5) }
+        Ffmpeg.sniff(ogg) shouldBe "ogg"
+        Ffmpeg.sniff(aiff) shouldBe "mov"
     }
 
     test("워커 호출: WAV로 바꿔 보내고 오류는 알기 쉬운 문장으로").config(enabled = Ffmpeg.available(FFMPEG)) {
         val ffmpeg = Ffmpeg(FFMPEG)
         val audio = SayTextToSpeech("Yuna", ffmpeg, 100).synthesize("테스트", AudioFormat.OGG_OPUS)
         val requests = mutableListOf<HttpRequestData>()
+        val tokenFile = kotlin.io.path.createTempFile().also { it.toFile().writeText("secret-token\n") }
         val ok = WorkerSpeechToText("http://w", HttpClient(MockEngine { r ->
             requests += r
             respond("""{"text":" 테스트 ","language":"ko"}""")
-        }), ffmpeg, 60)
+        }), ffmpeg, 60, tokenFile)
         ok.transcribe(audio) shouldBe "테스트"
         requests.single().url.toString() shouldBe "http://w/stt?language=ko"
+        requests.single().headers["X-Vesta-Token"] shouldBe "secret-token"
         val body = (requests.single().body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes()
         String(body, 0, 4) shouldBe "RIFF"
 

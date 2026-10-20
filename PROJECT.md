@@ -1733,6 +1733,10 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 웹 UI: 파일을 고른 뒤 입력란을 비우면 FileList도 비어 이미지가 안 붙음 → 먼저 옮겨 둔다. Kotlin/JS `as` 형 검사가 브라우저 객체에서 실패 → `unsafeCast`.
 - `default-config.yaml`은 `vesta config init` 템플릿이라 기존 설정에는 `stt`·`tts`가 없어 음성 인식이 꺼져 있었음 → 코드 기본값으로.
 - 합성 음성(say)을 다시 인식하면 "수도 → 소도", "자 → 차"처럼 틀릴 때가 있다. 실제 목소리로 확인 필요.
+- 보안 검토 반영:
+  - ffmpeg는 파일 앞부분으로 확인한 형식(`-f`)으로만 읽고 `-protocol_whitelist file`로 다른 프로토콜을 막는다(재생 목록 형식으로 다른 파일·주소를 읽게 하는 입력 차단). 오류 원문은 로그에만.
+  - ffmpeg 출력을 파일로 받아 시간 제한(2분)이 실제로 듣게 했다.
+  - 미디어 워커는 모든 요청에 토큰(`X-Vesta-Token`, `~/.vesta/media-token` 600, 워커가 처음 뜰 때 만듦)을 요구하고, Origin 헤더가 있거나 Host가 127.0.0.1·localhost가 아니면 거부, `/stt`는 `audio/wav`만.
 
 #### 남은 일
 - **실제 확인** (M12 완료 조건): 휴대폰 Telegram에서 음성으로 묻고 답 받기, 스크린샷 질문. 웹 UI 마이크는 휴대폰 브라우저(Tailscale HTTPS)에서 확인 — 마이크는 HTTPS나 localhost에서만 열린다.

@@ -6,12 +6,18 @@ Vesta 미디어 워커 (PROJECT.md 7.11): mlx-whisper 음성 인식을 127.0.0.1
 - POST /unload           → 모델을 메모리에서 내린다
 
 모델은 처음 요청 때 올리고, --idle 초 동안 안 쓰면 내린다 (메모리 예산, PROJECT.md 2.3).
-이 Mac 안에서만 받는다 (127.0.0.1).
+
+이 Mac 안에서만 받고(127.0.0.1), 모든 요청에 토큰(X-Vesta-Token)이 있어야 한다.
+토큰은 --token-file(기본 ~/.vesta/media-token, 권한 600)에 있고 없으면 만든다. Vesta 서버가 같은 파일을 읽는다.
+브라우저에서 온 요청(Origin 헤더)과 다른 Host 이름(DNS 리바인딩)은 받지 않는다.
 """
 import argparse
+import hmac
 import io
 import json
 import logging
+import os
+import secrets
 import threading
 import time
 import wave
@@ -92,10 +98,38 @@ def read_wav(data: bytes) -> np.ndarray:
     return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def handler(stt: Stt):
+def load_token(path: str) -> str:
+    """토큰 파일을 읽는다. 없으면 본인만 읽을 수 있게(600) 만든다"""
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(secrets.token_urlsafe(32))
+    os.chmod(path, 0o600)
+    with open(path) as f:
+        token = f.read().strip()
+    if len(token) < 32:
+        raise SystemExit(f"token too short: {path}")
+    return token
+
+
+def handler(stt: Stt, token: str, port: int):
+    hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             log.debug(fmt, *args)
+
+        def allowed(self) -> bool:
+            """토큰·Host·Origin 확인. 실패하면 응답을 보내고 False"""
+            if self.headers.get("Origin") is not None or self.headers.get("Host") not in hosts:
+                self.reply(403, {"error": "forbidden"})
+                return False
+            if not hmac.compare_digest(self.headers.get("X-Vesta-Token", "").encode(), token.encode()):
+                self.reply(401, {"error": "token required"})
+                return False
+            return True
 
         def reply(self, code: int, obj: dict):
             body = json.dumps(obj, ensure_ascii=False).encode()
@@ -106,17 +140,23 @@ def handler(stt: Stt):
             self.wfile.write(body)
 
         def do_GET(self):
+            if not self.allowed():
+                return
             if urlparse(self.path).path == "/health":
                 return self.reply(200, {"ok": True, "stt": {"model": stt.model, "loaded": stt.loaded, "bytes": stt.bytes()}})
             self.reply(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self.allowed():
+                return
             url = urlparse(self.path)
             if url.path == "/unload":
                 stt.unload()
                 return self.reply(200, {"ok": True})
             if url.path != "/stt":
                 return self.reply(404, {"error": "not found"})
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "audio/wav":
+                return self.reply(415, {"error": "audio/wav only"})
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0 or length > MAX_BODY:
                 return self.reply(413, {"error": "audio too large or empty"})
@@ -141,11 +181,13 @@ def main():
     parser.add_argument("--port", type=int, default=11436)
     parser.add_argument("--stt-model", default="mlx-community/whisper-large-v3-turbo")
     parser.add_argument("--idle", type=int, default=1800, help="이 초 동안 안 쓰면 모델을 내린다")
+    parser.add_argument("--token-file", default="~/.vesta/media-token")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     stt = Stt(args.stt_model, args.idle)
     threading.Thread(target=stt.reaper, daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt))
+    token = load_token(args.token_file)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt, token, args.port))
     log.info("Vesta media worker on 127.0.0.1:%d (stt %s)", args.port, args.stt_model)
     server.serve_forever()
 
