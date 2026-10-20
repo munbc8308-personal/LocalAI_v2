@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -14,6 +15,7 @@ import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.Parameters
 import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -48,6 +50,8 @@ interface SlackApi {
     suspend fun postEphemeral(channel: String, user: String, text: String)
     /** 입력 창(모달). [triggerId]는 버튼을 누른 뒤 3초만 쓸 수 있다 */
     suspend fun openView(triggerId: String, view: JsonObject)
+    /** 파일 올리기 (만든 이미지). files:write 권한이 필요하다 */
+    suspend fun uploadFile(channel: String, fileName: String, bytes: ByteArray, title: String?)
     /** 첨부 파일 (files.slack.com만, 봇 토큰으로). [maxBytes]를 넘으면 받지 않는다 */
     suspend fun download(url: String, maxBytes: Long): ByteArray
 }
@@ -112,6 +116,31 @@ class HttpSlackApi(
 
     override suspend fun openView(triggerId: String, view: JsonObject) {
         call("views.open", buildJsonObject { put("trigger_id", triggerId); put("view", view) }, botToken)
+    }
+
+    /** 외부 업로드 3단계: 올릴 주소 받기 → 내용 보내기 → 대화방에 공유 */
+    override suspend fun uploadFile(channel: String, fileName: String, bytes: ByteArray, title: String?) {
+        val ticket = guarded {
+            val response = http.submitForm(
+                "$baseUrl/files.getUploadURLExternal",
+                Parameters.build { append("filename", fileName); append("length", bytes.size.toString()) },
+            ) { header(HttpHeaders.Authorization, "Bearer $botToken") }
+            val result = runCatching { json.parseToJsonElement(response.bodyAsText()).jsonObject }.getOrNull() ?: throw SlackException(response.status.value, "invalid_response")
+            if (result["ok"]?.jsonPrimitive?.booleanOrNull != true) throw SlackException(response.status.value, result["error"]?.jsonPrimitive?.contentOrNull ?: "unknown_error")
+            result
+        }
+        val uploadUrl = ticket["upload_url"]?.jsonPrimitive?.contentOrNull ?: throw IOException("upload_url 없음")
+        val fileId = ticket["file_id"]?.jsonPrimitive?.contentOrNull ?: throw IOException("file_id 없음")
+        guarded {
+            val response = http.post(uploadUrl) { setBody(bytes) }
+            if (!response.status.isSuccess()) throw SlackException(response.status.value, "upload_failed")
+        }
+        call("files.completeUploadExternal", buildJsonObject {
+            put("channel_id", channel)
+            put("files", kotlinx.serialization.json.buildJsonArray {
+                add(buildJsonObject { put("id", fileId); title?.let { put("title", it.take(250)) } })
+            })
+        }, botToken)
     }
 
     override suspend fun download(url: String, maxBytes: Long): ByteArray {

@@ -107,7 +107,8 @@ class Router(
         val CODE_BLOCK = Regex("```")
         /** 이보다 짧은 후속 질문은 결정 모델 대신 문맥을 보는 메인 모델이 판정 */
         const val FOLLOW_UP_CHARS = 20
-        val CONTINUABLE = setOf(AgentType.DOCS, AgentType.WEB, AgentType.CODE, AgentType.PERSONAL)
+        /** 이미지: "더 밝게", "그럼 고양이로" 같은 수정 요청은 이어서 다시 그린다 */
+        val CONTINUABLE = setOf(AgentType.DOCS, AgentType.WEB, AgentType.CODE, AgentType.PERSONAL, AgentType.IMAGE)
         /** 앞 질문에 기대는 말로 시작하거나 주어가 빠진 짧은 질문 */
         val FOLLOW_UP = Regex("^(그럼|그러면|그건|그거|그것|이건|이거|저건|또|더|그리고|그 ?다음|다른|나머지|위|아까|방금)|[은는]\\s*[?？]?$|^(왜|어떻게|언제|어디서|누가)\\s*\\S{0,6}[?？]$")
     }

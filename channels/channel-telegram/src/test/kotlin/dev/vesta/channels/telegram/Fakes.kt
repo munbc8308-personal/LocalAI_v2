@@ -37,4 +37,6 @@ class FakeTelegram : TelegramApi {
     override suspend fun download(fileId: String, maxBytes: Long) = file
     val voices = mutableListOf<ByteArray>()
     override suspend fun sendVoice(chatId: Long, ogg: ByteArray) { voices += ogg }
+    val photos = mutableListOf<Pair<ByteArray, String?>>()
+    override suspend fun sendPhoto(chatId: Long, png: ByteArray, caption: String?) { photos += png to caption }
 }

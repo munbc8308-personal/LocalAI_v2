@@ -30,6 +30,9 @@ class VestaDatabase private constructor(val db: Database) {
         val columns = exec("PRAGMA table_info(collections)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("kind" !in columns) exec("ALTER TABLE collections ADD COLUMN kind VARCHAR(16) DEFAULT 'DOCS' NOT NULL")
         if ("root_path" !in columns) exec("ALTER TABLE collections ADD COLUMN root_path TEXT NULL")
+        // v11: media_asset.caption (생성 이미지 프롬프트)
+        val mediaColumns = exec("PRAGMA table_info(media_asset)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
+        if ("caption" !in mediaColumns) exec("ALTER TABLE media_asset ADD COLUMN caption TEXT NULL")
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
             log.info { "schema $current -> $CURRENT_VERSION" }
@@ -51,8 +54,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12) */
-        const val CURRENT_VERSION = 10
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12), 11: media_asset.caption (M13) */
+        const val CURRENT_VERSION = 11
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()

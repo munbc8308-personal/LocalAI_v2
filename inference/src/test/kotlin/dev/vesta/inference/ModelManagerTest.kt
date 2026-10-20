@@ -67,4 +67,13 @@ class ModelManagerTest : FunSpec({
             ModelManager(ModelsConfig(), 89 * GB, FakeRuntime(emptyMap())).acquire(ModelRole.GENERAL)
         }
     }
+
+    test("Ollama 밖 모델(이미지 생성)을 위해 자리를 비운다. 외부 사용량도 예산에 넣는다") {
+        val runtime = FakeRuntime(mapOf("main:a" to 40 * GB, "coder:b" to 30 * GB), loaded = listOf("main:a", "coder:b"))
+        val manager = ModelManager(config, 80 * GB, runtime, externalBytes = { 2 * GB })
+        manager.reserve(5 * GB)
+        runtime.unloaded.shouldBeEmpty() // 40 + 30 + 2 + 5 = 77 ≤ 80
+        manager.reserve(10 * GB)
+        runtime.unloaded shouldContainExactly listOf("coder:b") // 82 > 80 → 상시가 아닌 coder부터
+    }
 })

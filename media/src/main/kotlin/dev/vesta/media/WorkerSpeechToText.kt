@@ -35,10 +35,22 @@ class WorkerSpeechToText(
     @Serializable
     private data class Result(val text: String = "", val error: String? = null)
 
+    /** [bytes]는 워커가 GPU에 올린 메모리 전체 (음성·이미지 모델) */
     @Serializable
-    data class Health(val ok: Boolean = false, val stt: Stt? = null) {
+    data class Health(val ok: Boolean = false, val bytes: Long = 0, val stt: Stt? = null, val image: Image? = null) {
         @Serializable
         data class Stt(val model: String = "", val loaded: Boolean = false, val bytes: Long = 0)
+
+        @Serializable
+        data class Image(
+            val model: String = "",
+            /** 양자화한 모델이 저장돼 있는지 */
+            val ready: Boolean = false,
+            val loaded: Boolean = false,
+            /** 처음 받기·양자화 중 */
+            val preparing: Boolean = false,
+            val error: String? = null,
+        )
     }
 
     override suspend fun transcribe(audio: ByteArray, language: String): String {

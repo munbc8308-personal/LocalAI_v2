@@ -1,17 +1,21 @@
 """
-Vesta 미디어 워커 (PROJECT.md 7.11): mlx-whisper 음성 인식을 127.0.0.1 HTTP로 제공한다.
+Vesta 미디어 워커 (PROJECT.md 7.11): mlx-whisper 음성 인식과 mflux 이미지 생성을 127.0.0.1 HTTP로 제공한다.
 
 - POST /stt?language=ko  본문: 16kHz 모노 16비트 WAV (앱이 ffmpeg로 바꿔 보낸다) → {"text", "language", "seconds"}
-- GET  /health           → {"ok", "stt": {"model", "loaded", "bytes"}}
-- POST /unload           → 모델을 메모리에서 내린다
+- POST /image            본문: {"prompt", "width", "height", "steps", "seed"} → image/png (메타데이터에 "AI 생성")
+                         모델이 아직 없으면 받기·양자화를 시작하고 503 {"error": "preparing"}
+- GET  /health           → {"ok", "bytes", "stt": {...}, "image": {...}}
+- POST /unload           → 모델을 메모리에서 내린다 (?model=stt|image, 없으면 둘 다)
 
-모델은 처음 요청 때 올리고, --idle 초 동안 안 쓰면 내린다 (메모리 예산, PROJECT.md 2.3).
+모델은 처음 요청 때 올리고, 안 쓰면 내린다 (음성 --idle, 이미지 --image-idle 초. 메모리 예산, PROJECT.md 2.3).
+이미지 모델은 공식 FLUX.1-schnell(Hugging Face 로그인 필요)을 한 번 받아 4bit로 양자화해 --image-dir에 저장하고, 이후에는 그것만 읽는다.
 
 이 Mac 안에서만 받고(127.0.0.1), 모든 요청에 토큰(X-Vesta-Token)이 있어야 한다.
 토큰은 --token-file(기본 ~/.vesta/media-token, 권한 600)에 있고 없으면 만든다. Vesta 서버가 같은 파일을 읽는다.
 브라우저에서 온 요청(Origin 헤더)과 다른 Host 이름(DNS 리바인딩)은 받지 않는다.
 """
 import argparse
+import gc
 import hmac
 import io
 import json
@@ -29,6 +33,7 @@ import mlx_whisper
 import numpy as np
 from huggingface_hub import snapshot_download
 from mlx_whisper.transcribe import ModelHolder
+from PIL.PngImagePlugin import PngInfo
 
 log = logging.getLogger("vesta-media")
 
@@ -90,6 +95,91 @@ class Stt:
                 self.unload()
 
 
+class Imager:
+    """FLUX.1-schnell 이미지 생성. 한 번에 하나만 그린다"""
+
+    def __init__(self, directory: str, idle: int, bits: int):
+        self.directory = os.path.expanduser(directory)
+        self.idle = idle
+        self.bits = bits
+        self.lock = threading.Lock()
+        self.flux = None
+        self.last_used = 0.0
+        self.preparing = False
+        self.error = None
+
+    @property
+    def ready(self) -> bool:
+        # 저장이 끝나야 이름을 바꾸므로(.tmp → 최종) 폴더에 가중치가 있으면 다 받은 것
+        return os.path.isdir(self.directory) and any(f.endswith(".safetensors") for _, _, files in os.walk(self.directory) for f in files)
+
+    def prepare_async(self):
+        """처음 한 번: 공식 가중치를 받아 양자화해 저장한다 (오래 걸린다, 약 33GB 받기)"""
+        with self.lock:
+            if self.preparing or self.ready:
+                return
+            self.preparing = True
+            self.error = None
+        threading.Thread(target=self._prepare, daemon=True).start()
+
+    def _prepare(self):
+        try:
+            from mflux.models.common.config import ModelConfig
+            from mflux.models.flux.variants.txt2img.flux import Flux1
+            log.info("image model: downloading and quantizing FLUX.1-schnell to %d bit", self.bits)
+            with self.lock:
+                flux = Flux1(model_config=ModelConfig.schnell(), quantize=self.bits)
+                tmp = self.directory + ".tmp"
+                flux.save_model(tmp)
+                os.replace(tmp, self.directory)
+                del flux
+                gc.collect()
+                mx.clear_cache()
+            log.info("image model saved: %s", self.directory)
+        except Exception as e:
+            log.exception("image model prepare failed")
+            self.error = str(e)
+        finally:
+            self.preparing = False
+
+    def generate(self, prompt: str, width: int, height: int, steps: int, seed: int) -> bytes:
+        from mflux.models.common.config import ModelConfig
+        from mflux.models.flux.variants.txt2img.flux import Flux1
+        with self.lock:
+            if self.flux is None:
+                started = time.time()
+                self.flux = Flux1(model_config=ModelConfig.schnell(), model_path=self.directory)
+                log.info("image model loaded in %.1fs", time.time() - started)
+            started = time.time()
+            result = self.flux.generate_image(seed=seed, prompt=prompt, num_inference_steps=steps, width=width, height=height)
+            self.last_used = time.time()
+            log.info("image %dx%d %d steps in %.1fs", width, height, steps, time.time() - started)
+            info = PngInfo()
+            info.add_text("Software", "Vesta")
+            info.add_text("Comment", "AI 생성 (Vesta, FLUX.1-schnell)")
+            info.add_text("ai_generated", "true")
+            info.add_text("prompt", prompt)
+            info.add_text("seed", str(seed))
+            out = io.BytesIO()
+            result.image.save(out, format="PNG", pnginfo=info)
+            return out.getvalue()
+
+    def unload(self):
+        with self.lock:
+            if self.flux is None:
+                return
+            self.flux = None
+            gc.collect()
+            mx.clear_cache()
+            log.info("image model unloaded")
+
+    def reaper(self):
+        while True:
+            time.sleep(30)
+            if self.flux is not None and time.time() - self.last_used > self.idle:
+                self.unload()
+
+
 def read_wav(data: bytes) -> np.ndarray:
     with wave.open(io.BytesIO(data)) as w:
         if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getframerate() != 16000:
@@ -114,7 +204,7 @@ def load_token(path: str) -> str:
     return token
 
 
-def handler(stt: Stt, token: str, port: int):
+def handler(stt: Stt, imager: Imager, token: str, port: int):
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
@@ -143,7 +233,14 @@ def handler(stt: Stt, token: str, port: int):
             if not self.allowed():
                 return
             if urlparse(self.path).path == "/health":
-                return self.reply(200, {"ok": True, "stt": {"model": stt.model, "loaded": stt.loaded, "bytes": stt.bytes()}})
+                return self.reply(200, {
+                    "ok": True,
+                    # 이 워커가 GPU에 올린 메모리 전체 (음성·이미지 모델)
+                    "bytes": mx.get_active_memory(),
+                    "stt": {"model": stt.model, "loaded": stt.loaded, "bytes": stt.bytes()},
+                    "image": {"model": "FLUX.1-schnell", "ready": imager.ready, "loaded": imager.flux is not None,
+                              "preparing": imager.preparing, "error": imager.error},
+                })
             self.reply(404, {"error": "not found"})
 
         def do_POST(self):
@@ -151,8 +248,14 @@ def handler(stt: Stt, token: str, port: int):
                 return
             url = urlparse(self.path)
             if url.path == "/unload":
-                stt.unload()
+                which = parse_qs(url.query).get("model", ["all"])[0]
+                if which in ("all", "stt"):
+                    stt.unload()
+                if which in ("all", "image"):
+                    imager.unload()
                 return self.reply(200, {"ok": True})
+            if url.path == "/image":
+                return self.image()
             if url.path != "/stt":
                 return self.reply(404, {"error": "not found"})
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "audio/wav":
@@ -173,6 +276,41 @@ def handler(stt: Stt, token: str, port: int):
                 log.exception("stt failed")
                 self.reply(500, {"error": str(e)})
 
+        def image(self):
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                return self.reply(415, {"error": "application/json only"})
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 64 * 1024:
+                return self.reply(413, {"error": "bad request size"})
+            try:
+                body = json.loads(self.rfile.read(length))
+                prompt = str(body["prompt"]).strip()
+                width = int(body.get("width", 1024))
+                height = int(body.get("height", 1024))
+                steps = int(body.get("steps", 4))
+                seed = int(body.get("seed", secrets.randbelow(2**31)))
+            except Exception:
+                return self.reply(400, {"error": "bad request"})
+            if not prompt or len(prompt) > 2000 or not (1 <= steps <= 8) or \
+                    any(v < 256 or v > 1536 or v % 16 for v in (width, height)):
+                return self.reply(400, {"error": "prompt 1~2000 chars, size 256~1536 (multiple of 16), steps 1~8"})
+            if not imager.ready:
+                # 지난번 실패 이유를 알려 주고 다시 시도한다
+                previous = imager.error
+                imager.prepare_async()
+                return self.reply(503, {"error": "preparing", "detail": previous})
+            try:
+                png = imager.generate(prompt, width, height, steps, seed)
+            except Exception as e:
+                log.exception("image failed")
+                return self.reply(500, {"error": str(e)})
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.send_header("X-Seed", str(seed))
+            self.end_headers()
+            self.wfile.write(png)
+
     return Handler
 
 
@@ -182,12 +320,17 @@ def main():
     parser.add_argument("--stt-model", default="mlx-community/whisper-large-v3-turbo")
     parser.add_argument("--idle", type=int, default=1800, help="이 초 동안 안 쓰면 모델을 내린다")
     parser.add_argument("--token-file", default="~/.vesta/media-token")
+    parser.add_argument("--image-dir", default="~/.vesta/models/flux1-schnell-4bit", help="양자화해 저장한 이미지 모델")
+    parser.add_argument("--image-idle", type=int, default=600, help="이 초 동안 안 그리면 이미지 모델을 내린다")
+    parser.add_argument("--image-bits", type=int, default=4)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     stt = Stt(args.stt_model, args.idle)
     threading.Thread(target=stt.reaper, daemon=True).start()
+    imager = Imager(args.image_dir, args.image_idle, args.image_bits)
+    threading.Thread(target=imager.reaper, daemon=True).start()
     token = load_token(args.token_file)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt, token, args.port))
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt, imager, token, args.port))
     log.info("Vesta media worker on 127.0.0.1:%d (stt %s)", args.port, args.stt_model)
     server.serve_forever()
 

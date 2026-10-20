@@ -7,6 +7,7 @@ import dev.vesta.core.media.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -28,8 +29,9 @@ import kotlin.io.path.writeBytes
  * 조회는 사용자 범위로 제한한다: 다른 사용자의 ID를 알아도 읽을 수 없다.
  */
 class FileMediaStore(private val db: Database, private val dir: Path, private val clock: Clock = Clock.systemUTC()) : MediaStore {
-    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray): MediaAsset = withContext(Dispatchers.IO) {
+    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray, caption: String?): MediaAsset = withContext(Dispatchers.IO) {
         val id = UUID.randomUUID().toString()
+        val now = clock.instant()
         val folder = dir.resolve(userId.value.toString()).createDirectories()
         val file = folder.resolve("$id.${extension(mime)}")
         Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
@@ -42,10 +44,21 @@ class FileMediaStore(private val db: Database, private val dir: Path, private va
                 it[MediaAssets.mime] = mime
                 it[path] = file.toString()
                 it[size] = bytes.size.toLong()
-                it[createdAt] = clock.instant()
+                it[MediaAssets.caption] = caption
+                it[createdAt] = now
             }
         }
-        MediaAsset(id, userId, kind, mime, bytes.size.toLong())
+        MediaAsset(id, userId, kind, mime, bytes.size.toLong(), caption, now)
+    }
+
+    override suspend fun list(userId: UserId, kind: MediaKind, limit: Int): List<MediaAsset> = withContext(Dispatchers.IO) {
+        transaction(db) {
+            MediaAssets.selectAll()
+                .where { (MediaAssets.userId eq userId.value) and (MediaAssets.kind eq kind.name) }
+                .orderBy(MediaAssets.createdAt, SortOrder.DESC)
+                .limit(limit)
+                .map { it.toAsset() }
+        }
     }
 
     override suspend fun load(userId: UserId, id: String): Pair<MediaAsset, ByteArray>? = withContext(Dispatchers.IO) {
@@ -74,4 +87,6 @@ internal fun ResultRow.toAsset() = MediaAsset(
     MediaKind.valueOf(this[MediaAssets.kind]),
     this[MediaAssets.mime],
     this[MediaAssets.size],
+    this[MediaAssets.caption],
+    this[MediaAssets.createdAt],
 )

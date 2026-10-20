@@ -33,6 +33,11 @@ class FakeDiscord : DiscordApi {
         sent.rows = rows
     }
 
+    val files = mutableListOf<Pair<String, ByteArray>>()
+    override suspend fun createMessageWithFile(channelId: String, content: String, fileName: String, bytes: ByteArray, contentType: String) {
+        files += content to bytes
+    }
+
     override suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject) {
         responses += response
     }

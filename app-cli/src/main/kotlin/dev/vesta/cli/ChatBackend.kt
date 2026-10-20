@@ -30,6 +30,7 @@ import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -54,6 +55,8 @@ interface ChatBackend : AutoCloseable {
     suspend fun recent(limit: Int): List<Session>
     suspend fun find(id: SessionId): Session?
     suspend fun messages(id: SessionId): List<StoredMessage>
+    /** 만든 이미지 등의 내용 (M13) */
+    suspend fun media(id: String): ByteArray?
 }
 
 /** 같은 프로세스 안에서 바로 실행 */
@@ -69,6 +72,7 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
     override suspend fun recent(limit: Int) = app.sessions.listRecent(app.owner.userId, limit)
     override suspend fun find(id: SessionId) = app.sessions.find(app.owner.userId, id)
     override suspend fun messages(id: SessionId) = app.messages.list(id)
+    override suspend fun media(id: String) = app.mediaStore.load(app.owner.userId, id)?.second
     override fun close() = app.close()
 }
 
@@ -135,6 +139,11 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
 
     private fun SessionDto.toSession() =
         Session(SessionId(id), UserId(0), title, ChannelType.valueOf(channel), null, Instant.parse(updatedAt), Instant.parse(updatedAt))
+
+    override suspend fun media(id: String): ByteArray? {
+        val response = http.get("$baseUrl/api/media/$id") { bearerAuth(token) }
+        return if (response.status.isSuccess()) response.readRawBytes() else null
+    }
 
     override fun close() = http.close()
 

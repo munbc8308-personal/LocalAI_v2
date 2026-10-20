@@ -76,4 +76,13 @@ class RouterTest : FunSpec({
         LlmRouter.parse("모르겠음") shouldBe null
         LlmRouter.parse("""{"agent": "UNKNOWN"}""") shouldBe null
     }
+
+    test("/image는 이미지 생성, 그 뒤 짧은 수정 요청은 이미지를 이어서 다시 그린다. 이미지 생성이 없으면 일반 대화") {
+        val router = Router(DecisionConfig(), FakeDecision("CHAT", 0.99), null)
+        val first = router.route("/image 고양이 수채화", emptyList(), all)
+        first.agent shouldBe AgentType.IMAGE
+        first.question shouldBe "고양이 수채화"
+        router.route("더 밝게 해 줘", listOf(ChatMessage(ChatRole.USER, "/image 고양이 수채화")), all, first).agent shouldBe AgentType.IMAGE
+        router.route("/image 고양이", emptyList(), basic).agent shouldBe AgentType.CHAT
+    }
 })

@@ -12,6 +12,7 @@ import dev.vesta.api.CollectionDto
 import dev.vesta.api.DashboardDto
 import dev.vesta.api.LoginDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.MediaItemDto
 import dev.vesta.api.RoutingDto
 import kotlinx.browser.document
 import kotlinx.browser.window
@@ -42,7 +43,7 @@ import org.jetbrains.compose.web.dom.Ul
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLTextAreaElement
 
-enum class Tab(val label: String) { CHAT("대화"), COLLECTIONS("컬렉션"), DASHBOARD("상태") }
+enum class Tab(val label: String) { CHAT("대화"), GALLERY("갤러리"), COLLECTIONS("컬렉션"), DASHBOARD("상태") }
 
 @Composable
 fun App() {
@@ -121,6 +122,7 @@ private fun Main(me: MeDto, onLogout: () -> Unit) {
         }
         when (tab) {
             Tab.CHAT -> ChatView(chat, drawer, { drawer = it }, draft, { draft = it })
+            Tab.GALLERY -> GalleryView()
             Tab.COLLECTIONS -> CollectionsView { name -> draft = "@$name "; tab = Tab.CHAT }
             Tab.DASHBOARD -> DashboardView(me)
         }
@@ -151,7 +153,7 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
                 if (chat.turns.isEmpty()) {
                     Div({ classes("empty") }) {
                         P { Text("무엇이든 물어보세요.") }
-                        P({ classes("muted", "small") }) { Text("/web 웹 검색 · /docs 문서 · @컬렉션 이름 · /chat 일반 대화 · 🎤 음성 · 📎 이미지(붙여넣기·끌어 놓기)") }
+                        P({ classes("muted", "small") }) { Text("/web 웹 검색 · /docs 문서 · @컬렉션 이름 · /chat 일반 대화 · /image 이미지 만들기 · 🎤 음성 · 📎 이미지(붙여넣기·끌어 놓기)") }
                     }
                 }
                 chat.loadError?.let { P({ classes("error") }) { Text(it) } }
@@ -324,6 +326,10 @@ private fun TurnView(chat: ChatController, turn: Turn) {
             }
         }
         turn.approvals.forEach { ApprovalCard(chat, it) }
+        // 만든 이미지: 누르면 원본을 새 탭에서
+        if (turn.generated.isNotEmpty()) Div({ classes("generated") }) {
+            turn.generated.forEach { src -> A(src, { target(ATarget.Blank); attr("rel", "noopener") }) { Img(src, "만든 이미지") } }
+        }
         if (turn.answer.isNotEmpty()) Div({ classes("answer") }) { Markdown(turn.answer) }
         if (turn.answer.isEmpty() && turn.error == null && turn.done == null && chat.busy && turn === chat.turns.lastOrNull()) {
             Div({ classes("muted", "pulse") }) { Text(turn.status ?: if (turn.thinking) "생각 중…" else "준비 중…") }
@@ -357,6 +363,36 @@ private fun TurnView(chat: ChatController, turn: Turn) {
         }
         // 읽어 주기 (V-03): 코드·표·출처는 서버가 빼고 읽는다
         if (turn.answer.isNotBlank() && !(chat.busy && turn === chat.turns.lastOrNull())) SpeakButton(turn)
+    }
+}
+
+/** 만든 이미지 모음 (V-08). 최근 것부터 */
+@Composable
+private fun GalleryView() {
+    var items by remember { mutableStateOf<List<MediaItemDto>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { Http.get("/api/media?kind=GENERATED&limit=100", ListSerializer(MediaItemDto.serializer())) }
+            .onSuccess { items = it }
+            .onFailure { error = it.message }
+    }
+    Div({ classes("page") }) {
+        H2 { Text("갤러리") }
+        error?.let { P({ classes("error") }) { Text(it) } }
+        val list = items
+        when {
+            list == null && error == null -> P({ classes("muted") }) { Text("불러오는 중…") }
+            list != null && list.isEmpty() -> P({ classes("muted") }) { Text("아직 만든 이미지가 없습니다. 대화에서 /image 고양이 수채화 처럼 요청해 보세요.") }
+            list != null -> Div({ classes("gallery") }) {
+                list.forEach { item ->
+                    Div({ classes("card") }) {
+                        A("/api/media/${item.id}", { target(ATarget.Blank); attr("rel", "noopener") }) { Img("/api/media/${item.id}", item.caption ?: "만든 이미지") }
+                        item.caption?.let { P({ classes("muted", "small") }) { Text(it) } }
+                        item.createdAt?.let { P({ classes("muted", "small") }) { Text(localTime(it)) } }
+                    }
+                }
+            }
+        }
     }
 }
 

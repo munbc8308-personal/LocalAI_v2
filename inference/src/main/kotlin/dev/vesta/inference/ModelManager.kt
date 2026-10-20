@@ -50,11 +50,25 @@ class ModelManager(
         return spec
     }
 
+    /**
+     * Ollama 밖에서 [bytes]만큼 쓸 모델(이미지 생성 등)을 올리기 전에 자리를 만든다 (PROJECT.md 2.3).
+     * 예산을 넘으면 상시 모델이 아닌 것 중 가장 오래 안 쓴 Ollama 모델부터 내린다.
+     */
+    suspend fun reserve(bytes: Long) = mutex.withLock {
+        runCatching { makeRoom(runtime.loadedModels(), bytes) }
+            .onFailure { log.warn(it) { "메모리 예산 확인 실패, 그대로 진행" } }
+        Unit
+    }
+
     /** [model]을 올릴 자리를 만든다. 이미 올라가 있으면 아무것도 하지 않는다. */
     private suspend fun ensureRoom(model: String) {
         val loaded = runtime.loadedModels()
         if (loaded.any { sameModel(it.name, model) }) return
         val needed = runtime.localModelSizes().entries.firstOrNull { sameModel(it.key, model) }?.value ?: 0
+        makeRoom(loaded, needed)
+    }
+
+    private suspend fun makeRoom(loaded: List<LoadedModel>, needed: Long) {
         var used = loaded.sumOf { it.sizeBytes } + runCatching { externalBytes() }.getOrDefault(0L)
         val candidates = loaded
             .filterNot { loadedModel -> alwaysOnNames.any { sameModel(loadedModel.name, it) } }

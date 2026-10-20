@@ -3,6 +3,7 @@ package dev.vesta.server
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ApprovalDto
 import dev.vesta.api.AttachmentDto
+import dev.vesta.api.MediaItemDto
 import dev.vesta.api.SpeechRequestDto
 import dev.vesta.api.TranscriptDto
 import dev.vesta.api.CSRF_HEADER
@@ -27,6 +28,7 @@ import dev.vesta.core.conversation.ConversationService
 import dev.vesta.core.media.AudioFormat
 import dev.vesta.core.media.ImageInput
 import dev.vesta.core.media.MediaException
+import dev.vesta.core.media.MediaKind
 import dev.vesta.core.media.MediaStore
 import dev.vesta.core.media.SpeechToText
 import dev.vesta.core.media.TextToSpeech
@@ -241,6 +243,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                 } catch (e: MediaException) {
                     call.respondJson(HttpStatusCode.UnprocessableEntity, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
                 }
+            }
+            // 갤러리: 만든 이미지 목록 (V-08)
+            get("/media") {
+                val user = call.principal(deps) ?: return@get
+                val kind = runCatching { MediaKind.valueOf(call.request.queryParameters["kind"] ?: "GENERATED") }.getOrNull()
+                    ?: return@get call.respondJson(HttpStatusCode.BadRequest, """{"error":"kind"}""")
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 100
+                val list = deps.media?.list(user.userId, kind, limit).orEmpty().map { MediaItemDto(it.id, it.mime, it.caption, it.createdAt?.toString()) }
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(MediaItemDto.serializer()), list))
             }
             // 메시지에 붙인 이미지 (본인 것만)
             get("/media/{id}") {

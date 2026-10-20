@@ -210,6 +210,8 @@ class ChannelBot(
         var withheld = false
         var cancelled = false
         val opened = mutableListOf<String>()
+        // 만든 이미지는 답변을 마친 뒤 그 아래에 보낸다
+        val images = mutableListOf<AgentEvent.Media>()
         try {
             reply.start("생각 중…")
             conversation.send(binding.user, channel, binding.sessionId, input).collect { event ->
@@ -223,6 +225,7 @@ class ChannelBot(
                     }
                     is AgentEvent.Status -> reply.status(event.text)
                     is AgentEvent.Reasoning -> Unit
+                    is AgentEvent.Media -> images += event
                     is AgentEvent.ToolStarted -> reply.status("${event.tool} · ${event.summary}")
                     // 시간 초과 등으로 끝난 승인 요청의 버튼을 닫는다
                     is AgentEvent.ToolFinished -> opened.forEach { expire(state, chat, it) }
@@ -264,6 +267,12 @@ class ChannelBot(
                 }
                 runCatching { reply.finish(body, if (withheld) null else footer(answer, evidence, done, unsupported)) }
                     .onFailure { log.warn { "${surface.name} 답변 마무리 실패: ${it.message}" } }
+                images.forEach { image ->
+                    val sent = runCatching { surface.sendImage(chat, image.bytes, image.caption) }
+                        .onFailure { log.warn { "${surface.name} 이미지 보내기 실패: ${it.message}" } }
+                        .getOrDefault(false)
+                    if (!sent) runCatching { send(chat, "이미지를 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다.") }
+                }
             }
         }
         // 음성으로 물었으면 답도 읽어 준다 (코드·표·출처는 읽지 않음, V-03)
@@ -528,7 +537,7 @@ class ChannelBot(
         private val ENGINE_COMMANDS = setOf("start", "help", "new", "cancel", "status", "voice")
         private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif")
         private val AUDIO_EXTENSIONS = setOf("ogg", "oga", "opus", "m4a", "mp3", "wav", "webm")
-        private val ROUTE_COMMANDS = setOf("web", "docs", "chat")
+        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */
         private val CODE = Regex("^[A-Za-z0-9]{4}[- ]?[A-Za-z0-9]{4}$")
@@ -542,6 +551,7 @@ class ChannelBot(
             "web" to "웹 검색해서 답하기",
             "docs" to "등록한 문서에서 찾아 답하기",
             "chat" to "일반 대화",
+            "image" to "이미지 만들기",
             "cancel" to "답변 멈추기",
             "status" to "Vesta 상태",
             "voice" to "음성으로 물으면 음성으로도 답하기 (켜기/끄기)",
@@ -554,6 +564,7 @@ class ChannelBot(
             • ${prefix}web 질문 — 웹 검색
             • ${prefix}docs 질문, @컬렉션 질문 — 문서 검색
             • ${prefix}chat 질문 — 일반 대화
+            • ${prefix}image 그릴 것 — 이미지 만들기 ("더 밝게"처럼 이어서 고칠 수 있음)
             • 문서 파일(.txt .md .pdf)을 보내면 그 파일에 대해 묻거나 컬렉션에 추가할 수 있습니다.
             • 음성 메시지로 물어도 됩니다. 사진·스크린샷에 설명을 붙여 보내면 그 이미지에 대해 답합니다.
             • ${prefix}new 새 대화 · ${prefix}cancel 답변 멈춤 · ${prefix}status 상태

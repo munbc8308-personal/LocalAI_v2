@@ -31,6 +31,10 @@ data class ChatRequestDto(
 @Serializable
 data class AttachmentDto(val id: String, val mime: String)
 
+/** 갤러리 항목 (`GET /api/media?kind=GENERATED`) */
+@Serializable
+data class MediaItemDto(val id: String, val mime: String, val caption: String?, val createdAt: String?)
+
 /** 음성 인식 결과 (`POST /api/stt`) */
 @Serializable
 data class TranscriptDto(val text: String)
@@ -92,6 +96,8 @@ sealed interface EventDto {
         val requestId: String, val tool: String, val risk: String, val title: String, val body: String,
         val warning: String?, val reason: String?, val editableField: String?, val editableValue: String?,
     ) : EventDto
+    /** 에이전트가 만든 이미지. 내용은 `GET /api/media/{id}` */
+    @Serializable @SerialName("media") data class Media(val id: String, val mime: String, val caption: String?) : EventDto
     @Serializable @SerialName("grounding") data class Grounding(val checked: Int, val unsupported: List<String>) : EventDto
     @Serializable @SerialName("token") data class Token(val text: String) : EventDto
     @Serializable @SerialName("done") data class Done(val agent: String, val model: String, val promptTokens: Int?, val completionTokens: Int?) : EventDto

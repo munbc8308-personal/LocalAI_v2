@@ -103,6 +103,14 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     /** 답변 하나를 스트리밍으로 출력한다. 생성 중 Ctrl+C면 중단한다. 이번 턴의 세션을 돌려준다. */
+    /** 만든 이미지를 `~/Pictures/Vesta/`에 저장하고 경로를 돌려준다 */
+    private suspend fun saveImage(backend: ChatBackend, event: AgentEvent.Media): java.nio.file.Path? = runCatching {
+        val bytes = event.bytes.takeIf { it.isNotEmpty() } ?: backend.media(event.asset.id) ?: return null
+        val dir = java.nio.file.Path.of(System.getProperty("user.home"), "Pictures", "Vesta").also { java.nio.file.Files.createDirectories(it) }
+        val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        dir.resolve("$stamp-${event.asset.id.take(8)}.png").also { java.nio.file.Files.write(it, bytes) }
+    }.getOrNull()
+
     /** 서버가 떠 있으면 원격, 아니면(또는 --local·--model) 임베디드 (PROJECT.md 6.2) */
     private suspend fun openBackend(): ChatBackend {
         if (!local && model == null) {
@@ -131,6 +139,7 @@ class ChatCommand : CliktCommand(name = "chat") {
                         current = backend.find(event.sessionId)
                     }
                     renderer.render(event, start.elapsedNow())
+                    if (event is AgentEvent.Media) saveImage(backend, event)?.let { out.println("🖼 이미지: $it"); out.flush() }
                     if (event is AgentEvent.ApprovalRequested) {
                         backend.resolveApproval(event.requestId, Approvals.ask(reader, out, event))
                     }

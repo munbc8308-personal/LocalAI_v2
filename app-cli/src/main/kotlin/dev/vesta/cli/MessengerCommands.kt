@@ -154,6 +154,7 @@ class SlackManifestCommand : CliktCommand(name = "manifest") {
                   - chat:write
                   - im:history
                   - files:read
+                  - files:write
             settings:
               event_subscriptions:
                 bot_events:

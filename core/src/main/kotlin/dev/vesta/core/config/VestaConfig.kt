@@ -33,6 +33,11 @@ data class MediaConfig(
     val maxImages: Int = 4,
     /** 읽어 줄 글자 수 상한 (넘으면 앞부분만 읽는다) */
     val ttsMaxChars: Int = 1_500,
+    /** 생성 이미지 기본 크기·단계 (FLUX.1-schnell은 4단계면 충분) */
+    val imageSize: Int = 1024,
+    val imageSteps: Int = 4,
+    /** 이미지 모델이 쓰는 메모리 (그리기 전에 이만큼 자리를 비운다, 2.3) */
+    val imageMemoryGigabytes: Int = 10,
 )
 
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */
@@ -148,7 +153,8 @@ data class ModelsConfig(
     val reranker: ModelSpec? = null,
     /** 없으면 메인 모델이 이미지를 읽는다 (Gemma 4는 비전 지원) */
     val vision: ModelSpec? = null,
-    val image: ModelSpec? = null,
+    /** 이미지 생성: 미디어 워커의 mflux FLUX.1-schnell 4bit (M13). 10분 안 쓰면 워커가 내린다 */
+    val image: ModelSpec? = ModelSpec(name = "FLUX.1-schnell", keepAlive = "10m", engine = "mflux", baseUrl = "http://127.0.0.1:11436"),
     /** 음성 인식: 미디어 워커의 mlx-whisper (M12). 설정 파일에 없어도 켜진다 */
     val stt: ModelSpec? = ModelSpec(
         name = "mlx-community/whisper-large-v3-turbo",

@@ -86,6 +86,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 음성 인식: 미디어 워커 (models.stt, engine: mlx-whisper) */
     val speechToText: dev.vesta.media.WorkerSpeechToText? = config.models.stt?.takeIf { it.baseUrl != null }
         ?.let { dev.vesta.media.WorkerSpeechToText(it.baseUrl!!, http, ffmpeg, config.media.maxAudioSeconds) }
+    /** 이미지 생성: 미디어 워커의 mflux (models.image, engine: mflux) */
+    val imageGenerator: dev.vesta.core.media.ImageGenerator? = config.models.image?.takeIf { it.engine == "mflux" && it.baseUrl != null }
+        ?.let { dev.vesta.media.WorkerImageGenerator(it.baseUrl!!, http, it.name) }
     /** 읽어 주기: macOS say (models.tts, engine: say) */
     val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.takeIf { it.engine == "say" }
         ?.let { dev.vesta.media.SayTextToSpeech(it.name, ffmpeg, config.media.ttsMaxChars) }
@@ -94,7 +97,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         models = config.models,
         budgetBytes = MacSystem.totalMemoryBytes() * config.memory.budgetPercent / 100,
         runtime = OllamaAdmin(config.inference.ollamaUrl, http),
-        externalBytes = { speechToText?.health()?.stt?.bytes ?: 0L },
+        // 미디어 워커가 올린 음성·이미지 모델 전체
+        externalBytes = { speechToText?.health()?.bytes ?: 0L },
     )
     val knowledge = KnowledgeRepository(database.db)
     val indexer = Indexer(knowledge, inference)
@@ -168,6 +172,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 // Apple 앱은 Mac 주인 계정의 데이터 → OWNER만 (7.12)
                 if (orchard != null && user.role == UserRole.OWNER) add(AgentType.PERSONAL)
                 if (knowledge.listCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
+                if (imageGenerator != null) add(AgentType.IMAGE)
             }
         },
         // @이름이 모두 코드 저장소면 코드 도우미로
@@ -201,6 +206,13 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 maxToolOutputChars = config.tools.maxOutputChars,
                 judge = judge,
             ),
+            AgentType.IMAGE to (imageGenerator?.let { generator ->
+                dev.vesta.agents.ImageAgent(
+                    inference, modelManager, generator, mediaStore,
+                    reserve = { modelManager.reserve(config.media.imageMemoryGigabytes * 1024L * 1024 * 1024) },
+                    size = config.media.imageSize, steps = config.media.imageSteps,
+                )
+            } ?: ChatAgent(inference, modelManager)),
             AgentType.WEB to WebResearchAgent(inference, modelManager, rewriter, webRetriever, { config.web.mode }, judge = judge),
         ),
     )

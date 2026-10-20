@@ -340,4 +340,25 @@ class TelegramBotTest : FunSpec({
         }
     }
 
+
+    test("만든 이미지는 답변을 마친 뒤 사진으로 보낸다") {
+        runTest {
+            val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
+            val asset = dev.vesta.core.media.MediaAsset("g1", owner.userId, dev.vesta.core.media.MediaKind.GENERATED, "image/png", 4, "a cat")
+            val h = Harness({ _, _ ->
+                emit(AgentEvent.Media(asset, png, "a cat"))
+                emit(AgentEvent.Token("이미지를 만들었습니다"))
+                emit(AgentEvent.Done(AgentType.IMAGE, "FLUX.1-schnell", null))
+            })
+            with(h) {
+                send(text("/image 고양이"))
+                conversation.inputs.single() shouldBe "/image 고양이"
+                api.photos.single().let {
+                    it.first.toList() shouldBe png.toList()
+                    it.second shouldBe "AI 생성 · a cat"
+                }
+                api.messages.last().text shouldContain "이미지를 만들었습니다"
+            }
+        }
+    }
 })

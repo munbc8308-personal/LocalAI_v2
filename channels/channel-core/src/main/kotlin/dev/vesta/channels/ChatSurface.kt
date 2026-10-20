@@ -51,6 +51,9 @@ interface ChatSurface {
 
     /** OGG/Opus 음성 메시지를 보낸다 */
     suspend fun sendVoice(chat: String, ogg: ByteArray) {}
+
+    /** 만든 이미지(PNG)를 사진으로 보낸다. 보낼 수 없으면 false */
+    suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean = false
 }
 
 enum class ButtonStyle { NORMAL, PRIMARY, DANGER }

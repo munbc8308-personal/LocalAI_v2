@@ -21,16 +21,37 @@ class ImageInput(val mime: String, val bytes: ByteArray) {
     }
 }
 
-enum class MediaKind { IMAGE, AUDIO }
+/** IMAGE: 질문에 붙인 이미지, GENERATED: Vesta가 만든 이미지 (갤러리, V-08) */
+enum class MediaKind { IMAGE, AUDIO, GENERATED }
 
-/** 저장한 미디어 (PROJECT.md 11장 MediaAsset). 파일은 `~/.vesta/media/<사용자>/`에 둔다 */
-data class MediaAsset(val id: String, val userId: UserId, val kind: MediaKind, val mime: String, val size: Long)
+/** 저장한 미디어 (PROJECT.md 11장 MediaAsset). 파일은 `~/.vesta/media/<사용자>/`에 둔다. [caption]은 생성 프롬프트 등 */
+data class MediaAsset(
+    val id: String,
+    val userId: UserId,
+    val kind: MediaKind,
+    val mime: String,
+    val size: Long,
+    val caption: String? = null,
+    val createdAt: java.time.Instant? = null,
+)
 
 /** 미디어 저장소. 조회는 항상 사용자 범위로 제한한다 (U-03) */
 interface MediaStore {
-    suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray): MediaAsset
+    suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray, caption: String? = null): MediaAsset
     /** 다른 사용자의 것이면 null */
     suspend fun load(userId: UserId, id: String): Pair<MediaAsset, ByteArray>?
+    /** 최근 것부터 */
+    suspend fun list(userId: UserId, kind: MediaKind, limit: Int): List<MediaAsset> = emptyList()
+}
+
+/** 생성한 이미지 (PNG, 메타데이터에 "AI 생성") */
+class GeneratedImage(val png: ByteArray, val seed: Long)
+
+/** 이미지 생성 (PROJECT.md 8장, V-06). 준비가 안 됐거나 실패하면 [MediaException] */
+interface ImageGenerator {
+    /** 이 모델 이름 (답변·메타데이터에 표시) */
+    val model: String
+    suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long? = null): GeneratedImage
 }
 
 /** 음성 인식 (PROJECT.md 8장, V-01). [audio]는 형식 상관없음 (ffmpeg로 바꾼다) */

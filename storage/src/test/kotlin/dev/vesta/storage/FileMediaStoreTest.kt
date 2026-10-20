@@ -41,4 +41,17 @@ class FileMediaStoreTest : FunSpec({
         messages.list(theirs.id).single().attachments.shouldBeEmpty()
         Path(file.toString()).toFile().exists() shouldBe true
     }
+
+    test("갤러리: 만든 이미지만 최근 것부터, 프롬프트와 함께") {
+        val home = createTempDirectory("vesta")
+        val db = VestaDatabase.open(home.resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val store = FileMediaStore(db.db, home.resolve("media"))
+        store.save(owner, MediaKind.IMAGE, "image/png", byteArrayOf(1))
+        val first = store.save(owner, MediaKind.GENERATED, "image/png", byteArrayOf(2), "a cat")
+        Thread.sleep(5)
+        val second = store.save(owner, MediaKind.GENERATED, "image/png", byteArrayOf(3), "a dog")
+        store.list(owner, MediaKind.GENERATED, 10).map { it.id to it.caption } shouldBe listOf(second.id to "a dog", first.id to "a cat")
+        db.schemaVersion() shouldBe 11
+    }
 })

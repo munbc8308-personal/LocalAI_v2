@@ -48,7 +48,7 @@ fun main() {
             val models = with(app.config.models) {
                 listOfNotNull(
                     general?.let { "general" to it.name }, code?.let { "code" to it.name }, embedding?.let { "embedding" to it.name },
-                    reranker?.let { "reranker" to it.name }, vision?.let { "vision" to it.name }, stt?.let { "stt" to it.name }, tts?.let { "tts" to "say ${it.name}" },
+                    reranker?.let { "reranker" to it.name }, vision?.let { "vision" to it.name }, image?.let { "image" to it.name }, stt?.let { "stt" to it.name }, tts?.let { "tts" to "say ${it.name}" },
                 )
             }.toMap() + ("decision" to app.config.decision.model)
             DashboardDto(
@@ -62,11 +62,26 @@ fun main() {
                         app.speechToText == null -> "꺼짐"
                         else -> worker.await()?.stt?.let { if (it.loaded) "정상 (모델 올라감)" else "정상 (대기, 처음 쓸 때 올림)" } ?: "응답 없음"
                     },
+                    "이미지 생성 (미디어 워커)" to when {
+                        app.imageGenerator == null -> "꺼짐"
+                        else -> worker.await()?.image?.let {
+                            when {
+                                it.preparing -> "모델 준비 중 (처음 한 번 받기·양자화)"
+                                it.loaded -> "정상 (모델 올라감)"
+                                it.ready -> "정상 (대기, 처음 쓸 때 올림)"
+                                it.error != null -> "모델 없음 (${it.error.orEmpty().take(80)})"
+                                else -> "모델 없음 (처음 요청할 때 받음, Hugging Face 로그인 필요)"
+                            }
+                        } ?: "응답 없음"
+                    },
                 ),
                 models = models,
                 // 미디어 워커가 올린 음성 인식 모델도 메모리 사용량에 보인다
                 loaded = loaded.await().map { LoadedModelDto(it.name, it.sizeBytes, it.gpuBytes) } +
-                    listOfNotNull(worker.await()?.stt?.takeIf { it.loaded }?.let { LoadedModelDto(it.model.substringAfterLast('/'), it.bytes, it.bytes) }),
+                    listOfNotNull(worker.await()?.takeIf { it.bytes > 0 }?.let { w ->
+                        val names = listOfNotNull(w.stt?.takeIf { it.loaded }?.model?.substringAfterLast('/'), w.image?.takeIf { it.loaded }?.model)
+                        LoadedModelDto("미디어 워커 (${names.joinToString().ifEmpty { "캐시" }})", w.bytes, w.bytes)
+                    }),
                 memoryTotalBytes = total,
                 memoryBudgetBytes = total * app.config.memory.budgetPercent / 100,
             )

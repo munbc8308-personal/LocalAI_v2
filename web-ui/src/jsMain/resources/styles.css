@@ -165,3 +165,10 @@ a { color: var(--accent); }
 @media (min-width: 761px) {
   .topbar .icon { display: none; }
 }
+
+.generated { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
+.generated img { width: min(420px, 100%); border-radius: 12px; display: block; border: 1px solid var(--line); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.gallery .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.gallery .card img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+.gallery .card p { margin: 6px 2px 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

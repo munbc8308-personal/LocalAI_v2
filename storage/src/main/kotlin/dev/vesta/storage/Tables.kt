@@ -180,6 +180,8 @@ object MediaAssets : org.jetbrains.exposed.v1.core.Table("media_asset") {
     val mime = varchar("mime", 64)
     val path = text("path")
     val size = long("size")
+    /** 생성 프롬프트 등 (v11) */
+    val caption = text("caption").nullable()
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
 }

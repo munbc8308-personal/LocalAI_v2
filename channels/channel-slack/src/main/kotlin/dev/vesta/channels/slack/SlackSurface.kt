@@ -66,6 +66,11 @@ internal class SlackSurface(private val api: SlackApi) : ChatSurface {
         api.update(chat, messageId, "승인 필요: ${escape(card.tool)} → ${escape(result)}", JsonArray(cardBlocks(card) + resultBlocks))
     }
 
+    override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
+        api.uploadFile(chat, "vesta.png", png, "AI 생성" + (caption?.let { " · $it" } ?: ""))
+        return true
+    }
+
     override suspend fun askEdit(chat: String, current: String) {
         api.postMessage(chat, "수정한 명령을 보내 주세요. 지금 명령:\n" + SlackMrkdwn.codeBlock(current))
     }

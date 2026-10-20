@@ -45,6 +45,8 @@ interface TelegramApi {
     suspend fun download(fileId: String, maxBytes: Long): ByteArray
     /** OGG/Opus 음성 메시지 (V-03) */
     suspend fun sendVoice(chatId: Long, ogg: ByteArray)
+    /** 사진 (만든 이미지, V-06) */
+    suspend fun sendPhoto(chatId: Long, png: ByteArray, caption: String?)
 }
 
 /** Bot API 오류. 429면 [retryAfterSeconds]만큼 기다려야 한다 */
@@ -223,15 +225,23 @@ class HttpTelegramApi(
         }
     }
 
-    override suspend fun sendVoice(chatId: Long, ogg: ByteArray) {
+    override suspend fun sendVoice(chatId: Long, ogg: ByteArray) =
+        upload("sendVoice", chatId, "voice", ogg, "audio/ogg", "answer.ogg", null)
+
+    override suspend fun sendPhoto(chatId: Long, png: ByteArray, caption: String?) =
+        upload("sendPhoto", chatId, "photo", png, "image/png", "vesta.png", caption)
+
+    private suspend fun upload(method: String, chatId: Long, field: String, bytes: ByteArray, type: String, name: String, caption: String?) {
         guarded {
             val text = http.submitFormWithBinaryData(
-                "$baseUrl/bot$token/sendVoice",
+                "$baseUrl/bot$token/$method",
                 formData {
                     append("chat_id", chatId.toString())
-                    append("voice", ogg, Headers.build {
-                        append(HttpHeaders.ContentType, "audio/ogg")
-                        append(HttpHeaders.ContentDisposition, "filename=\"answer.ogg\"")
+                    // 사진 설명은 1024자까지
+                    caption?.let { append("caption", it.take(1_000)) }
+                    append(field, bytes, Headers.build {
+                        append(HttpHeaders.ContentType, type)
+                        append(HttpHeaders.ContentDisposition, "filename=\"$name\"")
                     })
                 },
             ).bodyAsText()

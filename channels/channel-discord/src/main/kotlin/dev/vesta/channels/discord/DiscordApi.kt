@@ -6,6 +6,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.request
@@ -13,6 +15,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.Url
@@ -49,6 +52,8 @@ interface DiscordApi {
     suspend fun editMessage(channelId: String, messageId: String, content: String, rows: List<List<DcButton>> = emptyList())
     /** 버튼·입력 창에 대한 응답 (3초 안에 한 번) */
     suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject)
+    /** 파일을 붙인 메시지 (만든 이미지) */
+    suspend fun createMessageWithFile(channelId: String, content: String, fileName: String, bytes: ByteArray, contentType: String)
     /** 첨부 파일. Discord CDN 주소만 받는다. [maxBytes]를 넘으면 받지 않는다 */
     suspend fun download(url: String, maxBytes: Long): ByteArray
 }
@@ -140,6 +145,28 @@ class HttpDiscordApi(
 
     override suspend fun editMessage(channelId: String, messageId: String, content: String, rows: List<List<DcButton>>) {
         call(HttpMethod.Patch, "/channels/$channelId/messages/$messageId", messageBody(content, rows))
+    }
+
+    override suspend fun createMessageWithFile(channelId: String, content: String, fileName: String, bytes: ByteArray, contentType: String) {
+        val payload = messageBody(content, emptyList()).let { body ->
+            JsonObject(body + ("attachments" to buildJsonArray { add(buildJsonObject { put("id", 0); put("filename", fileName) }) }))
+        }
+        guarded {
+            val response = http.submitFormWithBinaryData(
+                "$baseUrl/channels/$channelId/messages",
+                formData {
+                    append("payload_json", payload.toString())
+                    append("files[0]", bytes, Headers.build {
+                        append(HttpHeaders.ContentType, contentType)
+                        append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"")
+                    })
+                },
+            ) {
+                header(HttpHeaders.Authorization, "Bot $token")
+                header(HttpHeaders.UserAgent, USER_AGENT)
+            }
+            if (!response.status.isSuccess()) throw DiscordException(response.status.value, response.bodyAsText().take(200))
+        }
     }
 
     override suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject) {

@@ -32,6 +32,9 @@ class FakeSlack : SlackApi {
     override suspend fun postEphemeral(channel: String, user: String, text: String) { ephemeral += user to text }
     override suspend fun openView(triggerId: String, view: JsonObject) { views += view }
 
+    val uploads = mutableListOf<Pair<String, ByteArray>>()
+    override suspend fun uploadFile(channel: String, fileName: String, bytes: ByteArray, title: String?) { uploads += fileName to bytes }
+
     override suspend fun download(url: String, maxBytes: Long): ByteArray {
         downloads += url
         return file

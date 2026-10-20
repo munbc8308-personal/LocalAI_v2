@@ -56,6 +56,11 @@ internal class TelegramSurface(private val api: TelegramApi) : ChatSurface {
 
     override suspend fun sendVoice(chat: String, ogg: ByteArray) = api.sendVoice(chat.toLong(), ogg)
 
+    override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
+        api.sendPhoto(chat.toLong(), png, caption?.let { "AI 생성 · $it" } ?: "AI 생성")
+        return true
+    }
+
     override suspend fun askEdit(chat: String, current: String) {
         api.sendMessage(chat.toLong(), "수정한 명령을 보내 주세요. 지금 명령:\n<pre>${escape(current)}</pre>", html = true, forceReply = true)
     }

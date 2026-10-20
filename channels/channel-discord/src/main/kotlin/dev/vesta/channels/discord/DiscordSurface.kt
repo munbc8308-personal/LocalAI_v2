@@ -60,6 +60,11 @@ internal class DiscordSurface(private val api: DiscordApi) : ChatSurface {
         api.editMessage(chat, messageId, content.take(MESSAGE_LIMIT))
     }
 
+    override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
+        api.createMessageWithFile(chat, "AI 생성" + (caption?.let { " · " + escape(it.take(1_500)) } ?: ""), "vesta.png", png, "image/png")
+        return true
+    }
+
     override suspend fun askEdit(chat: String, current: String) {
         api.createMessage(chat, "수정한 명령을 보내 주세요. 지금 명령:\n" + codeBlock(current))
     }

@@ -45,8 +45,8 @@ private class MemorySessions : SessionRepository {
 
 private class MemoryMedia : MediaStore {
     val items = mutableMapOf<String, Pair<MediaAsset, ByteArray>>()
-    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray) =
-        MediaAsset("a${items.size}", userId, kind, mime, bytes.size.toLong()).also { items[it.id] = it to bytes }
+    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray, caption: String?) =
+        MediaAsset("a${items.size}", userId, kind, mime, bytes.size.toLong(), caption).also { items[it.id] = it to bytes }
     override suspend fun load(userId: UserId, id: String) = items[id]?.takeIf { it.first.userId == userId }
 }
 

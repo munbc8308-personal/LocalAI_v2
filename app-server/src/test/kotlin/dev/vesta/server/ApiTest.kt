@@ -182,7 +182,7 @@ class ApiTest : FunSpec({
     test("음성 인식·읽어 주기·미디어: 설정이 없으면 503, 있으면 처리하고 미디어는 본인 것만") { testApplication {
         val owner = UserContext(UserId(1), UserRole.OWNER)
         val store = object : dev.vesta.core.media.MediaStore {
-            override suspend fun save(userId: UserId, kind: dev.vesta.core.media.MediaKind, mime: String, bytes: ByteArray) = error("x")
+            override suspend fun save(userId: UserId, kind: dev.vesta.core.media.MediaKind, mime: String, bytes: ByteArray, caption: String?) = error("x")
             override suspend fun load(userId: UserId, id: String) =
                 if (userId == owner.userId && id == "a1") dev.vesta.core.media.MediaAsset("a1", userId, dev.vesta.core.media.MediaKind.IMAGE, "image/png", 3) to byteArrayOf(1, 2, 3) else null
         }

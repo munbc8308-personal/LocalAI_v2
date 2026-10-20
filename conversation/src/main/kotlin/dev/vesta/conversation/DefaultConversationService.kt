@@ -100,6 +100,8 @@ class DefaultConversationService(
         val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
         val route = decision
         val answer = StringBuilder()
+        // 에이전트가 만든 이미지 (답변 메시지에 붙인다)
+        val produced = mutableListOf<String>()
         var done: AgentEvent.Done? = null
         try {
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route))
@@ -111,13 +113,14 @@ class DefaultConversationService(
                     when (event) {
                         is AgentEvent.Token -> answer.append(event.text)
                         is AgentEvent.Done -> done = event
+                        is AgentEvent.Media -> produced += event.asset.id
                         else -> Unit
                     }
                     emit(event)
                 }
         } finally {
             // 사용자가 중단(취소)해도 생성된 부분까지는 남긴다 (C-04)
-            if (answer.isNotEmpty()) {
+            if (answer.isNotEmpty() || produced.isNotEmpty()) {
                 withContext(NonCancellable) {
                     messages.append(
                         session.id,
@@ -129,6 +132,7 @@ class DefaultConversationService(
                             interrupted = done == null,
                             promptTokens = done?.usage?.promptTokens,
                             completionTokens = done?.usage?.completionTokens,
+                            attachments = produced,
                         ),
                     )
                 }

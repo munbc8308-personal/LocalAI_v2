@@ -45,6 +45,9 @@ sealed interface AgentEvent {
         val editableValue: String? = null,
     ) : AgentEvent
 
+    /** 에이전트가 만든 이미지 등 (V-06). 이미 저장됐고, 채널은 [bytes]를 그대로 보낸다 */
+    class Media(val asset: dev.vesta.core.media.MediaAsset, val bytes: ByteArray, val caption: String?) : AgentEvent
+
     /** 근거 검증 결과 (D7). [unsupported]는 근거로 확인되지 않은 문장. */
     data class Grounding(val checked: Int, val unsupported: List<String>) : AgentEvent
 

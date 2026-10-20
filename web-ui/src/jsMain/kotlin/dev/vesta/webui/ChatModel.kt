@@ -32,6 +32,8 @@ class Turn(val question: String, val images: List<String> = emptyList()) {
     /** 저장된 기록에서 불러온 답변 */
     var agent by mutableStateOf<String?>(null)
     var interrupted by mutableStateOf(false)
+    /** 이 답변에서 만든 이미지 주소 (/api/media/…) */
+    val generated = mutableStateListOf<String>()
 }
 
 class ToolLine(val callId: String, val tool: String, val summary: String) {
@@ -138,6 +140,7 @@ class ChatController(private val scope: CoroutineScope) {
             is EventDto.ToolFinished -> turn.tools.lastOrNull { it.callId == event.callId }?.let { it.ok = event.ok; it.result = event.summary }
             is EventDto.Approval -> turn.approvals += ApprovalView(event)
             is EventDto.Grounding -> turn.grounding = event
+            is EventDto.Media -> turn.generated += "/api/media/${event.id}"
             is EventDto.Token -> {
                 turn.thinking = false
                 turn.status = null
@@ -157,6 +160,7 @@ class ChatController(private val scope: CoroutineScope) {
                 turn.answer = m.content
                 turn.agent = m.agent
                 turn.interrupted = m.interrupted
+                turn.generated.addAll(m.attachments.filter { it.mime.startsWith("image/") }.map { "/api/media/${it.id}" })
             }
         }
         return out
