@@ -3,6 +3,12 @@ package dev.vesta.server
 import dev.vesta.app.AppContainer
 import dev.vesta.app.BotTokens
 import dev.vesta.channels.ChannelFiles
+import dev.vesta.channels.discord.DiscordBot
+import dev.vesta.channels.discord.DiscordGateway
+import dev.vesta.channels.discord.HttpDiscordApi
+import dev.vesta.channels.slack.HttpSlackApi
+import dev.vesta.channels.slack.SlackBot
+import dev.vesta.channels.slack.SlackSocket
 import dev.vesta.channels.telegram.HttpTelegramApi
 import dev.vesta.channels.telegram.TelegramBot
 import dev.vesta.core.ChannelType
@@ -26,13 +32,42 @@ private val log = KotlinLogging.logger {}
 
 /** 메신저 봇을 띄운다 (PROJECT.md 6.2: 서버가 채널 어댑터를 기동). 토큰이 없으면 건너뛴다 */
 fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -> String) {
-    val telegram = app.config.channels.telegram
-    val token = BotTokens.read("telegram")
+    val channels = app.config.channels
+    val files = ServerChannelFiles(app)
+
+    val telegram = channels.telegram
+    val telegramToken = BotTokens.read("telegram")
     when {
         !telegram.enabled -> log.info { "Telegram 꺼짐 (channels.telegram.enabled: false)" }
-        token == null -> log.info { "Telegram 토큰 없음 — 켜려면 vesta telegram token" }
+        telegramToken == null -> log.info { "Telegram 토큰 없음 — 켜려면 vesta telegram token" }
         else -> {
-            val bot = TelegramBot(HttpTelegramApi(token, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, ServerChannelFiles(app), telegram, status)
+            val bot = TelegramBot(HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status)
+            scope.launch { bot.run() }
+        }
+    }
+
+    val discord = channels.discord
+    val discordToken = BotTokens.read("discord")
+    when {
+        !discord.enabled -> log.info { "Discord 꺼짐 (channels.discord.enabled: false)" }
+        discordToken == null -> log.info { "Discord 토큰 없음 — 켜려면 vesta discord token" }
+        else -> {
+            val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
+            val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() })
+            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status)
+            scope.launch { bot.run() }
+        }
+    }
+
+    val slack = channels.slack
+    val slackBot = BotTokens.read("slack")
+    val slackApp = BotTokens.read("slack", account = BotTokens.APP)
+    when {
+        !slack.enabled -> log.info { "Slack 꺼짐 (channels.slack.enabled: false)" }
+        slackBot == null || slackApp == null -> log.info { "Slack 토큰 없음 — 켜려면 vesta slack token" }
+        else -> {
+            val api = HttpSlackApi(slackBot, slackApp, baseUrl = slack.apiUrl)
+            val bot = SlackBot(api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status)
             scope.launch { bot.run() }
         }
     }

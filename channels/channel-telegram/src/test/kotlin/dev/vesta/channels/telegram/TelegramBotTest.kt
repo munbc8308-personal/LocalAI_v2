@@ -1,6 +1,9 @@
 package dev.vesta.channels.telegram
 
 import dev.vesta.channels.PairingCode
+import dev.vesta.channels.testing.FakeConversation
+import dev.vesta.channels.testing.FakeFiles
+import dev.vesta.channels.testing.MemoryBindings
 import dev.vesta.core.AgentType
 import dev.vesta.core.ChannelType
 import dev.vesta.core.RiskLevel

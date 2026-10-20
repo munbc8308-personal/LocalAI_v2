@@ -14,16 +14,19 @@ internal class ArtifactFilter {
         if (started) return cleaned
         head.append(cleaned)
         val text = head.toString()
-        if (text.length < LEADING.length + 1 && LEADING.startsWith(text.trimStart())) return ""
+        val trimmed = text.trimStart()
+        if (trimmed.length <= LEADINGS.maxOf { it.length } && LEADINGS.any { it.startsWith(trimmed) }) return ""
         started = true
-        return if (text.trimStart().startsWith(LEADING)) text.trimStart().removePrefix(LEADING).trimStart('\n') else text
+        val lead = LEADINGS.firstOrNull { trimmed.startsWith(it) } ?: return text
+        return trimmed.removePrefix(lead).trimStart('\n')
     }
 
     /** 턴이 끝날 때 남은 글자 */
-    fun flush(): String = if (started) "" else head.toString().let { if (it.trim() == LEADING.trim()) "" else it }.also { started = true }
+    fun flush(): String = if (started) "" else head.toString().let { h -> if (LEADINGS.any { it.trim() == h.trim() }) "" else h }.also { started = true }
 
     private companion object {
-        const val LEADING = "thought\n"
+        /** M11에서 ":thought\n"도 나왔다 */
+        val LEADINGS = listOf("thought\n", ":thought\n")
         val MARKER = Regex("<\\|?(channel|turn|start_of_turn|end_of_turn)\\|?>")
     }
 }

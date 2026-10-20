@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9 완료, M10 구현(실제 Telegram 확인 남음) (v3.1, 2026-10-19)
+> 상태: M0~M9 완료, M10·M11 구현(실제 Telegram·Discord·Slack 확인 남음) (v3.2, 2026-10-21)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -37,6 +37,7 @@
 | v2.9 | 2026-10-19 | **M8 서버·API**: app-server(Ktor, 127.0.0.1:8787), Vesta API(SSE)·OpenAI 호환 API, 키체인 토큰, CLI 원격/임베디드 자동 선택, launchd 상시 실행. 13.10 진행 기록 |
 | v3.0 | 2026-10-19 | **M9 웹 UI**: 시제품 비교로 웹 UI 기술을 Compose Multiplatform Web(Wasm) → **Compose HTML(Kotlin/JS, DOM)** 로 변경(사용자 결정). `api-model` KMP(JVM + JS), `web-ui` 모듈, 비밀번호 로그인(Argon2id)·세션 쿠키·CSRF·Host 검사, `vesta passwd`, Tailscale serve 스크립트. 13.11 진행 기록 |
 | v3.1 | 2026-10-19 | **M10 Telegram**: `channel-core`·`channel-telegram` 모듈(Bot API 직접 호출, long polling), 일회용 코드로 계정 연결(`vesta telegram pair`), 메시지 수정 스트리밍·분할, 인라인 버튼 승인(셸 수정 후 승인), 파일 첨부(질문·컬렉션 추가), 봇 토큰 키체인 저장. schema v9. 13.12 진행 기록 |
+| v3.2 | 2026-10-21 | **M11 Discord·Slack**: Kord·Bolt 대신 **Ktor로 직접**(Discord Gateway WebSocket·REST, Slack Socket Mode·Web API). 메신저 공통 동작을 `channel-core`의 `ChannelBot`으로 모으고 Telegram도 그 위로 옮김. 버튼 승인, 셸 수정은 입력 창(모달), 메시지 분할(Discord 2000자·Slack 블록 3000자), `!` 명령, 코드만 보내도 계정 연결. `vesta discord`·`vesta slack` 명령(token·pair·list·unlink·off), `vesta slack manifest`. 13.13 진행 기록 |
 
 ---
 
@@ -175,7 +176,7 @@ Kotlin(JVM)으로 만드는, **Apple Silicon Mac에서 동작하는 로컬 우�
 | 프로세스 관리 | launchd | OS 내장 | 로컬 | |
 | 원격 접속 | Tailscale **Personal** | 개인 무료 (최대 3명, 100대) | 외부 조정 서버 + 기기 간 WireGuard | 선택. 안 쓰면 웹 UI는 이 Mac에서만 접속 |
 | 메신저 | Telegram / Discord / Slack | 무료 (Slack 무료 플랜은 기록 90일) | 외부 서비스 | 선택. 메시지가 각 회사 서버를 거침 (6.6) |
-| 앱 라이브러리 | Ktor, Exposed, Kord, Bolt, Clikt, Hoplite, PDFBox, JGit, Compose 등 | Apache 2.0 / MIT / EPL 등 오픈소스 | 앱 내부 | 의존성 추가 시 라이선스 확인 |
+| 앱 라이브러리 | Ktor, Exposed, Clikt, Hoplite, PDFBox, JGit, Compose 등 | Apache 2.0 / MIT / EPL 등 오픈소스 | 앱 내부 | 의존성 추가 시 라이선스 확인 |
 
 **비용: Orchard Pro 구독료만** (전기료 제외). 나머지 구성 요소는 모두 0원이다.
 
@@ -485,8 +486,8 @@ MoE 모델은 MLX에서 속도 이득이 특히 크므로 우선 검토한다.
 | 메신저 | 연결 방식 | 공개 주소 필요 | 비용 | 종단간 암호화 | Kotlin/JVM 라이브러리 | 판단 |
 |--------|-----------|----------------|------|---------------|------------------------|------|
 | **Telegram** | Bot API long polling (`getUpdates`) | 불필요 | 무료 | 아니오 (Telegram 서버 경유·저장) | Ktor Client로 Bot API 직접 호출 또는 ktgbotapi(Kotlin) | **1순위 (P1)**. 인라인 버튼으로 승인 처리, 설정 쉬움 |
-| **Discord** | Gateway WebSocket | 불필요 | 무료 | 아니오 | **Kord** (Kotlin, 코루틴 기반) | **2순위 (확정)**. 버튼 컴포넌트로 승인 |
-| **Slack** | Socket Mode | 불필요 | 무료 플랜 가능 (기록 보존 제한) | 아니오 | Bolt for Java (Kotlin에서 사용) | **2순위 (확정)**. Block Kit 버튼으로 승인 |
+| **Discord** | Gateway WebSocket | 불필요 | 무료 | 아니오 | Ktor Client로 Gateway·REST 직접 (M11 확정, 처음 후보는 Kord) | **2순위 (확정)**. 버튼 컴포넌트로 승인 |
+| **Slack** | Socket Mode | 불필요 | 무료 플랜 가능 (기록 보존 제한) | 아니오 | Ktor Client로 Socket Mode·Web API 직접 (M11 확정, 처음 후보는 Bolt for Java) | **2순위 (확정)**. Block Kit 버튼으로 승인 |
 | Signal | signal-cli 데몬 (JSON-RPC) | 불필요 | 무료 (봇용 전화번호 필요) | **예** | signal-cli 연동 | 보류 |
 | Matrix | Client-Server API sync | 불필요 | 무료 (자체 서버 가능) | 예 (설정 시) | Trixnity(Kotlin) | 보류 |
 | 카카오톡 | 카카오톡 채널 + 챗봇 스킬 서버 (webhook) | **필요** | 무료~유료 | 아니오 | 직접 구현 | **보류**. 개인용 봇 API가 없고, 응답 시간 제한이 짧아 LLM 생성에 부적합 |
@@ -496,9 +497,9 @@ MoE 모델은 MLX에서 속도 이득이 특히 크므로 우선 검토한다.
 ### 6.5 메신저 공통 기능
 | 기능 | 내용 |
 |------|------|
-| 사용자 허용 목록 | 등록된 사용자의 메신저 계정 ID에서 온 메시지만 처리 (`ChannelBinding` → `userId`). 나머지는 무시하고 로그 기록. 연결은 이 Mac에서 만든 일회용 코드(`vesta telegram pair`, 10분)를 봇에게 보내야 생긴다. 1:1 대화만 받는다 |
+| 사용자 허용 목록 | 등록된 사용자의 메신저 계정 ID에서 온 메시지만 처리 (`ChannelBinding` → `userId`). 나머지는 무시하고 로그 기록. 연결은 이 Mac에서 만든 일회용 코드(`vesta telegram pair`, `vesta discord pair`, `vesta slack pair`, 10분)를 봇에게 보내야 생긴다(Telegram은 `/start <코드>`, Discord·Slack은 코드만 보내도 됨). 1:1 대화만 받는다 |
 | 세션 매핑 | 메신저 대화방 ↔ 세션 연결. `/new`로 새 세션 |
-| 명령어 | `/new` `/web` `/docs` `/code` `/task` `/status` `/cancel` (CLI·웹과 동일 체계) |
+| 명령어 | `/new` `/web` `/docs` `/code` `/task` `/status` `/cancel` (CLI·웹과 동일 체계). Discord·Slack은 `!new`처럼 `!`로 쓴다(Slack 앱은 `/`를 앱 명령으로 가로챔). 어느 메신저든 `/`·`!` 둘 다 받는다 |
 | 스트리밍 | 메시지를 일정 간격(약 1초)으로 수정해 생성 중 내용 표시. 플랫폼 rate limit 준수 |
 | 긴 메시지 | 플랫폼 길이 제한(Telegram 4096자, Discord 2000자, Slack 블록당 3000자)에 맞춰 분할, 코드 블록이 깨지지 않게 자름 |
 | 출처 표시 | 답변 끝에 출처 목록. 로컬 문서는 파일명·위치만 표시 |
@@ -729,7 +730,7 @@ MCP `annotations`는 서버가 주는 **힌트일 뿐**이라 그대로 믿지 �
 | I-03 | 로컬 HTTP API | P1 | 자체 REST + SSE, OpenAI 호환 `/v1/chat/completions` |
 | I-04 | 웹 UI | P1 | 대화·승인·컬렉션·모델 대시보드 (6.3) |
 | I-05 | Telegram 봇 | P1 | long polling, 사용자 허용 목록, 인라인 버튼 승인 (6.4~6.6) |
-| I-06 | Discord · Slack 봇 | P1 | Kord / Bolt(Socket Mode) 어댑터, 버튼 승인 |
+| I-06 | Discord · Slack 봇 | P1 | Gateway / Socket Mode 어댑터(Ktor 직접), 버튼 승인, 셸 수정은 입력 창 |
 | I-06a | 기타 메신저 | 보류 | Signal, Matrix |
 | I-07 | 채널 간 세션 이어가기 | P2 | 웹에서 하던 대화를 텔레그램에서 계속 |
 | I-08 | 데스크톱 GUI | 보류 | 웹 UI로 대체 |
@@ -1027,8 +1028,8 @@ class McpTool(                                          // MCP 도구를 Vesta T
 | 공유 모델 | Kotlin Multiplatform (`api-model`: JVM + JS) | 서버·CLI·웹 UI가 같은 DTO 사용, kotlinx.serialization |
 | 비밀번호 해시 | Bouncy Castle Argon2id | 웹 UI 로그인 |
 | Telegram | **Bot API 직접 호출 (Ktor Client)** (M10 확정) | long polling. 라이브러리 없이 필요한 메서드 9개만 |
-| Discord | Kord | Kotlin 코루틴 기반 |
-| Slack | Bolt for Java (Socket Mode) | Kotlin에서 사용 |
+| Discord | **Gateway WebSocket·REST 직접 호출 (Ktor Client)** (M11 확정) | DM만(intent `DIRECT_MESSAGES`), Resume·heartbeat 직접 처리 |
+| Slack | **Socket Mode·Web API 직접 호출 (Ktor Client)** (M11 확정) | 봇 토큰 xoxb- + 앱 토큰 xapp-, 앱 DM(메시지 탭)만 |
 | MCP 클라이언트 | 공식 Kotlin MCP SDK (`io.modelcontextprotocol:kotlin-sdk`) | stdio 전송, 범용 |
 | Apple 앱 연동 | **Orchard** (MCP 서버, `orchard-cli mcp`) | **Pro 구매해서 사용** (앱 11개). 대비책은 A-09 (보류) |
 | 원격 접속 | Tailscale Personal (무료, 선택) | 휴대폰 등에서 웹 UI 접속 |
@@ -1057,10 +1058,10 @@ vesta/   (저장소 폴더: LocalAI/)
 ├── agents/        # Chat/Docs/Web/Code/Task/Personal/Image 에이전트
 ├── conversation/  # ConversationService, 세션 관리, ApprovalBroker
 ├── channels/
-│   ├── channel-core/      # ChannelAdapter, 공통 포맷팅(분할·출처·승인 버튼)
-│   ├── channel-telegram/  # P1
-│   ├── channel-discord/   # Kord
-│   └── channel-slack/     # Bolt Socket Mode
+│   ├── channel-core/      # ChannelBot(공통 동작), ChatSurface, 분할·출처·승인 카드
+│   ├── channel-telegram/  # Bot API long polling
+│   ├── channel-discord/   # Gateway WebSocket + REST
+│   └── channel-slack/     # Socket Mode + Web API
 ├── tools/         # Tool, 기본 도구, 승인 정책, 샌드박스
 ├── identity/      # 사용자·역할·인증, 사용자 범위 강제, 요청 큐
 ├── media/         # STT·TTS·이미지 생성 클라이언트, 오디오 변환(ffmpeg)
@@ -1173,7 +1174,7 @@ app-cli / app-server
 | **M8. 서버 · API** | app-server 상시 실행(launchd), REST + SSE, OpenAI 호환 API, CLI를 서버 클라이언트로 전환 | 재부팅 후 자동 기동, 외부 클라이언트 호출 성공 |
 | **M9. 웹 UI** | `api-model` KMP 모듈, Compose Web 대화·승인·컬렉션·대시보드, 로그인, Tailscale 접속 | 휴대폰 브라우저에서 대화·승인 가능 |
 | **M10. Telegram** | 봇 어댑터, 허용 목록, 스트리밍·분할, 인라인 승인, 파일 첨부 | 외출 중 텔레그램으로 문서 질의·웹 리서치 동작 |
-| **M11. Discord · Slack** | Kord·Bolt 어댑터, 버튼 승인, 메시지 분할 | Discord·Slack에서 대화·셸 승인 동작 |
+| **M11. Discord · Slack** | Discord Gateway·Slack Socket Mode 어댑터(Ktor 직접), 공통 엔진 `ChannelBot`, 버튼 승인, 메시지 분할 | Discord·Slack에서 대화·셸 승인 동작 |
 | **M12. 음성 · 비전 입력** | 미디어 워커(uv), mlx-whisper STT, ffmpeg, 웹 UI 마이크, 메신저 음성·사진, 비전 질문, `say` TTS | 텔레그램 음성으로 묻고 답 받기, 스크린샷 질문 동작 |
 | **M13. 이미지 생성** | mflux + FLUX.1-schnell, `ImageAgent`, `/image`, MediaAsset 갤러리, 메모리 LRU 연동 | 한국어 요청으로 이미지 생성, 코드 모델과 메모리 충돌 없이 동작 |
 | **M14. 모델 학습** | 피드백 수집(C-09), 데이터셋 내보내기, Laya 미세조정 → ONNX → Ollaya, 평가 게이트, 버전·롤백, 이후 생성 모델 QLoRA | 미세조정한 결정 모델이 한국어 평가셋에서 기존보다 높은 점수 |
@@ -1639,8 +1640,60 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 
 #### 남은 일
 - **실제 Telegram 확인**: BotFather에서 봇을 만들고 `vesta telegram token` → `vesta telegram pair` → 휴대폰에서 `/start <코드>` → 외출 중(셀룰러) 문서 질의·웹 리서치. 이게 M10 완료 조건이다.
-- 한 번 수정 후 승인한 결과 답변이 비어 있었던 적이 있음(모델이 도구 결과 뒤 아무 말도 안 함, 다시 하면 정상). 작업 에이전트 쪽 문제로 보고 지켜본다.
+- ~~한 번 수정 후 승인한 결과 답변이 비어 있었던 적이 있음~~ → M11에서 원인 확인: 모델은 자기가 요청한 명령만 알아 결과를 헷갈림. 고친 명령으로 실행했다고 도구 결과 앞에 알려 주도록 수정 (13.13).
 - 음성·사진(M12), 예약 작업 알림(P2)은 이후 마일스톤.
+
+### 13.13 M11 진행 기록 (2026-10-21)
+
+#### 완료
+- **라이브러리 결정**: 기획의 Kord·Bolt 대신 Telegram처럼 **Ktor로 직접** 구현했다. 필요한 API가 적고(Discord REST 6개 + Gateway, Slack Web API 6개 + Socket Mode), 큰 라이브러리의 Kotlin·Ktor 버전 충돌을 피하며, 가짜 서버로 시험하기 쉽다.
+- **공통 엔진** (`channel-core`):
+  - Telegram 봇에 있던 대화·승인·파일 처리를 `ChannelBot`으로 옮기고, 플랫폼은 `ChatSurface`(보내기·고치기·서식·버튼·승인 카드)만 구현한다. 받은 일은 `Inbound`(글·파일, 버튼, 입력 창 제출)로 바꿔 넘긴다.
+  - 스트리밍(`LiveReply`)·표 변환(`MarkdownTable`)도 공통. 메시지 ID·대화방 ID는 문자열.
+  - Telegram 어댑터는 이 엔진 위로 옮겼고 M10 시험 18개가 그대로 통과한다.
+  - 명령은 `/`와 `!` 둘 다 받는다. `!web 질문` → `/web 질문`으로 바꿔 대화 엔진에 넘긴다.
+  - 연결 코드는 `/start <코드>`, `!start <코드>`, 코드만(가운데 하이픈 허용) 모두 받는다.
+  - 승인 카드는 보내기 전에 등록한다(카드가 도착한 직후 누른 버튼이 "이미 끝난 요청"이 되지 않게).
+- **Discord** (`channel-discord`):
+  - Gateway: Hello → Identify(intent `DIRECT_MESSAGES`만) → heartbeat. ack가 안 오면 끊고 Resume. 재연결 요청(op 7)·세션 무효(op 9) 처리. 4004(토큰 거부)·4010~4014는 멈춤. 4007·4009는 새로 Identify.
+  - DM만 받는다(서버 대화방 글·봇 글 무시). DM 글 내용은 Message Content 권한 없이도 온다.
+  - 메시지는 멘션을 끄고(`allowed_mentions`) 링크 미리보기를 끈다. 2,000자 한도라 1,800자씩 나눈다. 표는 고정폭 코드 블록, `####` 이하 제목은 굵게.
+  - 버튼은 한 줄 5개·5줄까지라 다시 나눠 담는다. 다른 사람이 누르면 본인에게만 보이는 안내(ephemeral).
+  - 셸 수정은 **입력 창(모달)** 에 지금 명령을 채워 띄운다. 명령이 1,200자를 넘으면 승인받지 않고 거부(카드에 전부 보여 줄 수 없음).
+  - 429는 `retry_after`만큼 기다렸다 다시 보낸다(10초 이하, 두 번까지). 첨부 파일은 Discord CDN 주소만 받는다.
+  - `vesta discord token`: 토큰 확인 후 키체인 저장, 봇을 서버에 넣는 초대 주소(권한 0) 출력.
+- **Slack** (`channel-slack`):
+  - Socket Mode: 앱 토큰(xapp-)으로 연결 주소를 받아 WebSocket 연결. 봉투마다 바로 확인(ack)을 보내고 처리. 다시 보낸 이벤트는 `event_id`로 한 번만. `disconnect`면 새 주소로 다시 붙고, `invalid_auth` 등이면 멈춘다.
+  - 앱 DM(메시지 탭)만 받는다. 봇 글·고친 글·채널 글 무시, 파일 올림(`file_share`)만 받음.
+  - mrkdwn 변환: 모든 글자의 `& < >` 이스케이프(답변 속 `<!channel>` 같은 멘션은 글자로만), 링크는 http(s)만 `<url|글>`, 표·코드는 고정폭 블록. 서식 기호가 글자에 붙으면 Slack이 그리지 않아 폭 없는 공백을 둔다. 받은 글의 이스케이프·링크 표기는 되돌린다.
+  - Block Kit 버튼 승인. 블록 하나 3,000자 한도라 긴 명령은 줄 단위로 여러 블록에 나눠 **전부** 보여 준다(2,800자 넘으면 거부). 셸 수정은 모달(`views.open`).
+  - 파일은 `files.slack.com`에서만 봇 토큰으로 받는다(다른 주소로 넘겨주는 응답은 따라가지 않음). 권한이 없어 HTML이 오면 실패로 본다.
+  - `vesta slack manifest`: 앱 만들 때 붙여 넣을 manifest(권한 `chat:write` `im:history` `files:read`, 이벤트 `message.im`, Socket Mode·Interactivity 켬). `vesta slack token`: 봇·앱 토큰 둘 다 확인 후 키체인 저장.
+- **CLI**: `vesta telegram|discord|slack token·pair·list·unlink·off`를 같은 코드로. 키체인 계정 `bot-token`·`app-token`, 환경 변수 `VESTA_<채널>_TOKEN`·`VESTA_SLACK_APP_TOKEN`.
+- **설정**: `channels.discord`·`channels.slack`(Telegram과 같은 항목: `enabled` `allowLocalSources` `allowExecApproval` `streamIntervalMillis` `maxFileMegabytes` `apiUrl`). 수정 간격 기본 1.5초.
+- **작업 에이전트**: 사용자가 승인하면서 인자를 고치면 "고친 인자로 실행했다, 원래 인자로 다시 실행하지 말 것"을 도구 결과 앞에 붙인다. Gemma가 답 앞에 내는 `:thought` 표식도 거른다.
+- **테스트**: 공통 가짜(`channel-core` testFixtures)를 세 어댑터가 함께 씀. Discord 16개(봇·가짜 Gateway 서버로 Identify/Resume/heartbeat·REST·서식), Slack 14개(봇·가짜 Socket Mode 서버로 ack/중복/재연결·Web API·mrkdwn), TaskAgent·표식 필터 추가.
+
+#### 확인 (가짜 Discord·Slack 서버 + 평가용 홈 `~/.vesta-eval`, 실제 모델)
+- 가짜 서버는 표준 라이브러리만으로 WebSocket을 직접 구현(Discord Gateway·Slack Socket Mode)했다.
+- 연결 안 된 계정 → 답 없음·로그. 코드만 보내 연결.
+- Discord: `@b` 문서 질문 → 출처 `PROJECT.md · 6.6 … · 508–519행`. `!web` → 웹 출처 링크 3개(미리보기 없음). 셸 요청 → 다른 계정 버튼(본인에게만 "권한이 없습니다") → 본인 "수정" → 입력 창 → 고친 명령으로 실행(tool_run 확인). 일반 승인 → 결과가 카드 아래. 캡션 붙인 파일 질문, `!status`.
+- Slack: 문서 질문·`!web`(근거 미확인 2개 표시)·셸 승인(모달 수정)·파일 → 컬렉션 추가 → `@b` 질문에 그 파일을 출처로 답변. `!cancel` → "(중단됨)". 연결 갱신(disconnect) → 1초 뒤 다시 연결.
+- Telegram(가짜 Bot API): 새 엔진에서 문서 질문 정상.
+
+#### 발견·수정
+- Gateway가 Hello 전에 연결을 끊으면 끊긴 이유를 못 읽어 토큰 거부(4004)에도 계속 다시 붙음 → 연결이 끝나면 항상 이유를 읽는다.
+- 연결 쪽 작업이 취소되면(heartbeat 시간 초과 등) 봇 전체가 멈춤 → 우리가 멈춘 게 아니면 다시 붙는다(Discord·Slack 공통).
+- 승인 카드가 도착한 직후 누른 버튼이 "이미 끝난 요청"으로 처리됨 → 카드를 보내기 전에 등록.
+- 수정 후 승인하면 모델이 원래 명령 결과로 착각하거나 원래 명령을 다시 요청함(M10의 빈 답변도 같은 원인) → 도구 결과 앞에 알림. 고친 뒤 두 번 연속 정상 확인.
+- 답 앞에 `:thought`가 새어 나옴 → 표식 필터에 추가.
+
+#### 남은 일
+- **실제 Discord·Slack 확인** (M11 완료 조건):
+  - Discord: Developer Portal에서 앱·봇 만들기 → `vesta discord token`(초대 주소로 내 서버에 추가) → `vesta discord pair` → 봇에게 DM으로 코드 → 대화·셸 승인.
+  - Slack: `vesta slack manifest`로 앱 만들기 → 워크스페이스에 설치 → 앱 토큰(`connections:write`) 만들기 → `vesta slack token` → `vesta slack pair` → 앱 메시지 탭에 코드 → 대화·셸 승인.
+- Slack 무료 플랜은 기록 90일 보관(6.4). Discord는 봇과 같은 서버에 있어야 DM 가능.
+- 음성·사진(M12), 알림(P2).
 
 ---
 

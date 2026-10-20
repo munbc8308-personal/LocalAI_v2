@@ -134,11 +134,12 @@ class TaskAgent(
             return ToolResult("오류: 인자 JSON을 읽지 못함 (${it.message})", isError = true)
         }
         var approved: Boolean? = null
+        var edited = false
         if (ToolRegistry.needsApproval(tool.risk, taint.tainted)) {
             when (val decision = askApproval(tool, arguments, request)) {
                 ApprovalDecision.Approve -> approved = true
                 // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다
-                is ApprovalDecision.ApproveEdited -> { arguments = JsonObject(arguments + decision.editedArguments); approved = true }
+                is ApprovalDecision.ApproveEdited -> { arguments = JsonObject(arguments + decision.editedArguments); approved = true; edited = true }
                 is ApprovalDecision.Deny -> {
                     val denied = ToolResult(
                         "실행되지 않았다. 사용자가 승인을 거부했다(${decision.reason}). 이 작업은 일어나지 않았으므로 했다고 말하지 말고, " +
@@ -169,7 +170,9 @@ class TaskAgent(
         if (tool.readsLocalData && !result.isError) taint.tainted = true
         emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = !result.isError, summary = result.summary))
         runCatching { runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, approved, result, ms) }
-        return checked
+        // 모델은 자기가 요청한 인자만 알고 있으므로, 사용자가 고친 인자로 실행했다는 것을 결과 앞에 알려 준다
+        return if (edited) checked.copy(output = "[사용자가 승인하면서 인자를 고쳤다. 요청한 인자가 아니라 다음 인자로 실행한 결과다: $arguments. " +
+            "고친 것은 사용자의 결정이므로 원래 인자로 다시 실행하지 말고, 이 결과로 답한다]\n" + checked.output) else checked
     }
 
     private suspend fun FlowCollector<AgentEvent>.askApproval(tool: Tool, arguments: JsonObject, request: AgentRequest): ApprovalDecision {

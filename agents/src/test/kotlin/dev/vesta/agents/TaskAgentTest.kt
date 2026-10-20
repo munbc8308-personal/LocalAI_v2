@@ -128,6 +128,9 @@ class TaskAgentTest : FunSpec({
         val edited = buildJsonObject { put("command", kotlinx.serialization.json.JsonPrimitive("ls old")) }
         TaskAgent(model, models, ToolRegistry(listOf(shell)), AutoBroker(ApprovalDecision.ApproveEdited(edited))).handle(request).toList()
         shell.calls.single() shouldBe edited
+        // 모델은 원래 요청한 명령만 알고 있으므로 고친 명령으로 실행했다고 알려 준다
+        model.requests[1].messages.last().content shouldContain "인자를 고쳤다"
+        model.requests[1].messages.last().content shouldContain "ls old"
     }
 
     test("없는 도구·잘못된 인자는 오류로 모델에 돌려준다") {

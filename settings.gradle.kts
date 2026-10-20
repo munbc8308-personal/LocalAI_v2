@@ -61,6 +61,8 @@ include(
     "conversation",
     "channel-core",
     "channel-telegram",
+    "channel-discord",
+    "channel-slack",
     "app-common",
     "api-model",
     "web-ui",
@@ -71,3 +73,5 @@ include(
 // 메신저 어댑터는 channels/ 아래에 모은다 (PROJECT.md 10장)
 project(":channel-core").projectDir = file("channels/channel-core")
 project(":channel-telegram").projectDir = file("channels/channel-telegram")
+project(":channel-discord").projectDir = file("channels/channel-discord")
+project(":channel-slack").projectDir = file("channels/channel-slack")

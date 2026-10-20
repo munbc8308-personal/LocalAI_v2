@@ -1,5 +1,7 @@
 package dev.vesta.channels.telegram
 
+import dev.vesta.channels.MarkdownTable
+
 /**
  * 답변 Markdown → Telegram HTML (parse_mode=HTML). 쓰는 태그: b, i, code, pre, a, blockquote.
  * 모든 글자는 이스케이프하므로 답변에 들어 있던 HTML은 글자 그대로 보인다. 링크는 http(s)만.
@@ -9,7 +11,6 @@ object TelegramHtml {
     private val heading = Regex("^#{1,6}\\s+(.*)$")
     private val bullet = Regex("^(\\s*)[-*+]\\s+(.*)$")
     private val ordered = Regex("^(\\s*)(\\d+[.)])\\s+(.*)$")
-    private val tableSeparator = Regex("^\\s*\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?\\s*$")
     private val language = Regex("^[A-Za-z0-9_+#-]{1,20}$")
 
     fun escape(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -37,11 +38,10 @@ object TelegramHtml {
                     val open = if (lang != null) "<pre><code class=\"language-$lang\">" else "<pre><code>"
                     out += open + escape(code.joinToString("\n")) + "</code></pre>"
                 }
-                trimmed.startsWith("|") && i + 1 < lines.size && tableSeparator.matches(lines[i + 1]) -> {
-                    val rows = mutableListOf(cells(trimmed))
-                    i += 2
-                    while (i < lines.size && lines[i].trim().startsWith("|")) rows += cells(lines[i++].trim())
-                    out += "<pre>" + escape(table(rows)) + "</pre>"
+                MarkdownTable.startsAt(lines, i) -> {
+                    val (table, next) = MarkdownTable.read(lines, i)
+                    out += "<pre>" + escape(table) + "</pre>"
+                    i = next
                     continue
                 }
                 trimmed.startsWith(">") -> {
@@ -61,20 +61,6 @@ object TelegramHtml {
         }
         return out.joinToString("\n").trim()
     }
-
-    private fun cells(row: String) = row.trim().removePrefix("|").removeSuffix("|").split('|').map { it.trim().replace("**", "").replace("`", "") }
-
-    /** 열 너비를 맞춘 표. 한글은 두 칸으로 센다 */
-    private fun table(rows: List<List<String>>): String {
-        val columns = rows.maxOf { it.size }
-        val widths = (0 until columns).map { c -> rows.maxOf { width(it.getOrElse(c) { "" }) } }
-        return rows.mapIndexed { r, row ->
-            val line = (0 until columns).joinToString(" | ") { c -> row.getOrElse(c) { "" }.let { it + " ".repeat(widths[c] - width(it)) } }.trimEnd()
-            if (r == 0) line + "\n" + widths.joinToString("-+-") { "-".repeat(it) } else line
-        }.joinToString("\n")
-    }
-
-    private fun width(text: String) = text.sumOf { if (it.code in 0x1100..0xFFDC && !it.isWhitespace()) 2L else 1L }.toInt()
 
     fun inline(text: String): String {
         val out = StringBuilder()

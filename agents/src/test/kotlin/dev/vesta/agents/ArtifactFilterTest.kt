@@ -8,6 +8,7 @@ class ArtifactFilterTest : FunSpec({
 
     test("앞의 thought 줄과 채널 표식을 지운다") {
         run("thought", "\n", "회의록 내용을", " 요약합니다") shouldBe "회의록 내용을 요약합니다"
+        run(":thought\n사용자가", " 바꿨습니다") shouldBe "사용자가 바꿨습니다"
         run("<channel|>") shouldBe ""
         run("완료", "<channel|>", "했습니다") shouldBe "완료했습니다"
     }
@@ -16,5 +17,6 @@ class ArtifactFilterTest : FunSpec({
         run("tho", "ugh") shouldBe "though"
         run("안녕하세요") shouldBe "안녕하세요"
         run("thought experiment") shouldBe "thought experiment"
+        run(":", ") 웃음") shouldBe ":) 웃음"
     }
 })

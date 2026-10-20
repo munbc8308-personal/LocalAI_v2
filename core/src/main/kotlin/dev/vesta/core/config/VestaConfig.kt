@@ -19,22 +19,58 @@ data class VestaConfig(
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */
 data class ChannelsConfig(
     val telegram: TelegramConfig = TelegramConfig(),
+    val discord: DiscordConfig = DiscordConfig(),
+    val slack: SlackConfig = SlackConfig(),
 )
 
-data class TelegramConfig(
-    /** 토큰이 있을 때만 실제로 켜진다 (`vesta telegram token`) */
-    val enabled: Boolean = true,
+/** 메신저마다 같은 설정 */
+interface MessengerConfig {
+    /** 토큰이 있을 때만 실제로 켜진다 (`vesta <채널> token`) */
+    val enabled: Boolean
     /** 로컬 문서·코드·Apple 앱 내용이 들어간 답변을 보낼지 (v1.0 결정: 허용) */
-    val allowLocalSources: Boolean = true,
-    /** 셸(EXEC) 승인을 텔레그램에서 받을지 (v1.0 결정: 허용) */
-    val allowExecApproval: Boolean = true,
-    /** 생성 중 메시지 수정 간격. Telegram은 채팅당 초당 1회 정도까지 */
-    val streamIntervalMillis: Long = 1_200,
-    /** 받을 문서 파일 최대 크기 (Bot API 다운로드 한도 20MB) */
-    val maxFileMegabytes: Int = 20,
-    /** Bot API 주소 (직접 띄운 Bot API 서버나 시험용 가짜 서버를 쓸 때만 바꾼다) */
-    val apiUrl: String = "https://api.telegram.org",
-)
+    val allowLocalSources: Boolean
+    /** 셸(EXEC) 승인을 메신저에서 받을지 (v1.0 결정: 허용) */
+    val allowExecApproval: Boolean
+    /** 생성 중 메시지 수정 간격 (플랫폼 rate limit 안쪽) */
+    val streamIntervalMillis: Long
+    /** 받을 문서 파일 최대 크기 */
+    val maxFileMegabytes: Int
+    /** API 주소 (시험용 가짜 서버를 쓸 때만 바꾼다) */
+    val apiUrl: String
+}
+
+data class TelegramConfig(
+    override val enabled: Boolean = true,
+    override val allowLocalSources: Boolean = true,
+    override val allowExecApproval: Boolean = true,
+    /** Telegram은 채팅당 초당 1회 정도까지 */
+    override val streamIntervalMillis: Long = 1_200,
+    /** Bot API 다운로드 한도 20MB */
+    override val maxFileMegabytes: Int = 20,
+    /** 직접 띄운 Bot API 서버나 시험용 가짜 서버를 쓸 때만 바꾼다 */
+    override val apiUrl: String = "https://api.telegram.org",
+) : MessengerConfig
+
+data class DiscordConfig(
+    override val enabled: Boolean = true,
+    override val allowLocalSources: Boolean = true,
+    override val allowExecApproval: Boolean = true,
+    /** Discord는 대화방당 5초에 5번까지 고칠 수 있다 */
+    override val streamIntervalMillis: Long = 1_500,
+    /** 무료 계정 첨부 한도 10MB */
+    override val maxFileMegabytes: Int = 10,
+    override val apiUrl: String = "https://discord.com/api/v10",
+) : MessengerConfig
+
+data class SlackConfig(
+    override val enabled: Boolean = true,
+    override val allowLocalSources: Boolean = true,
+    override val allowExecApproval: Boolean = true,
+    /** chat.update는 분당 50번 정도까지 (Tier 3) */
+    override val streamIntervalMillis: Long = 1_500,
+    override val maxFileMegabytes: Int = 20,
+    override val apiUrl: String = "https://slack.com/api",
+) : MessengerConfig
 
 /** 상시 실행 서버 (PROJECT.md 6.2, I-02·I-03). 기본은 이 Mac에서만 접속. */
 data class ServerConfig(

@@ -1,5 +1,6 @@
 package dev.vesta.channels.telegram
 
+import dev.vesta.channels.ChannelApiException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -42,8 +43,8 @@ interface TelegramApi {
 
 /** Bot API 오류. 429면 [retryAfterSeconds]만큼 기다려야 한다 */
 class TelegramException(val code: Int, val description: String, val retryAfterSeconds: Int? = null) :
-    IOException("Telegram $code: $description") {
-    val notModified get() = code == 400 && "not modified" in description
+    ChannelApiException("Telegram $code: $description", retryAfterSeconds?.times(1000L)) {
+    override val notModified get() = code == 400 && "not modified" in description
     val badEntities get() = code == 400 && "parse entities" in description
 }
 

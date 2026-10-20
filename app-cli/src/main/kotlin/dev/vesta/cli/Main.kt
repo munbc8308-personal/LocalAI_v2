@@ -18,5 +18,6 @@ fun main(args: Array<String>) = Vesta()
         SearchCommand(),
         EvalCommand().subcommands(EvalRoutingCommand(), EvalRetrievalCommand(), EvalGroundingCommand(), EvalAllCommand()),
         StatusCommand(), PasswdCommand(),
-        TelegramCommand().subcommands(TelegramTokenCommand(), TelegramPairCommand(), TelegramListCommand(), TelegramUnlinkCommand(), TelegramOffCommand()), ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
+        *messengerCommands().toTypedArray(),
+        ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
     .main(args)
