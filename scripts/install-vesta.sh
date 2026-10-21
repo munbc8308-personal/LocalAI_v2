@@ -3,7 +3,8 @@
 #   1. CLI·서버 빌드 (./gradlew installDist)
 #   2. ~/.vesta/app/{cli,server} 로 복사, ~/.local/bin/vesta 링크
 #   3. 미디어 워커(음성 인식)를 ~/.vesta/media-worker에 복사하고 uv로 Python 환경을 만든다 (M12)
-#   4. launchd dev.vesta.server 등록·재시작 (Ollaya·미디어 워커도 함께)
+#   4. 학습기(결정 모델 미세조정)를 ~/.vesta/trainer에 복사하고 uv로 Python 환경을 만든다 (M14)
+#   5. launchd dev.vesta.server 등록·재시작 (Ollaya·미디어 워커도 함께)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP="$HOME/.vesta/app"
@@ -25,6 +26,14 @@ if [ -x "$UV" ]; then
     echo "미디어 워커: $WORKER (음성 인식 모델은 처음 쓸 때 받는다, 약 1.6GB)"
 else
     echo "uv가 없어 미디어 워커(음성 인식)를 건너뜁니다: brew install uv 후 다시 실행" >&2
+fi
+
+TRAINER="$HOME/.vesta/trainer"
+if [ -x "$UV" ]; then
+    mkdir -p "$TRAINER"
+    rsync -a --delete --exclude .venv --exclude __pycache__ "$ROOT/trainer/" "$TRAINER/"
+    "$UV" sync --quiet --frozen --project "$TRAINER"
+    echo "학습기: $TRAINER (vesta train decision)"
 fi
 
 "$ROOT/scripts/install-launchd.sh"

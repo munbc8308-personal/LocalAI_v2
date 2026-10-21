@@ -15,6 +15,27 @@ data class VestaConfig(
     val server: ServerConfig = ServerConfig(),
     val channels: ChannelsConfig = ChannelsConfig(),
     val media: MediaConfig = MediaConfig(),
+    val training: TrainingConfig = TrainingConfig(),
+)
+
+/** 모델 학습 (PROJECT.md 7.10, M14). Python 학습기(trainer, uv)는 Vesta가 자식 프로세스로 실행한다 */
+data class TrainingConfig(
+    /** 학습기 프로젝트 (scripts/install-vesta.sh가 저장소의 trainer/를 복사한다) */
+    val trainerDir: String = "~/.vesta/trainer",
+    /** 변환한 기본 모델·실행 기록·어댑터를 두는 곳 */
+    val workDir: String = "~/.vesta/training",
+    val uv: String = "/opt/homebrew/bin/uv",
+    /** 결정 모델 학습의 출발점. 학습한 버전 위에 쌓지 않고 항상 이 모델에서 새로 학습한다 */
+    val decisionBase: String = "winnow:e4b",
+    val epochs: Int = 2,
+    val rank: Int = 16,
+    val learningRate: Double = 1e-4,
+    /** 평가 게이트: 다른 판정(D4~D11)이 지금 모델과 같아야 하는 비율 */
+    val minReplayAgreement: Double = 0.95,
+    /** 학습 중 쓰는 메모리 (그만큼 자리를 비운다) */
+    val memoryGigabytes: Int = 30,
+    /** Ollaya 모델 저장소 */
+    val ollayaModels: String = "~/.ollaya/models",
 )
 
 /**

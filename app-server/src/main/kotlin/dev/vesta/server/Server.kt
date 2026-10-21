@@ -87,6 +87,8 @@ fun main() {
             )
         }
     }
+    val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val training = trainingEndpoints(app, background)
     val deps = ServerDeps(
         conversation = app.conversation,
         sessions = app.sessions,
@@ -112,13 +114,15 @@ fun main() {
         textToSpeech = app.textToSpeech,
         media = app.mediaStore,
         mediaLimits = app.config.media,
+        feedback = app.feedback,
+        training = training,
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
     val channels = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     startChannels(app, channels) { dashboard().statusText() }
-    Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); app.close() })
+    Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
     embeddedServer(CIO, port = app.config.server.port, host = host) { vestaApi(deps) }.start(wait = true)
 }
@@ -132,3 +136,46 @@ private fun DashboardDto.statusText(): String = buildString {
 }
 
 private fun gb(bytes: Long): String = "%.1fGB".format(bytes / (1024.0 * 1024 * 1024))
+
+/** 결정 모델 학습 (M14). 시작할 때 끝나지 못한 실행을 정리한다 */
+private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): TrainingEndpoints {
+    kotlinx.coroutines.runBlocking { app.trainingRuns.abandonRunning() }
+    val service = dev.vesta.training.TrainingService(
+        config = app.config.training,
+        runs = app.trainingRuns,
+        versions = app.modelVersions,
+        feedback = app.feedback,
+        dataOwner = app.owner.userId,
+        ollayaUrl = app.config.decision.baseUrl,
+        scope = scope,
+        makeRoom = { bytes ->
+            app.speechToText?.unloadAll()
+            app.modelManager.reserve(bytes)
+        },
+    )
+    fun dev.vesta.core.training.TrainingRun.dto() = dev.vesta.api.TrainingRunDto(
+        id, kind, status.name, stage, step, total, loss, candidate, error, report, startedAt.toString(), finishedAt?.toString(),
+    )
+    return TrainingEndpoints(
+        state = {
+            dev.vesta.api.TrainingStateDto(
+                decisionModel = app.decisionModel.current(),
+                baseModel = app.config.decision.model,
+                corrections = app.feedback.routingCorrections(app.owner.userId).size,
+                runs = app.trainingRuns.list(20).map { it.dto() },
+                versions = app.modelVersions.list("decision").map { dev.vesta.api.ModelVersionDto(it.name, it.baseModel, it.active, it.runId, it.createdAt.toString()) },
+            )
+        },
+        start = { service.startDecision().dto() },
+        cancel = { service.cancel(it) },
+        // 설정의 기본 모델로 되돌리거나, 학습한 버전 중 하나로 바꾼다 (L-07)
+        activate = { name ->
+            val known = name == app.config.decision.model || app.modelVersions.list("decision").any { it.name == name }
+            if (known) {
+                app.modelVersions.activate("decision", name)
+                app.decisionModel.refresh()
+            }
+            known
+        },
+    )
+}

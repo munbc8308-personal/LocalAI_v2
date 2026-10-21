@@ -17,6 +17,7 @@ dependencies {
     api(project(":tools"))
     api(project(":mcp"))
     api(project(":media"))
+    api(project(":training"))
     api(project(":api-model"))
     implementation(libs.kotlin.logging)
     implementation(libs.bouncycastle)

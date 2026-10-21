@@ -31,6 +31,43 @@ data class ChatRequestDto(
 @Serializable
 data class AttachmentDto(val id: String, val mime: String)
 
+/** 학습 실행 (L-05). [report]는 평가 게이트 결과 JSON */
+@Serializable
+data class TrainingRunDto(
+    val id: Long,
+    val kind: String,
+    /** RUNNING / PASSED / REJECTED / FAILED / CANCELLED */
+    val status: String,
+    val stage: String?,
+    val step: Int,
+    val total: Int,
+    val loss: Double?,
+    val candidate: String?,
+    val error: String?,
+    val report: String?,
+    val startedAt: String,
+    val finishedAt: String?,
+)
+
+@Serializable
+data class ModelVersionDto(val name: String, val baseModel: String, val active: Boolean, val runId: Long?, val createdAt: String)
+
+/** 학습 화면 (`GET /api/training`) */
+@Serializable
+data class TrainingStateDto(
+    /** 지금 쓰는 결정 모델 */
+    val decisionModel: String,
+    /** 학습 출발점이자 되돌릴 때 쓰는 기본 모델 */
+    val baseModel: String,
+    /** 다음 학습에 쓸 사용자 라우팅 정정 수 */
+    val corrections: Int,
+    val runs: List<TrainingRunDto>,
+    val versions: List<ModelVersionDto>,
+)
+
+@Serializable
+data class ActivateDto(val name: String)
+
 /** 갤러리 항목 (`GET /api/media?kind=GENERATED`) */
 @Serializable
 data class MediaItemDto(val id: String, val mime: String, val caption: String?, val createdAt: String?)
@@ -57,6 +94,7 @@ data class SessionDto(val id: String, val title: String?, val channel: String, v
 
 @Serializable
 data class MessageDto(
+    val id: Long = 0,
     val role: String,
     val content: String,
     val agent: String?,
@@ -64,7 +102,14 @@ data class MessageDto(
     val interrupted: Boolean,
     val createdAt: String,
     val attachments: List<AttachmentDto> = emptyList(),
+    /** 남긴 피드백 (1 좋음, -1 나쁨) */
+    val rating: Int? = null,
+    val correctAgent: String? = null,
 )
+
+/** 답변 피드백 (`POST /api/messages/{id}/feedback`, C-09). [correctAgent]는 라우팅 정정 (CHAT·DOCS·WEB…) */
+@Serializable
+data class FeedbackDto(val rating: Int = 0, val correctAgent: String? = null, val comment: String? = null)
 
 @Serializable
 data class HealthDto(val status: String, val version: String, val checks: Map<String, String>)
@@ -96,6 +141,8 @@ sealed interface EventDto {
         val requestId: String, val tool: String, val risk: String, val title: String, val body: String,
         val warning: String?, val reason: String?, val editableField: String?, val editableValue: String?,
     ) : EventDto
+    /** 답변을 저장했다 (피드백용 메시지 ID) */
+    @Serializable @SerialName("saved") data class Saved(val messageId: Long) : EventDto
     /** 에이전트가 만든 이미지. 내용은 `GET /api/media/{id}` */
     @Serializable @SerialName("media") data class Media(val id: String, val mime: String, val caption: String?) : EventDto
     @Serializable @SerialName("grounding") data class Grounding(val checked: Int, val unsupported: List<String>) : EventDto

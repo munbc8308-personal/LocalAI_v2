@@ -2,7 +2,11 @@ package dev.vesta.server
 
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ApprovalDto
+import dev.vesta.api.ActivateDto
 import dev.vesta.api.AttachmentDto
+import dev.vesta.api.TrainingRunDto
+import dev.vesta.api.TrainingStateDto
+import dev.vesta.api.FeedbackDto
 import dev.vesta.api.MediaItemDto
 import dev.vesta.api.SpeechRequestDto
 import dev.vesta.api.TranscriptDto
@@ -102,6 +106,18 @@ class ServerDeps(
     val textToSpeech: TextToSpeech? = null,
     val media: MediaStore? = null,
     val mediaLimits: MediaConfig = MediaConfig(),
+    /** 답변 피드백 (C-09) */
+    val feedback: dev.vesta.core.training.FeedbackRepository? = null,
+    /** 모델 학습 (M14). OWNER만 */
+    val training: TrainingEndpoints? = null,
+)
+
+/** 학습 API가 쓰는 동작 (서버가 TrainingService로 채운다) */
+class TrainingEndpoints(
+    val state: suspend () -> TrainingStateDto,
+    val start: suspend () -> TrainingRunDto,
+    val cancel: suspend (Long) -> Boolean,
+    val activate: suspend (String) -> Boolean,
 )
 
 /**
@@ -215,7 +231,12 @@ fun Application.vestaApi(deps: ServerDeps) {
                     return@get
                 }
                 val list = deps.messages.list(id).map {
-                    MessageDto(it.role.name, it.content, it.agent?.name, it.model, it.interrupted, it.createdAt.toString(), it.attachments.map { a -> AttachmentDto(a.id, a.mime) })
+                    val feedback = if (it.role == dev.vesta.core.inference.ChatRole.ASSISTANT) deps.feedback?.find(user.userId, it.id) else null
+                    MessageDto(
+                        it.id, it.role.name, it.content, it.agent?.name, it.model, it.interrupted, it.createdAt.toString(),
+                        it.attachments.map { a -> AttachmentDto(a.id, a.mime) },
+                        feedback?.rating?.takeIf { r -> r != 0 }, feedback?.correctAgent?.name,
+                    )
                 }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(MessageDto.serializer()), list))
             }
@@ -262,6 +283,45 @@ fun Application.vestaApi(deps: ServerDeps) {
                 // 저장할 때 확인한 이미지 형식만 그대로 보낸다 (HTML 등으로 해석되지 않게)
                 val type = asset.mime.takeIf { it in IMAGE_TYPES } ?: "application/octet-stream"
                 call.respondBytes(bytes, ContentType.parse(type))
+            }
+            // 답변 피드백·라우팅 정정 (C-09). 정정은 결정 모델 학습 후보가 된다 (L-01)
+            post("/messages/{id}/feedback") {
+                val user = call.principal(deps) ?: return@post
+                val repo = deps.feedback ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"피드백 저장소 없음"}""")
+                val messageId = call.parameters["id"]?.toLongOrNull() ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"id"}""")
+                val dto = ApiJson.decodeFromString(FeedbackDto.serializer(), call.receiveText())
+                val agent = dto.correctAgent?.let { name -> runCatching { dev.vesta.core.AgentType.valueOf(name) }.getOrNull() ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"correctAgent"}""") }
+                val ok = repo.save(user.userId, dev.vesta.core.training.Feedback(messageId, dto.rating, agent, dto.comment))
+                call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("saved", ok) }.toString())
+            }
+            // 모델 학습 (L-05·L-07): 상태, 시작, 취소, 버전 전환·되돌리기. Mac 주인만
+            route("/training") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val training = call.trainingFor(user, deps) ?: return@get
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingStateDto.serializer(), training.state()))
+                }
+                post("/decision") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val run = runCatching { training.start() }.getOrElse {
+                        return@post call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", it.message ?: "학습을 시작하지 못했습니다") }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingRunDto.serializer(), run))
+                }
+                post("/{id}/cancel") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val ok = training.cancel(call.parameters["id"]?.toLongOrNull() ?: -1)
+                    call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("cancelled", ok) }.toString())
+                }
+                post("/activate") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val name = ApiJson.decodeFromString(ActivateDto.serializer(), call.receiveText()).name
+                    val ok = training.activate(name)
+                    call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("activated", ok) }.toString())
+                }
             }
             get("/collections") {
                 val user = call.principal(deps) ?: return@get
@@ -450,6 +510,13 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
         }
     }
     return session.user
+}
+
+/** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */
+private suspend fun ApplicationCall.trainingFor(user: UserContext, deps: ServerDeps): TrainingEndpoints? {
+    val training = deps.training ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"학습이 설정돼 있지 않습니다"}"""); return null }
+    if (user.role != dev.vesta.core.UserRole.OWNER) { respondJson(HttpStatusCode.Forbidden, """{"error":"학습은 Mac 주인만 할 수 있습니다"}"""); return null }
+    return training
 }
 
 /** Bearer 토큰 확인 (시간 차 공격을 피하려고 고정 시간 비교) */

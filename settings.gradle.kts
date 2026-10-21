@@ -57,6 +57,7 @@ include(
     "router",
     "tools",
     "media",
+    "training",
     "mcp",
     "agents",
     "conversation",

@@ -24,6 +24,7 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
             is AgentEvent.Grounding -> grounding = event
             // 파일 저장은 ChatCommand가 한다 (원격 모드면 서버에서 받아야 함)
             is AgentEvent.Media -> Unit
+            is AgentEvent.Saved -> Unit
             is AgentEvent.ToolStarted -> {
                 if (answerStarted) out.println()
                 answerStarted = false

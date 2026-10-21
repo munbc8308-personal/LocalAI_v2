@@ -1,0 +1,13 @@
+[project]
+name = "vesta-trainer"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "accelerate>=1.15.0",
+    "gguf>=0.19.0",
+    "mlx-lm>=0.32",
+    "numpy>=2.5.4",
+    "pyyaml>=6.0.3",
+    "torch>=2.14.1",
+    "transformers>=5.20.2",
+]

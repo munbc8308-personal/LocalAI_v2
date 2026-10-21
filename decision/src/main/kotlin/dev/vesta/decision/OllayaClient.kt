@@ -20,16 +20,22 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/** Ollaya `/api/decide` 클라이언트 (PROJECT.md 4.2). 기본 주소 `http://127.0.0.1:11435`. */
+/**
+ * Ollaya `/api/decide` 클라이언트 (PROJECT.md 4.2). 기본 주소 `http://127.0.0.1:11435`.
+ * [model]은 부를 때마다 묻는다: 학습한 결정 모델로 바꾸거나 되돌리면(L-07) 서버를 다시 시작하지 않아도 바로 쓴다.
+ */
 class OllayaClient(
     private val baseUrl: String,
-    private val model: String,
+    private val model: suspend () -> String,
     private val http: HttpClient,
 ) : DecisionClient {
+    constructor(baseUrl: String, model: String, http: HttpClient) : this(baseUrl, { model }, http)
+
     override suspend fun decide(state: String, questions: Map<String, DecisionQuestion>): Map<String, DecisionAnswer> {
+        val name = model()
         val response = http.post("$baseUrl/api/decide") {
             contentType(ContentType.Application.Json)
-            setBody(OllayaWire.request(model, state, questions).toString())
+            setBody(OllayaWire.request(name, state, questions).toString())
         }
         val text = response.bodyAsText()
         check(response.status.isSuccess()) { "Ollaya HTTP ${response.status.value}: ${text.take(300)}" }

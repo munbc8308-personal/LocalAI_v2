@@ -80,6 +80,10 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 메신저 계정 연결 (M10) */
     val channelBindings = dev.vesta.storage.ExposedChannelBindingStore(database.db)
     val messages = ExposedMessageRepository(database.db)
+    /** 답변 피드백·학습 기록·모델 버전 (M14) */
+    val feedback = dev.vesta.storage.ExposedFeedbackRepository(database.db)
+    val trainingRuns = dev.vesta.storage.ExposedTrainingRepository(database.db)
+    val modelVersions = dev.vesta.storage.ExposedModelVersionRepository(database.db)
     /** 질문에 붙인 이미지 등 (M12) */
     val mediaStore = dev.vesta.storage.FileMediaStore(database.db, paths.home.resolve("media"))
     val ffmpeg = dev.vesta.media.Ffmpeg(config.media.ffmpeg)
@@ -149,7 +153,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val orchard: McpToolSource? = config.mcp.servers["orchard"]
         ?.takeIf { it.enabled && java.io.File(it.command).canExecute() }
         ?.let { McpToolSource("orchard", it, config.tools.maxOutputChars) }
-    private val decisionClient = OllayaClient(config.decision.baseUrl, config.decision.model, http)
+    /** 학습으로 만든 결정 모델이 켜져 있으면 그것, 아니면 설정의 모델 (L-07). 10초마다 다시 읽는다 */
+    val decisionModel = DecisionModelSelector(config.decision.model) { modelVersions.active("decision")?.name }
+    private val decisionClient = OllayaClient(config.decision.baseUrl, { decisionModel.current() }, http)
     private val appGroups = AppGroupSelector(decisionClient.takeIf { config.decision.enabled })
     /** D4·D6·D7·D8·D10 판정 (PROJECT.md 4.4, M7). 결정 모델을 끄면 판정도 건너뛴다 */
     val judge = if (config.decision.enabled) dev.vesta.decision.Judge(decisionClient) else null
@@ -229,4 +235,22 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         val DEFAULT_GENERAL = ModelSpec(name = "", keepAlive = "forever", reasoningEffort = "none")
         const val DEFAULT_EMBEDDING = "bge-m3:567m"
     }
+}
+
+/** 지금 쓸 결정 모델 이름. DB의 활성 버전을 잠깐 기억해 매 판정마다 DB를 읽지 않는다 */
+class DecisionModelSelector(private val configured: String, private val active: suspend () -> String?) {
+    @Volatile private var cached: String? = null
+    @Volatile private var readAt = 0L
+
+    suspend fun current(): String {
+        val now = System.currentTimeMillis()
+        cached?.takeIf { now - readAt < 10_000 }?.let { return it }
+        val name = runCatching { active() }.getOrNull() ?: configured
+        cached = name
+        readAt = now
+        return name
+    }
+
+    /** 버전을 바꾼 직후 바로 쓰게 */
+    fun refresh() { readAt = 0 }
 }

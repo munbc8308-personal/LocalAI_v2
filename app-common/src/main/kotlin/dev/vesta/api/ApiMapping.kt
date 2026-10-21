@@ -26,6 +26,7 @@ fun AgentEvent.toDto(): EventDto = when (this) {
     )
     is AgentEvent.Grounding -> EventDto.Grounding(checked, unsupported)
     is AgentEvent.Media -> EventDto.Media(asset.id, asset.mime, caption)
+    is AgentEvent.Saved -> EventDto.Saved(messageId)
     is AgentEvent.Token -> EventDto.Token(text)
     is AgentEvent.Done -> EventDto.Done(agent.name, model, usage?.promptTokens, usage?.completionTokens)
     is AgentEvent.Error -> EventDto.Error(message)
@@ -66,6 +67,7 @@ fun EventDto.toEvent(): AgentEvent = when (this) {
         ByteArray(0),
         caption,
     )
+    is EventDto.Saved -> AgentEvent.Saved(messageId)
     is EventDto.Token -> AgentEvent.Token(text)
     is EventDto.Done -> AgentEvent.Done(
         AgentType.valueOf(agent), model,

@@ -210,4 +210,40 @@ class ApiTest : FunSpec({
         client.post("/api/stt") { bearerAuth("secret"); setBody(ByteArray(10)) }.status shouldBe HttpStatusCode.ServiceUnavailable
     } }
 
+
+    test("피드백·학습 API: 학습은 설정돼 있어야 하고, 시작·취소·전환을 넘긴다") { testApplication {
+        val owner = UserContext(UserId(1), UserRole.OWNER)
+        val saved = mutableListOf<dev.vesta.core.training.Feedback>()
+        val feedback = object : dev.vesta.core.training.FeedbackRepository {
+            override suspend fun save(userId: UserId, feedback: dev.vesta.core.training.Feedback) = (feedback.messageId == 7L).also { if (it) saved += feedback }
+            override suspend fun find(userId: UserId, messageId: Long) = null
+            override suspend fun routingCorrections(userId: UserId?) = emptyList<dev.vesta.core.training.RoutingCorrection>()
+        }
+        val calls = mutableListOf<String>()
+        val run = dev.vesta.api.TrainingRunDto(1, "decision", "RUNNING", "학습", 1, 10, 0.2, null, null, null, "t", null)
+        val training = TrainingEndpoints(
+            state = { dev.vesta.api.TrainingStateDto("winnow:e4b", "winnow:e4b", 2, listOf(run), emptyList()) },
+            start = { calls += "start"; run },
+            cancel = { calls += "cancel $it"; it == 1L },
+            activate = { calls += "activate $it"; it == "winnow:e4b" },
+        )
+        application { vestaApi(ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", feedback = feedback, training = training)) }
+        client.post("/api/messages/7/feedback") { bearerAuth("secret"); setBody("""{"rating":-1,"correctAgent":"TASK"}""") }.status shouldBe HttpStatusCode.OK
+        saved.single().correctAgent shouldBe dev.vesta.core.AgentType.TASK
+        client.post("/api/messages/8/feedback") { bearerAuth("secret"); setBody("""{"rating":1}""") }.status shouldBe HttpStatusCode.NotFound
+        client.post("/api/messages/7/feedback") { bearerAuth("secret"); setBody("""{"correctAgent":"NOPE"}""") }.status shouldBe HttpStatusCode.BadRequest
+
+        client.get("/api/training") { bearerAuth("secret") }.bodyAsText() shouldContain "\"corrections\":2"
+        client.post("/api/training/decision") { bearerAuth("secret") }.bodyAsText() shouldContain "\"status\":\"RUNNING\""
+        client.post("/api/training/1/cancel") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/training/activate") { bearerAuth("secret"); setBody("""{"name":"winnow:e4b"}""") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/training/activate") { bearerAuth("secret"); setBody("""{"name":"모름"}""") }.status shouldBe HttpStatusCode.NotFound
+        calls shouldBe listOf("start", "cancel 1", "activate winnow:e4b", "activate 모름")
+    } }
+
+    test("학습 API는 설정이 없으면 503") { testApplication {
+        application { vestaApi(deps) }
+        client.get("/api/training") { bearerAuth("secret") }.status shouldBe HttpStatusCode.ServiceUnavailable
+    } }
+
 })

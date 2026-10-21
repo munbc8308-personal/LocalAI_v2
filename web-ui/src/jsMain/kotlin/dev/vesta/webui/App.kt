@@ -11,13 +11,17 @@ import dev.vesta.api.ApiJson
 import dev.vesta.api.CollectionDto
 import dev.vesta.api.DashboardDto
 import dev.vesta.api.LoginDto
+import dev.vesta.api.ActivateDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.TrainingStateDto
 import dev.vesta.api.MediaItemDto
 import dev.vesta.api.RoutingDto
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.compose.web.attributes.ATarget
 import org.jetbrains.compose.web.attributes.ButtonType
 import org.jetbrains.compose.web.attributes.InputType
@@ -27,11 +31,15 @@ import org.jetbrains.compose.web.attributes.placeholder
 import org.jetbrains.compose.web.attributes.target
 import org.jetbrains.compose.web.attributes.type
 import org.jetbrains.compose.web.dom.A
+import org.jetbrains.compose.web.dom.B
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
 import org.jetbrains.compose.web.dom.Form
 import org.jetbrains.compose.web.dom.H2
 import org.jetbrains.compose.web.dom.Img
+import org.jetbrains.compose.web.dom.Option
+import org.jetbrains.compose.web.dom.Select
+import org.jetbrains.compose.web.attributes.selected
 import org.jetbrains.compose.web.dom.Input
 import org.jetbrains.compose.web.dom.Li
 import org.jetbrains.compose.web.dom.P
@@ -362,7 +370,10 @@ private fun TurnView(chat: ChatController, turn: Turn) {
             }
         }
         // 읽어 주기 (V-03): 코드·표·출처는 서버가 빼고 읽는다
-        if (turn.answer.isNotBlank() && !(chat.busy && turn === chat.turns.lastOrNull())) SpeakButton(turn)
+        if (turn.answer.isNotBlank() && !(chat.busy && turn === chat.turns.lastOrNull())) Div({ classes("turn-actions") }) {
+            SpeakButton(turn)
+            if (turn.messageId != null) FeedbackButtons(chat, turn)
+        }
     }
 }
 
@@ -394,6 +405,35 @@ private fun GalleryView() {
             }
         }
     }
+}
+
+/** 👍/👎와 담당 정정 (C-09). 정정은 결정 모델 학습 후보가 된다 */
+@Composable
+private fun FeedbackButtons(chat: ChatController, turn: Turn) {
+    Button({
+        classes("link", "small")
+        if (turn.rating == 1) classes("on")
+        attr("aria-label", "좋아요")
+        onClick { chat.feedback(turn, if (turn.rating == 1) 0 else 1) }
+    }) { Text("👍") }
+    Button({
+        classes("link", "small")
+        if (turn.rating == -1) classes("on")
+        attr("aria-label", "별로예요")
+        onClick { chat.feedback(turn, if (turn.rating == -1) 0 else -1) }
+    }) { Text("👎") }
+    // 맡은 담당자가 틀렸으면 고른다 (라우팅 정정)
+    Select({
+        classes("small")
+        attr("aria-label", "담당 정정")
+        onChange { event -> chat.feedback(turn, turn.rating, event.value?.ifEmpty { null }) }
+    }) {
+        Option("", { if (turn.correctAgent == null) selected() }) { Text("담당 정정…") }
+        listOf("CHAT", "DOCS", "WEB", "CODE", "TASK", "PERSONAL", "IMAGE").forEach { agent ->
+            Option(agent, { if (turn.correctAgent == agent) selected() }) { Text("→ " + agentName(agent)) }
+        }
+    }
+    turn.correctAgent?.let { Span({ classes("muted", "small") }) { Text(" 정정을 저장했습니다 (다음 학습에 반영)") } }
 }
 
 /** 한 번에 답변 하나만 읽는다 */
@@ -555,9 +595,98 @@ private fun DashboardView(me: MeDto) {
         Div({ classes("card") }) {
             d.models.forEach { (role, name) -> Div({ classes("row", "small") }) { Span { Text(role) }; Span({ classes("mono") }) { Text(name) } } }
         }
+        if (me.role == "OWNER") TrainingCard()
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
     }
 }
+
+/** 결정 모델 학습 (M14, L-05·L-07): 진행률·손실, 취소, 버전 전환·되돌리기. 진행 중이면 5초마다 새로 읽는다 */
+@Composable
+private fun TrainingCard() {
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<TrainingStateDto?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var tick by remember { mutableStateOf(0) }
+    fun load() = scope.launch {
+        runCatching { Http.get("/api/training", TrainingStateDto.serializer()) }
+            .onSuccess { state = it; error = null }
+            .onFailure { error = it.message }
+    }
+    fun act(block: suspend () -> Unit) = scope.launch {
+        runCatching { block() }.onFailure { error = it.message }
+        load()
+    }
+    LaunchedEffect(tick) {
+        load()
+        if (state?.runs?.any { it.status == "RUNNING" } != false) {
+            kotlinx.coroutines.delay(5_000)
+            tick++
+        }
+    }
+    val s = state ?: return
+    val running = s.runs.firstOrNull { it.status == "RUNNING" }
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span { B { Text("결정 모델 학습") } }
+            Button({
+                classes("primary")
+                if (running != null) disabled()
+                onClick { act { Http.post("/api/training/decision"); tick++ } }
+            }) { Text(if (running != null) "학습 중…" else "학습 시작") }
+        }
+        Div({ classes("row", "small") }) { Span { Text("지금 쓰는 모델") }; Span({ classes("mono") }) { Text(s.decisionModel) } }
+        Div({ classes("row", "small") }) { Span { Text("다음 학습에 쓸 라우팅 정정") }; Span { Text("${s.corrections}개") } }
+        error?.let { P({ classes("error", "small") }) { Text(it) } }
+        s.runs.take(5).forEach { run ->
+            Div({ classes("run") }) {
+                Div({ classes("row", "small") }) {
+                    Span { Text("r${run.id} · ${trainingStatus(run.status)} · ${run.stage ?: "-"}") }
+                    Span {
+                        run.loss?.let { Text("손실 ${(it * 1000).toInt() / 1000.0}  ") }
+                        if (run.status == "RUNNING") Button({ classes("link", "small"); onClick { act { Http.post("/api/training/${run.id}/cancel") } } }) { Text("취소") }
+                    }
+                }
+                if (run.status == "RUNNING" && run.total > 0) Div({ classes("bar") }) {
+                    Div({ classes("fill"); style { property("width", "${run.step * 100 / run.total}%") } })
+                }
+                run.error?.let { Div({ classes("muted", "small") }) { Text(it) } }
+                gateSummary(run.report)?.let { Div({ classes("muted", "small") }) { Text(it) } }
+            }
+        }
+        if (s.versions.isNotEmpty()) {
+            Div({ classes("small") }) { B { Text("버전") } }
+            s.versions.forEach { v ->
+                Div({ classes("row", "small") }) {
+                    Span({ classes("mono") }) { Text((if (v.active) "● " else "○ ") + v.name) }
+                    if (!v.active) Button({ classes("link", "small"); onClick { act { Http.post("/api/training/activate", ApiJson.encodeToString(ActivateDto.serializer(), ActivateDto(v.name))) } } }) { Text("이 버전 쓰기") }
+                }
+            }
+            if (s.decisionModel != s.baseModel) Button({
+                classes("link", "small")
+                onClick { act { Http.post("/api/training/activate", ApiJson.encodeToString(ActivateDto.serializer(), ActivateDto(s.baseModel))) } }
+            }) { Text("기본 모델(${s.baseModel})로 되돌리기") }
+        }
+    }
+}
+
+private fun trainingStatus(status: String) = when (status) {
+    "RUNNING" -> "진행 중"
+    "PASSED" -> "통과·적용"
+    "REJECTED" -> "반영 안 함"
+    "CANCELLED" -> "취소"
+    else -> "실패"
+}
+
+/** 평가 게이트 결과 한 줄: 기존 → 새 모델 정답 수 */
+private fun gateSummary(report: String?): String? = runCatching {
+    val gate = ApiJson.parseToJsonElement(report ?: return null).jsonObject
+    fun right(key: String) = gate[key]!!.jsonObject["right"]!!.jsonObject.mapValues { it.value.jsonPrimitive.content.toInt() }
+    val base = right("base"); val cand = right("candidate")
+    val total = gate["base"]!!.jsonObject["total"]!!.jsonPrimitive.content
+    val replay = gate["replay"]!!.jsonObject
+    listOf("agent" to "담당", "needsWeb" to "웹", "needsLocal" to "로컬").joinToString(" · ") { (k, label) -> "$label ${base[k]}→${cand[k]}/$total" } +
+        " · 다른 판정 일치 ${replay["same"]!!.jsonPrimitive.content}/${replay["total"]!!.jsonPrimitive.content}"
+}.getOrNull()
 
 // JS 정규식(u 플래그)은 닫는 ]도 이스케이프해야 한다
 private val citation = Regex("\\[(\\d+(?:\\s*,\\s*\\d+)*)\\]")

@@ -52,6 +52,6 @@ class FileMediaStoreTest : FunSpec({
         Thread.sleep(5)
         val second = store.save(owner, MediaKind.GENERATED, "image/png", byteArrayOf(3), "a dog")
         store.list(owner, MediaKind.GENERATED, 10).map { it.id to it.caption } shouldBe listOf(second.id to "a dog", first.id to "a cat")
-        db.schemaVersion() shouldBe 11
+        db.schemaVersion() shouldBe VestaDatabase.CURRENT_VERSION
     }
 })

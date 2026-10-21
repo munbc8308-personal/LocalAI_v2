@@ -72,6 +72,11 @@ class WorkerSpeechToText(
         return result.text.trim()
     }
 
+    /** 워커가 올린 모델(음성·이미지)을 모두 내린다 (학습 전 메모리 확보) */
+    suspend fun unloadAll(): Boolean = runCatching {
+        http.post("$baseUrl/unload") { header(TOKEN_HEADER, token()) }.status.isSuccess()
+    }.getOrDefault(false)
+
     /** 워커 상태. 연결 안 되면 null */
     suspend fun health(): Health? = runCatching {
         json.decodeFromString(Health.serializer(), http.get("$baseUrl/health") { header(TOKEN_HEADER, token()) }.bodyAsText())

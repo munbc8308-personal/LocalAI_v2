@@ -9,6 +9,7 @@ import dev.vesta.api.ApprovalDto
 import dev.vesta.api.ChatRequestDto
 import dev.vesta.api.EventDto
 import dev.vesta.api.EvidenceDto
+import dev.vesta.api.FeedbackDto
 import dev.vesta.api.MessageDto
 import dev.vesta.api.RoutingDto
 import dev.vesta.api.SessionDto
@@ -34,6 +35,10 @@ class Turn(val question: String, val images: List<String> = emptyList()) {
     var interrupted by mutableStateOf(false)
     /** 이 답변에서 만든 이미지 주소 (/api/media/…) */
     val generated = mutableStateListOf<String>()
+    /** 저장된 답변 ID와 남긴 피드백 (C-09) */
+    var messageId by mutableStateOf<Long?>(null)
+    var rating by mutableStateOf(0)
+    var correctAgent by mutableStateOf<String?>(null)
 }
 
 class ToolLine(val callId: String, val tool: String, val summary: String) {
@@ -107,6 +112,16 @@ class ChatController(private val scope: CoroutineScope) {
         }
     }
 
+    /** 👍/👎·담당 정정. 같은 단추를 다시 누르면 평가를 지운다 */
+    fun feedback(turn: Turn, rating: Int, correctAgent: String? = turn.correctAgent) = scope.launch {
+        val id = turn.messageId ?: return@launch
+        val previous = turn.rating to turn.correctAgent
+        turn.rating = rating
+        turn.correctAgent = correctAgent
+        runCatching { Http.post("/api/messages/$id/feedback", ApiJson.encodeToString(FeedbackDto.serializer(), FeedbackDto(rating, correctAgent))) }
+            .onFailure { turn.rating = previous.first; turn.correctAgent = previous.second }
+    }
+
     fun stop() {
         job?.cancel()
         job = null
@@ -141,6 +156,7 @@ class ChatController(private val scope: CoroutineScope) {
             is EventDto.Approval -> turn.approvals += ApprovalView(event)
             is EventDto.Grounding -> turn.grounding = event
             is EventDto.Media -> turn.generated += "/api/media/${event.id}"
+            is EventDto.Saved -> turn.messageId = event.messageId
             is EventDto.Token -> {
                 turn.thinking = false
                 turn.status = null
@@ -161,6 +177,9 @@ class ChatController(private val scope: CoroutineScope) {
                 turn.agent = m.agent
                 turn.interrupted = m.interrupted
                 turn.generated.addAll(m.attachments.filter { it.mime.startsWith("image/") }.map { "/api/media/${it.id}" })
+                turn.messageId = m.id.takeIf { it > 0 }
+                turn.rating = m.rating ?: 0
+                turn.correctAgent = m.correctAgent
             }
         }
         return out

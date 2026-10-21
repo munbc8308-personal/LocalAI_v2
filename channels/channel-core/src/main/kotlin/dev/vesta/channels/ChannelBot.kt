@@ -226,6 +226,7 @@ class ChannelBot(
                     is AgentEvent.Status -> reply.status(event.text)
                     is AgentEvent.Reasoning -> Unit
                     is AgentEvent.Media -> images += event
+                    is AgentEvent.Saved -> Unit
                     is AgentEvent.ToolStarted -> reply.status("${event.tool} · ${event.summary}")
                     // 시간 초과 등으로 끝난 승인 요청의 버튼을 닫는다
                     is AgentEvent.ToolFinished -> opened.forEach { expire(state, chat, it) }

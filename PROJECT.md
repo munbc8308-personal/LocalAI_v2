@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.4, 2026-10-21)
+> 상태: M0~M9·M13·M14 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.5, 2026-10-22)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -40,6 +40,7 @@
 | v3.2 | 2026-10-21 | **M11 Discord·Slack**: Kord·Bolt 대신 **Ktor로 직접**(Discord Gateway WebSocket·REST, Slack Socket Mode·Web API). 메신저 공통 동작을 `channel-core`의 `ChannelBot`으로 모으고 Telegram도 그 위로 옮김. 버튼 승인, 셸 수정은 입력 창(모달), 메시지 분할(Discord 2000자·Slack 블록 3000자), `!` 명령, 코드만 보내도 계정 연결. `vesta discord`·`vesta slack` 명령(token·pair·list·unlink·off), `vesta slack manifest`. 13.13 진행 기록 |
 | v3.3 | 2026-10-21 | **M12 음성·비전 입력**: 미디어 워커(`media-worker`, uv + Python 3.12, mlx-whisper large-v3-turbo, 127.0.0.1:11436, 30분 유휴 시 내림), `media` 모듈(ffmpeg 변환·워커 클라이언트·`say` 읽어 주기), 비전은 메인 모델 Gemma 4가 직접(추가 메모리 0). `media_asset`(schema v10)에 입력 이미지 보관. 웹 UI 🎤·📎(붙여넣기·끌어 놓기)·🔊 읽기, 메신저 음성·사진, Telegram `/voice` 음성 답변. 13.14 진행 기록 |
 | v3.4 | 2026-10-21 | **M13 이미지 생성**: 미디어 워커에 mflux FLUX.1-schnell(공식 가중치를 한 번 받아 4bit 9GB로 저장, 10분 유휴 시 내림), `ImageAgent`(한국어 → 영어 프롬프트·비율, 이어서 고치기), `/image`·D1 판정, 그리기 전 `ModelManager.reserve`로 자리 비우기, 갤러리(`media_asset` GENERATED, schema v11), 메신저 사진 보내기. 13.15 진행 기록 |
+| v3.5 | 2026-10-22 | **M14 모델 학습**: 답변 피드백·담당 정정(C-09, schema v12), `trainer/`(uv·MLX) — Winnow GGUF → HF 변환, 선택지 로짓 LoRA 학습, Q8_0 GGUF에 병합해 Ollaya 등록(`winnow-vesta:rN`), Ollaya 평가 게이트(정답 증가·질문별 하락 없음·판단 재현 95%), 버전·롤백(`vesta train`, 웹 UI 상태 탭). r2가 210문항 582→628로 통과해 결정 모델로 활성화. Laya → ONNX 경로는 winnow 전환(v2.5)으로 쓰지 않음. 13.16 진행 기록 |
 
 ---
 
@@ -1179,7 +1180,7 @@ app-cli / app-server
 | **M11. Discord · Slack** | Discord Gateway·Slack Socket Mode 어댑터(Ktor 직접), 공통 엔진 `ChannelBot`, 버튼 승인, 메시지 분할 | Discord·Slack에서 대화·셸 승인 동작 |
 | **M12. 음성 · 비전 입력** | 미디어 워커(uv), mlx-whisper STT, ffmpeg, 웹 UI 마이크, 메신저 음성·사진, 비전 질문, `say` TTS | 텔레그램 음성으로 묻고 답 받기, 스크린샷 질문 동작 |
 | **M13. 이미지 생성** | mflux + FLUX.1-schnell, `ImageAgent`, `/image`, MediaAsset 갤러리, 메모리 LRU 연동 | 한국어 요청으로 이미지 생성, 코드 모델과 메모리 충돌 없이 동작 |
-| **M14. 모델 학습** | 피드백 수집(C-09), 데이터셋 내보내기, Laya 미세조정 → ONNX → Ollaya, 평가 게이트, 버전·롤백, 이후 생성 모델 QLoRA | 미세조정한 결정 모델이 한국어 평가셋에서 기존보다 높은 점수 |
+| **M14. 모델 학습** | 피드백 수집(C-09), 데이터셋 내보내기, 결정 모델(winnow:e4b) LoRA 미세조정 → GGUF → Ollaya, 평가 게이트, 버전·롤백, 이후 생성 모델 QLoRA | 미세조정한 결정 모델이 한국어 평가셋에서 기존보다 높은 점수 |
 | **M15. 멀티 유저** | identity 모듈, 사용자·역할, 사용자별 인증·데이터 분리, 공유 컬렉션, 요청 큐, 역할별 도구 정책 | 두 사용자가 서로의 대화·문서를 볼 수 없음, MEMBER는 Orchard·셸 사용 불가 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
@@ -1776,6 +1777,45 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 원본 가중치 캐시(`~/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-schnell`, 19GB)는 4bit 저장본만 쓰므로 지워도 된다(다시 양자화할 때만 필요).
 - 이미지 편집(V-07)은 보류, 메신저 실기기에서 사진 받기 확인은 M10·M11 실기기 확인 때 함께.
 
+### 13.16 M14 진행 기록 (2026-10-22)
+
+#### 완료
+- **피드백 수집** (C-09): 답변마다 👍/👎와 "담당 정정"(웹 UI). `POST /api/messages/{id}/feedback`, 자기 세션의 답변에만. 정정은 `routing_log.user_override`에도 적는다. 답변 저장 후 `Saved(messageId)` 이벤트. 테이블 `message_feedback`·`training_run`·`model_version` (schema v12).
+- **학습기** `trainer/` (uv, Python 3.12, mlx-lm 0.32 — `~/.vesta/trainer`에 설치):
+  - `convert`: Winnow GGUF(Q8_0)를 HF BF16으로 푼다. GGUF 메타데이터에 빠진 `num_kv_shared_layers`(18)·`final_logit_softcapping`(30)은 공식 `gemma-4-E4B-it` 설정으로, `layer_scalar`는 GGUF `layer_output_scale`로 채운다. 이렇게 해야 MLX와 Ollaya 판정이 210/210 같다(최대 확률 차 0.068).
+  - 프롬프트는 winnow-inference `protocol.h`와 같은 형식(`<bos>` 포함, 선택지 A~Z). D1 담당·D2 웹·D3 로컬 + 판단 재현(D4~D11) 문항.
+  - `train`: LoRA rank 16·alpha 32, 42개 레이어 q/k/v/o·gate/up/down. 손실은 마지막 위치의 선택지 라벨 로짓 교차 엔트로피(softcap 30). AdamW·워밍업·코사인, 2에폭, 배치 8.
+  - 데이터: 라우팅 학습셋(`data/routing-train-ko.tsv` 418행) + 사용자 정정(개인정보 마스킹 `PrivacyFilter`) + 기본 모델 판단 재현(확신 0.8 이상, 7:3 분리).
+  - `export`: 원본 Q8_0 GGUF를 복사하고 LoRA가 바꾼 텐서만 (W + scale·BA)를 다시 양자화해 같은 위치에 덮어쓴다. winnow 매니페스트를 복사해 가중치·판정 레이어만 바꿔 Ollaya에 `winnow-vesta:rN`으로 등록.
+  - `verify` (게이트, Ollaya로 실행): 테스트셋 140 + M4 평가셋 70에서 정답 합계 증가, 질문별(D1/D2/D3) 하락 없음, 판단 재현 일치 0.95 이상.
+- **TrainingService**: 데이터 → 변환(처음 한 번) → 자리 비우기(미디어 워커 내림, `ModelManager.reserve` 30GB) → 학습(진행률) → 내보내기 → 게이트 → 통과면 버전 추가·활성화, 아니면 REJECTED. 취소 지원, 서버 재시작 시 실행 중이던 기록은 실패 처리. 로그 `~/.vesta/training/runs/r<id>/`.
+- **버전·롤백**: 결정 모델은 활성 버전을 따른다(`DecisionModelSelector`, 10초 캐시). `vesta train decision|status|activate <이름>|cancel <id>`, `/api/training`(OWNER만), 웹 UI 상태 탭 학습 카드(시작·진행·취소·버전·되돌리기).
+- **테스트**: TrainingService(가짜 uv — 통과·거절·실패·취소), 저장소(피드백·정정·버전 활성화), API(피드백 권한·학습 OWNER 전용).
+
+#### 확인 (실제 서버, r2)
+- 학습 1219개·검증 108개, 306단계 69분, 메모리 약 30GB. 끝 손실 0.007, 검증 정확도 100%.
+- 게이트 통과, `winnow-vesta:r2` 활성화:
+
+  | 질문 (210문항) | winnow:e4b | r2 |
+  |---|---|---|
+  | D1 담당 | 196 | 208 |
+  | D2 웹 | 201 | 210 |
+  | D3 로컬 | 185 | 210 |
+  | 판단 재현 | — | 106/106 |
+
+- 남은 오답: "git log 최근 10개 보여 줘"(TASK → CODE), "사진 메타데이터에서 위치 정보 지워 줘"(TASK → IMAGE).
+
+#### 발견·수정
+- GGUF 설정 누락·`layer_scalar`가 1로 남아 MLX 판정이 Ollaya와 88/210 달랐음 → 공식 설정 + GGUF 값.
+- HF 토크나이저가 이 형식에 `<bos>`를 붙이지 않음 → 직접 붙인다. 선택지 라벨이 8개뿐이라 D11이 잘림 → A~Z.
+- transformers는 GGUF 양자화 모델을 저장하지 못함 → 풀어 낸 텐서로 새 모델을 만들어 저장.
+- 수동 실험에서 lr 1e-4가 적은 데이터(40단계)로 손실을 0.19 → 약 1로 올림 → 학습기 기본 2e-5·워밍업. r2는 서버 설정(1e-4)으로 돌아 30~60단계 손실이 0.56까지 올랐다가 150단계부터 회복해 통과. 설정 기본값은 검증된 1e-4 유지.
+- `accelerate`가 없어 r1이 변환에서 실패 → 의존성 추가.
+
+#### 남은 일
+- 생성 모델 QLoRA (P2).
+- 학습용 BF16 변환본(`~/.vesta/training/base`)은 다음 학습 때 다시 쓰므로 남겨 둔다(지우면 처음에 다시 변환).
+
 ---
 
 ## 14. 결정 사항 / 남은 질문
@@ -1817,8 +1857,8 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - Ollama MLX 엔진이 아직 프리뷰 (M0 벤치마크에서 안정성 확인)
 - Orchard는 v0.6.x 초기 버전이라 도구 이름·스키마가 바뀔 수 있음. 시작 시 `tools/list`로 받고, 그룹 분류는 이름 접두사 규칙으로 처리해 변경에 견디게 한다
 - Orchard는 외부 개발사의 유료 제품이라 가격 변경·서비스 중단 가능성이 있음. MCP 표준으로만 연동해 교체 가능하게 두고, 대비책은 A-09
-- Ollaya가 직접 미세조정한 로컬 ONNX 모델을 불러올 수 있는지 (M14 전에 확인. 안 되면 Ollaya 호환 형식 조사 또는 결정 모델 서빙 대안 검토)
-- mlx-lm LoRA의 MoE 모델(Qwen3.5-35B-A3B 등) 지원 수준과 학습 메모리 (M14에서 측정, 어려우면 dense 소형 모델 또는 결정 모델 학습만 먼저)
+- ~~Ollaya가 직접 미세조정한 로컬 ONNX 모델을 불러올 수 있는지~~ → winnow GGUF에 LoRA를 병합해 Ollaya에 등록 (13.16)
+- mlx-lm LoRA의 MoE 모델 지원 수준과 학습 메모리 (M14는 결정 모델 학습만 먼저, 약 30GB. 생성 모델 QLoRA 때 측정)
 - 이미지 생성과 코드 모델이 동시에 필요할 때 메모리 경합 (M13에서 LRU 동작 확인)
 - MeloTTS 한국어 품질과 설치 난이도 (안 되면 macOS `say` 유지)
 - 멀티 유저 동시 요청 시 KV 캐시 증가 (M15에서 `OLLAMA_NUM_PARALLEL` 측정)

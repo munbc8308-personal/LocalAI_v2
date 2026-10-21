@@ -103,6 +103,24 @@ class DefaultConversationService(
         // 에이전트가 만든 이미지 (답변 메시지에 붙인다)
         val produced = mutableListOf<String>()
         var done: AgentEvent.Done? = null
+        var answerSaved = false
+        suspend fun save(): Long? {
+            if (answerSaved || (answer.isEmpty() && produced.isEmpty())) return null
+            answerSaved = true
+            return messages.append(
+                session.id,
+                NewMessage(
+                    role = ChatRole.ASSISTANT,
+                    content = answer.toString(),
+                    agent = agent.type,
+                    model = done?.model,
+                    interrupted = done == null,
+                    promptTokens = done?.usage?.promptTokens,
+                    completionTokens = done?.usage?.completionTokens,
+                    attachments = produced,
+                ),
+            ).id
+        }
         try {
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route))
                 .catch { error ->
@@ -118,25 +136,11 @@ class DefaultConversationService(
                     }
                     emit(event)
                 }
+            // 저장한 답변 ID를 알려 준다 (피드백·정정용, C-09)
+            save()?.let { emit(AgentEvent.Saved(it)) }
         } finally {
             // 사용자가 중단(취소)해도 생성된 부분까지는 남긴다 (C-04)
-            if (answer.isNotEmpty() || produced.isNotEmpty()) {
-                withContext(NonCancellable) {
-                    messages.append(
-                        session.id,
-                        NewMessage(
-                            role = ChatRole.ASSISTANT,
-                            content = answer.toString(),
-                            agent = agent.type,
-                            model = done?.model,
-                            interrupted = done == null,
-                            promptTokens = done?.usage?.promptTokens,
-                            completionTokens = done?.usage?.completionTokens,
-                            attachments = produced,
-                        ),
-                    )
-                }
-            }
+            withContext(NonCancellable) { save() }
         }
     }
 

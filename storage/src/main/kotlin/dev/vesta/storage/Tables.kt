@@ -185,3 +185,41 @@ object MediaAssets : org.jetbrains.exposed.v1.core.Table("media_asset") {
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+/** 답변 피드백 (PROJECT.md C-09, v12). 답변 메시지 하나에 하나 */
+object MessageFeedbacks : org.jetbrains.exposed.v1.core.Table("message_feedback") {
+    val messageId = reference("message_id", Messages.id, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val userId = long("user_id").index()
+    val rating = integer("rating")
+    val correctAgent = varchar("correct_agent", 16).nullable()
+    val comment = text("comment").nullable()
+    val updatedAt = timestamp("updated_at")
+    override val primaryKey = PrimaryKey(messageId)
+}
+
+/** 학습 실행 (PROJECT.md 11장 TrainingRun, v12) */
+object TrainingRuns : LongIdTable("training_run") {
+    val kind = varchar("kind", 16)
+    val status = varchar("status", 16)
+    val baseModel = varchar("base_model", 200)
+    val step = integer("step").default(0)
+    val total = integer("total").default(0)
+    val loss = double("loss").nullable()
+    val stage = varchar("stage", 32).nullable()
+    val candidate = varchar("candidate", 200).nullable()
+    val report = text("report").nullable()
+    val error = text("error").nullable()
+    val startedAt = timestamp("started_at")
+    val finishedAt = timestamp("finished_at").nullable()
+}
+
+/** 모델 버전 (PROJECT.md 11장 ModelVersion, v12) */
+object ModelVersions : LongIdTable("model_version") {
+    val role = varchar("role", 16).index()
+    val name = varchar("name", 200)
+    val baseModel = varchar("base_model", 200)
+    val runId = long("run_id").nullable()
+    val active = bool("active").default(false)
+    val metrics = text("metrics").nullable()
+    val createdAt = timestamp("created_at")
+}
