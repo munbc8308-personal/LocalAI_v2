@@ -28,6 +28,9 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+# 큰 파일은 일반 HTTP로 받는다: xet 전송은 수 GB 파일에서 "error decoding response body"로 끊기고 이어받지 못했다 (M13)
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 import mlx.core as mx
 import mlx_whisper
 import numpy as np
@@ -125,8 +128,22 @@ class Imager:
     def _prepare(self):
         try:
             from mflux.models.common.config import ModelConfig
+            from mflux.models.common.resolution.model_revisions import ModelRevisions
             from mflux.models.flux.variants.txt2img.flux import Flux1
+            from mflux.models.flux.weights.flux_weight_definition import FluxWeightDefinition
             log.info("image model: downloading and quantizing FLUX.1-schnell to %d bit", self.bits)
+            # 끊겨도 받은 데까지 이어서 받는다
+            for attempt in range(1, 6):
+                try:
+                    # mflux가 읽는 파일·버전만 (저장소의 단일 파일 flux1-schnell.safetensors 등은 받지 않는다)
+                    repo = ModelConfig.schnell().model_name
+                    snapshot_download(repo, allow_patterns=FluxWeightDefinition.get_download_patterns(), revision=ModelRevisions.get(repo))
+                    break
+                except Exception as e:
+                    if attempt == 5:
+                        raise
+                    log.warning("download failed (%d/5), retrying: %s", attempt, e)
+                    time.sleep(10 * attempt)
             with self.lock:
                 flux = Flux1(model_config=ModelConfig.schnell(), quantize=self.bits)
                 tmp = self.directory + ".tmp"
@@ -146,6 +163,8 @@ class Imager:
         from mflux.models.common.config import ModelConfig
         from mflux.models.flux.variants.txt2img.flux import Flux1
         with self.lock:
+            # 그리는 중에 유휴 정리가 내리지 않게 시작할 때도 기록한다
+            self.last_used = time.time()
             if self.flux is None:
                 started = time.time()
                 self.flux = Flux1(model_config=ModelConfig.schnell(), model_path=self.directory)
@@ -164,9 +183,12 @@ class Imager:
             result.image.save(out, format="PNG", pnginfo=info)
             return out.getvalue()
 
-    def unload(self):
+    def unload(self, only_if_idle: bool = False):
         with self.lock:
             if self.flux is None:
+                return
+            # 잠금을 기다리는 동안 그렸을 수 있으므로 다시 확인한다
+            if only_if_idle and time.time() - self.last_used <= self.idle:
                 return
             self.flux = None
             gc.collect()
@@ -177,7 +199,7 @@ class Imager:
         while True:
             time.sleep(30)
             if self.flux is not None and time.time() - self.last_used > self.idle:
-                self.unload()
+                self.unload(only_if_idle=True)
 
 
 def read_wav(data: bytes) -> np.ndarray:

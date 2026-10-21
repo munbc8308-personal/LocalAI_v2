@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.3, 2026-10-21)
+> 상태: M0~M9·M13 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.4, 2026-10-21)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -39,6 +39,7 @@
 | v3.1 | 2026-10-19 | **M10 Telegram**: `channel-core`·`channel-telegram` 모듈(Bot API 직접 호출, long polling), 일회용 코드로 계정 연결(`vesta telegram pair`), 메시지 수정 스트리밍·분할, 인라인 버튼 승인(셸 수정 후 승인), 파일 첨부(질문·컬렉션 추가), 봇 토큰 키체인 저장. schema v9. 13.12 진행 기록 |
 | v3.2 | 2026-10-21 | **M11 Discord·Slack**: Kord·Bolt 대신 **Ktor로 직접**(Discord Gateway WebSocket·REST, Slack Socket Mode·Web API). 메신저 공통 동작을 `channel-core`의 `ChannelBot`으로 모으고 Telegram도 그 위로 옮김. 버튼 승인, 셸 수정은 입력 창(모달), 메시지 분할(Discord 2000자·Slack 블록 3000자), `!` 명령, 코드만 보내도 계정 연결. `vesta discord`·`vesta slack` 명령(token·pair·list·unlink·off), `vesta slack manifest`. 13.13 진행 기록 |
 | v3.3 | 2026-10-21 | **M12 음성·비전 입력**: 미디어 워커(`media-worker`, uv + Python 3.12, mlx-whisper large-v3-turbo, 127.0.0.1:11436, 30분 유휴 시 내림), `media` 모듈(ffmpeg 변환·워커 클라이언트·`say` 읽어 주기), 비전은 메인 모델 Gemma 4가 직접(추가 메모리 0). `media_asset`(schema v10)에 입력 이미지 보관. 웹 UI 🎤·📎(붙여넣기·끌어 놓기)·🔊 읽기, 메신저 음성·사진, Telegram `/voice` 음성 답변. 13.14 진행 기록 |
+| v3.4 | 2026-10-21 | **M13 이미지 생성**: 미디어 워커에 mflux FLUX.1-schnell(공식 가중치를 한 번 받아 4bit 9GB로 저장, 10분 유휴 시 내림), `ImageAgent`(한국어 → 영어 프롬프트·비율, 이어서 고치기), `/image`·D1 판정, 그리기 전 `ModelManager.reserve`로 자리 비우기, 갤러리(`media_asset` GENERATED, schema v11), 메신저 사진 보내기. 13.15 진행 기록 |
 
 ---
 
@@ -134,7 +135,7 @@ Kotlin(JVM)으로 만드는, **Apple Silicon Mac에서 동작하는 로컬 우�
 
 | 항목 | 예상 사용량 | 로드 정책 |
 |------|------------|-----------|
-| 이미지 생성 (FLUX.1-schnell, 4bit) | ~10GB | `/image` 요청 시, 10분 미사용 시 언로드. 코드 모델과 동시 로드 시 코드 모델을 내림 |
+| 이미지 생성 (FLUX.1-schnell, 4bit) | ~9.5GB (M13 측정, 디스크 9.0GB) | `/image` 요청 시 미디어 워커가 올리고, 10분 미사용 시 언로드. 그리기 전에 예산을 넘으면 상시가 아닌 모델(코드 모델 등)을 내림 |
 | 음성 인식 STT (Whisper large-v3-turbo) | ~1.6GB (M12 측정) | 음성 입력 시 미디어 워커가 올리고, 30분 미사용 시 언로드. 메모리 예산 계산에 포함 |
 | 음성 합성 TTS (MeloTTS-KR) | ~1GB | 음성 답변 시. macOS `say`는 추가 메모리 없음 |
 | 학습 작업 (LoRA/QLoRA) | 20~45GB | **유지보수 시간대에만**. 학습 중에는 코드·이미지 모델을 내리고, 메인 모델은 학습 대상이면 내린다 (7.10) |
@@ -164,7 +165,7 @@ Kotlin(JVM)으로 만드는, **Apple Silicon Mac에서 동작하는 로컬 우�
 | 생성·코드·임베딩·리랭커 모델 | Qwen3.5 / Qwen3-Coder / Qwen3-Embedding·bge-m3 / Qwen3-Reranker·bge-reranker / gpt-oss | Apache 2.0 또는 MIT | 로컬 | 사용 제한 라이선스(예: Llama 커뮤니티 라이선스)는 후보에서 뺀다 |
 | 인젝션 탐지 | Qwen3Guard | Apache 2.0 | 로컬 | |
 | 학습 | **mlx-lm** (`mlx_lm.lora`, `mlx_lm.fuse`), PyTorch(MPS) + Hugging Face Transformers·Optimum(ONNX 내보내기) | MIT / BSD / Apache 2.0 | 로컬 | Python 환경은 **uv**(MIT)로 관리 |
-| 이미지 생성 | **mflux** (MLX용 FLUX) + FLUX.1-schnell | MIT / Apache 2.0 | 로컬 | FLUX.1-dev는 비상업 라이선스라 제외 |
+| 이미지 생성 | **mflux** 0.23 (MLX용 FLUX) + FLUX.1-schnell 4bit (M13 확정) | MIT / Apache 2.0 | 로컬 | 공식 저장소(Hugging Face 로그인·약관 동의 필요)에서 한 번 받아 직접 양자화. FLUX.1-dev는 비상업 라이선스라 제외 |
 | 비전 입력 | **메인 모델 Gemma 4가 직접** (M12 확정, OpenAI 호환 `image_url`) | Apache 2.0 | 로컬 | 별도 비전 모델·추가 메모리 없음 |
 | 음성 인식 | **mlx-whisper** + Whisper large-v3-turbo (M12 확정) | MIT | 로컬 | 미디어 워커(uv, Python 3.12). 받은 뒤에는 인식할 때 외부 통신 없음 |
 | 음성 합성 | macOS `say` Yuna (M12) → MeloTTS(한국어, 보류) | OS 내장 / MIT | 로컬 | ffmpeg로 m4a(웹)·ogg Opus(Telegram) |
@@ -1742,6 +1743,38 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **실제 확인** (M12 완료 조건): 휴대폰 Telegram에서 음성으로 묻고 답 받기, 스크린샷 질문. 웹 UI 마이크는 휴대폰 브라우저(Tailscale HTTPS)에서 확인 — 마이크는 HTTPS나 localhost에서만 열린다.
 - CLI에서 이미지·음성 입력은 아직 없음(웹·메신저만).
 - MeloTTS(V-03 2차), 이미지 속 문자 인식으로 컬렉션 추가(V-05)는 이후.
+
+### 13.15 M13 진행 기록 (2026-10-21)
+
+#### 완료
+- **미디어 워커 이미지 생성** (`POST /image`):
+  - mflux 0.23 + 공식 `black-forest-labs/FLUX.1-schnell`(Apache 2.0, gated). 사용자 결정으로 제3자 양자화 미러 대신 공식 저장소를 쓴다(Hugging Face 로그인·약관 동의, `uv run hf auth login`).
+  - 처음 요청 때 mflux가 읽는 파일만(약 19GB) 받아 4bit로 양자화해 `~/.vesta/models/flux1-schnell-4bit`(9.0GB)에 저장하고, 이후에는 그것만 읽는다. 준비 중에는 503 + 지난 실패 이유.
+  - 그린 PNG에 "AI 생성 (Vesta, FLUX.1-schnell)"·프롬프트·seed 메타데이터 (7.11).
+  - 10분 안 쓰면 내린다. 크기 256~1536(16의 배수), 단계 1~8, 프롬프트 2000자까지.
+- **ImageAgent** (V-06): 메인 모델이 한국어 요청과 최근 대화(이전 프롬프트)로 영어 프롬프트와 비율(정사각·세로 3:4·가로 4:3)을 정하고 그린다. "더 밝게"처럼 이어지는 수정 요청은 이전 프롬프트를 고쳐 다시 그린다. 답변에 프롬프트를 남긴다.
+- **라우팅**: `/image` 명령(메신저는 `!image`), D1 결정 모델 IMAGE 판정, 짧은 수정 요청은 이미지를 이어받는다.
+- **메모리** (2.3): 그리기 전에 `ModelManager.reserve(10GB)` — 예산을 넘으면 상시 모델이 아닌 Ollama 모델부터 내린다. 워커가 올린 음성·이미지 모델 메모리 전체를 예산과 대시보드에 반영.
+- **갤러리** (V-08): `media_asset` kind GENERATED + caption(프롬프트, schema v11). `GET /api/media?kind=GENERATED`, 웹 UI 갤러리 탭. 답변 안에도 이미지.
+- **채널**: 웹 UI(답변 안 이미지, 누르면 원본), 메신저(답변 뒤 사진: Telegram `sendPhoto`, Discord 첨부, Slack 외부 업로드 — `files:write` 권한, manifest에 추가), CLI(`~/Pictures/Vesta/`에 저장하고 경로 표시).
+- **테스트**: ImageAgent(프롬프트·비율·자리 비우기·저장·수정 요청·준비 중), ModelManager.reserve(외부 사용량 포함), 라우팅(/image·이어받기·없으면 일반 대화), 갤러리 목록, Telegram 사진 보내기.
+
+#### 확인 (실제 서버·모델)
+- "눈 덮인 한옥 마을을 해 질 녘 수채화 느낌으로 그려 줘" → D1이 IMAGE(0.99) → 1024×768(가로) 9.8초, 전체 14.6초. 결과 이미지 정상, PNG 메타데이터 확인.
+- 이어서 "더 밝은 낮으로 바꿔 줘" → 이전 프롬프트를 고쳐 다시 그림(전체 11초).
+- 메모리(평가용 서버, 예산 55GB, 코드 모델을 gpt-oss:20b로 임시 설정): 코드 질문으로 gpt-oss(13GB)를 올린 뒤 `/image` → 그리기 전에 gpt-oss를 내리고 메인 모델은 유지. 코드 모델과 충돌 없이 동작.
+- 웹 UI 갤러리 탭에 프롬프트·시각과 함께 표시.
+
+#### 발견·수정
+- 처음 넣은 `huggingface-hub>=2.2` 하한이 최신 mflux와 충돌해 mflux 0.2가 깔림 → 하한을 낮춰 0.23.
+- Pillow 13은 Python 3.12에서 import 실패(`numbers._IntegralLike`) → 12로 고정.
+- 모델 준비 실패가 `try` 밖 import에서 나면 "준비 중"이 풀리지 않음 → 수정.
+- Hugging Face xet 전송이 2시간 20분 받다가 "error decoding response body"로 실패하고 받던 파일이 지워짐 → 일반 HTTP(`HF_HUB_DISABLE_XET=1`, 이어받기)와 5회 재시도, mflux가 읽는 파일만 받기(저장소 전체보다 약 23GB 적음). 두 번째 시도는 57분에 완료.
+- 그리는 중에 유휴 정리 스레드가 "마지막 사용 0"으로 보고 생성 직후 모델을 내림 → 올릴 때·그리기 시작할 때 기록하고, 내리기 전 잠금 안에서 다시 확인.
+
+#### 남은 일
+- 원본 가중치 캐시(`~/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-schnell`, 19GB)는 4bit 저장본만 쓰므로 지워도 된다(다시 양자화할 때만 필요).
+- 이미지 편집(V-07)은 보류, 메신저 실기기에서 사진 받기 확인은 M10·M11 실기기 확인 때 함께.
 
 ---
 
