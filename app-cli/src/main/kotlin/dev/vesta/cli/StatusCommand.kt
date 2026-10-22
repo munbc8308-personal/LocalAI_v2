@@ -32,7 +32,7 @@ class StatusCommand : CliktCommand(name = "status") {
 
     override fun run() = runBlocking {
         val paths = VestaPaths.default()
-        val config = ConfigLoader.load(paths.configFile)
+        val config = ConfigLoader.load(paths.configFile, paths.tunedFile)
         val http = HttpClients.local(requestTimeoutSeconds = 5)
 
         echo("설정    ${paths.configFile}${if (paths.configFile.exists()) "" else " (없음, 기본값 사용)"}")
@@ -42,7 +42,7 @@ class StatusCommand : CliktCommand(name = "status") {
         val checks = coroutineScope {
             listOf(
                 async { checkOllama(config, http) },
-                async { checkOllaya(config, http) },
+                async { checkOllaya(config, http, db.getOrNull()) },
                 async { checkSearxng(config, http) },
                 async { checkOrchard(config) },
                 async { checkServer(config, http) },
@@ -57,11 +57,13 @@ class StatusCommand : CliktCommand(name = "status") {
         "v" + OllamaAdmin(config.inference.ollamaUrl, http).version()
     }
 
-    private suspend fun checkOllaya(config: VestaConfig, http: HttpClient) = check("Ollaya", config.decision.baseUrl) {
+    private suspend fun checkOllaya(config: VestaConfig, http: HttpClient, db: VestaDatabase?) = check("Ollaya", config.decision.baseUrl) {
         val response = http.get("${config.decision.baseUrl}/api/version")
         require(response.status.isSuccess()) { "HTTP ${response.status.value}" }
         val version = Json.parseToJsonElement(response.bodyAsText()).jsonObject["version"]?.jsonPrimitive?.content
-        "v$version, 결정 모델 ${config.decision.model}"
+        // 학습으로 만든 버전이 켜져 있으면 그것 (서버가 쓰는 것과 같게, L-07)
+        val active = db?.let { runCatching { dev.vesta.storage.ExposedModelVersionRepository(it.db).active("decision")?.name }.getOrNull() }
+        "v$version, 결정 모델 ${active ?: config.decision.model}" + if (active != null) " (학습 버전, 기본 ${config.decision.model})" else ""
     }
 
     private suspend fun checkSearxng(config: VestaConfig, http: HttpClient) = check("SearXNG", config.web.searxngUrl) {
