@@ -23,7 +23,6 @@ bouncycastle = "1.86"
 jda = "6.7.0"
 jdave = "0.1.8"
 jna = "5.17.0"
-udpqueue = "0.2.12"
 # DAVE 다른 구현 (JNI). JDAVE(FFM)는 소리 조각마다 70ms가 걸려 끊겼다 (M19). 커밋 해시 버전(2026-10-07)
 libdave-jvm = "181fdecfa"
 
@@ -47,8 +46,6 @@ jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 libdave-adapter-jda = { module = "moe.kyokobot.libdave:adapter-jda", version.ref = "libdave-jvm" }
 libdave-impl-jni = { module = "moe.kyokobot.libdave:impl-jni", version.ref = "libdave-jvm" }
 libdave-natives-darwin = { module = "moe.kyokobot.libdave:natives-darwin", version.ref = "libdave-jvm" }
-udpqueue-api = { module = "club.minnced:udpqueue-api", version.ref = "udpqueue" }
-udpqueue-native-darwin = { module = "club.minnced:udpqueue-native-darwin", version.ref = "udpqueue" }
 ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }

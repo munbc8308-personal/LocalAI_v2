@@ -90,14 +90,9 @@ class DiscordVoiceService(
             .disableCache(CacheFlag.EMOJI, CacheFlag.STICKER, CacheFlag.SOUNDBOARD_SOUNDS, CacheFlag.SCHEDULED_EVENTS)
             .enableCache(CacheFlag.VOICE_STATE)
             .setMemberCachePolicy(MemberCachePolicy.VOICE)
-            .setAudioModuleConfig(
-                AudioModuleConfig().withDaveSessionFactory(daveFactory()).let { config ->
-                    // 네이티브 전송 큐: 소리를 미리 쌓아 두고 정확한 간격으로 보낸다 (JDA 기본 전송은 Java 스레드 간격이 흔들려 끊긴다)
-                    runCatching { config.withAudioSendFactory(com.sedmelluq.discord.lavaplayer.jdaudp.NativeAudioSendFactory()) }
-                        .onFailure { log.warn { "네이티브 소리 전송을 쓸 수 없어 기본 전송: ${it.message}" } }
-                        .getOrDefault(config)
-                },
-            )
+            // 소리 보내기는 JDA 기본 전송. 네이티브 큐(udpqueue)는 자기 UDP 소켓으로 보내, 봇이 한 번 말한 뒤로 사람 소리를 받지 못했다
+            // (끊김의 원인은 전송이 아니라 launchd 타이머 묶음이었다: dev.vesta.server.plist LegacyTimers)
+            .setAudioModuleConfig(AudioModuleConfig().withDaveSessionFactory(daveFactory()))
             .addEventListeners(object : ListenerAdapter() {
                 override fun onGuildVoiceUpdate(event: GuildVoiceUpdateEvent) = leaveIfAlone(event.guild)
             })
@@ -204,9 +199,10 @@ class DiscordVoiceService(
 
         private suspend fun onUtterance(utterance: Utterance) {
             // 호출어를 찾으려면 모든 말을 인식해야 한다: 사람마다 인식 횟수에도 상한을 둔다 (누구나 말할 수 있어 Mac이 붙잡히지 않게)
-            if (!transcriptions.allow(utterance.userId)) return
+            fun skip(reason: String) = log.info { "Discord 음성 무시 (${utterance.userId}, %.1f초): $reason".format(utterance.seconds) }
+            if (!transcriptions.allow(utterance.userId)) return skip("음성 인식 횟수 초과")
             val text = speechToText.transcribe(Pcm.toWav16k(utterance.pcm)).trim()
-            if (text.isBlank() || text in HALLUCINATIONS) return
+            if (text.isBlank() || text in HALLUCINATIONS) return skip("알아듣지 못함 (\"${text.take(20)}\")")
             val humans = guild.selfMember.voiceState?.channel?.members?.count { !it.user.isBot } ?: 1
             val stripped = WakeWord.strip(text, settings.wakeWords)
             // 말하는 중: 호출어+"그만"이면 멈춘다. 다른 말은 듣지 않는다 (스피커 소리를 다시 듣지 않게)
@@ -215,10 +211,10 @@ class DiscordVoiceService(
                     answering?.cancel()
                     speaker.clear()
                     log.info { "Discord 음성: 멈춤 (${utterance.userId})" }
-                }
+                } else skip("답하는 중 (\"${text.take(30)}\")")
                 return
             }
-            val question = if (humans > 1) stripped ?: return else (stripped ?: text)
+            val question = if (humans > 1) stripped ?: return skip("호출어 없음, ${humans}명 (\"${text.take(30)}\")") else (stripped ?: text)
             if (question.isBlank()) { speaker.say("네, 말씀하세요."); return }
             if (!questions.allow(utterance.userId)) { speaker.say("한 시간에 ${settings.perHour}번까지 물어볼 수 있어요. 잠시 뒤에 불러 주세요."); return }
             log.info { "Discord 음성 질문 (${utterance.userId}, %.1f초): ${question.take(60)}".format(utterance.seconds) }
