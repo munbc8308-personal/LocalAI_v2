@@ -38,6 +38,12 @@ class AutoApproveTest : FunSpec({
         }
         // 허용 목록 밖 확장자·확장자 없는 파일, 패치는 늘 묻는다
         listOf("run.command", "Dockerfile", "hook", "x.plist", "evil.sh.bak").forEach { AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false }
+        // 설정 형식·점 파일·작업 도구 설정 꼴 (3차 검토)
+        listOf(
+            "renovate.json", "Taskfile.yml", "lefthook.yml", "config/app.toml", ".drone.yml", ".woodpecker/ci.yaml", ".gitea/x.md", ".cargo/config.md",
+            ".eslintrc.js", "gulpfile.js", "noxfile.py", "setup.py", "vite.config.ts", "tailwind.config.js", "src/.hidden.kt",
+        ).forEach { AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false }
+        AutoApprove.allows(event("make_directory", ".github"), root.toString()) shouldBe false
         AutoApprove.allows(event("apply_patch", "README.md"), root.toString()) shouldBe false
         AutoApprove.allows(event("move_file", "a.txt", ".git/hooks/post-checkout"), root.toString()) shouldBe false
     }

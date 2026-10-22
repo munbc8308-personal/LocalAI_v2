@@ -53,11 +53,26 @@ internal object Workspaces {
         Files.write(store, kept + "${sha256(text)}\t${workspace.path}")
     }
 
-    /** 터미널 제어 문자(ESC·CR 등)가 들어 있는가. 들어 있으면 화면을 속일 수 있어 신뢰하지 않는다 */
-    fun hasControlChars(text: String) = text.any { (it < ' ' && it != '\n' && it != '\t') || it in '\u007f'..'\u009f' }
+    /**
+     * 화면에 그대로 보이지 않는 문자가 들어 있는가: 제어 문자(줄바꿈·탭 제외), 서식 문자(양방향 제어·폭 없는 문자·태그 블록 U+E0000~),
+     * 사용자 정의·미할당·서로게이트, 줄·문단 구분자. 들어 있으면 승인 화면과 모델이 받는 내용이 달라 보일 수 있어 신뢰하지 않는다.
+     * UTF-16 단위가 아니라 코드 포인트로 본다
+     */
+    fun hasControlChars(text: String) = text.codePoints().anyMatch(::hidden)
 
-    /** 제어 문자를 보이는 기호로 */
-    fun visible(text: String) = text.map { c -> if ((c < ' ' && c != '\n' && c != '\t') || c in '\u007f'..'\u009f') "\\x%02x".format(c.code) else c.toString() }.joinToString("")
+    /** 보이지 않는 문자를 `\u{…}`로 */
+    fun visible(text: String): String = buildString {
+        text.codePoints().forEach { cp -> if (hidden(cp)) append("\\u{%x}".format(cp)) else appendCodePoint(cp) }
+    }
+
+    private fun hidden(cp: Int): Boolean {
+        if (cp == '\n'.code || cp == '\t'.code) return false
+        return when (Character.getType(cp).toByte()) {
+            Character.CONTROL, Character.FORMAT, Character.PRIVATE_USE, Character.UNASSIGNED, Character.SURROGATE,
+            Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR -> true
+            else -> cp in 0xE0000..0xE007F
+        }
+    }
 
     /** 승인 전에 보여 줄 지침. 모델이 받는 내용 전부를 보여 준다 (뒤쪽에 숨긴 지시를 못 보고 승인하지 않게). 길면 줄 수를 알린다 */
     fun preview(workspace: Workspace, lines: Int = 80): String {

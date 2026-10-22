@@ -52,6 +52,10 @@ class WorkspacePreviewTest : FunSpec({
         val tricky = "보통 규칙\u001b[8m숨긴 지시\u001b[0m\r덮어쓰기"
         Workspaces.hasControlChars(tricky) shouldBe true
         Workspaces.hasControlChars("규칙\n- 둘째\t줄") shouldBe false
-        Workspaces.preview(dev.vesta.core.agent.Workspace("/p", tricky)) shouldBe "보통 규칙\\x1b[8m숨긴 지시\\x1b[0m\\x0d덮어쓰기"
+        Workspaces.preview(dev.vesta.core.agent.Workspace("/p", tricky)) shouldBe "보통 규칙\\u{1b}[8m숨긴 지시\\u{1b}[0m\\u{d}덮어쓰기"
+        // 보이지 않는 유니코드: 양방향 제어, 폭 없는 공백, 태그 블록(서로게이트 쌍)
+        listOf("규칙\u202e뒤집기", "규칙\u200b", "규칙" + String(Character.toChars(0xE0041))).forEach { Workspaces.hasControlChars(it) shouldBe true }
+        Workspaces.visible("a" + String(Character.toChars(0xE0041))) shouldBe "a\\u{e0041}"
+        Workspaces.hasControlChars("한국어 English 😀 — “따옴표”") shouldBe false
     }
 })

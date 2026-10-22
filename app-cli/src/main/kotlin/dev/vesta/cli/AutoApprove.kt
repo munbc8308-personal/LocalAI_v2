@@ -6,29 +6,26 @@ import java.nio.file.Path
 
 /**
  * 파일 쓰기 자동 승인 범위 (`--accept-writes`·`/accept`, PROJECT.md W-06, M17).
- * 내장 파일 도구(write_file·make_directory·move_file)가 **작업 폴더 안의 소스·문서 파일**에 쓸 때만 묻지 않는다.
- * - 허용 목록: 확장자가 [SAFE_EXTENSIONS]인 파일 (폴더 만들기는 이름만 검사)
- * - 그래도 막는 것: 보호 폴더([PROTECTED_DIRS]: git·CI·편집기·에이전트 설정), 빌드·설치 때 돌아가는 파일([PROTECTED_FILE])
+ * 원칙: **작업 폴더 안의 소스 코드·문서 파일**만 묻지 않는다. 막을 이름을 하나씩 늘리는 대신 허용할 것만 정한다.
+ * - 도구: write_file·make_directory·move_file. 패치(apply_patch)는 미리 다 알 수 없는 경로(이름 바꾸기·바이너리·모드)가 있어 늘 묻는다
+ * - 파일: 확장자가 [SOURCE_EXTENSIONS]일 때만. 설정 형식(json·yaml·toml·xml·properties)은 도구가 읽어 실행하는 경우가 많아 늘 묻는다
+ * - 경로의 어느 부분이든 점으로 시작하면(`.git`, `.github`, `.envrc`, `.cargo`…) 묻는다. [PROTECTED_DIRS]도 묻는다
+ * - 이름이 빌드·작업 도구 설정 꼴이면(`*.config.*`, `*rc`, `gulpfile.js`, `conftest.py`, `setup.py`…) 묻는다
  * - 비교는 대소문자를 무시한다 (macOS 파일 시스템은 `.GIT/hooks`도 `.git/hooks`다)
- * - 패치(apply_patch)는 이름 바꾸기·바이너리·모드 변경처럼 미리 다 알 수 없는 경로를 건드릴 수 있어 늘 묻는다
- * 나머지(셸, MCP 도구, 작업 폴더 밖)도 늘 묻는다. 지침이나 읽은 파일 속 지시문이 실행되는 코드를 몰래 바꾸지 못하게 한다
+ * 셸·MCP 도구·작업 폴더 밖도 늘 묻는다. 지침이나 읽은 파일 속 지시문이 실행되는 코드를 몰래 바꾸지 못하게 한다
  */
 internal object AutoApprove {
     private val TOOLS = setOf("write_file", "make_directory", "move_file")
-    private val PROTECTED_DIRS = setOf(
-        ".git", ".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".vscode", ".idea", ".devcontainer",
-        ".claude", ".cursor", ".vesta", ".mvn", "gradle", "node_modules",
-    )
-    private val SAFE_EXTENSIONS = setOf(
+    private val PROTECTED_DIRS = setOf("gradle", "node_modules", "vendor", "scripts", "bin", "hooks")
+    private val SOURCE_EXTENSIONS = setOf(
         "md", "txt", "rst", "adoc", "kt", "java", "scala", "groovy", "swift", "go", "rs", "py", "rb", "php", "c", "h", "cc", "cpp", "hpp", "m", "mm", "cs",
-        "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte", "css", "scss", "less", "html", "json", "yaml", "yml", "toml", "xml", "sql", "csv",
-        "properties", "proto", "graphql", "svg",
+        "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte", "css", "scss", "less", "html", "sql", "csv", "proto", "graphql", "svg",
     )
-    /** 확장자가 안전해도 빌드·설치·테스트 도구가 스스로 읽어 실행하는 파일 */
+    /** 확장자가 소스라도 빌드·작업·테스트 도구가 스스로 찾아 실행하는 이름 */
     private val PROTECTED_FILE = Regex(
-        "^(package\\.json|package-lock\\.json|pom\\.xml|setup\\.py|setup\\.cfg|pyproject\\.toml|conftest\\.py|Cargo\\.toml|build\\.rs|" +
-            "\\.gitlab-ci\\.ya?ml|\\.travis\\.ya?ml|azure-pipelines\\.ya?ml|bitbucket-pipelines\\.ya?ml|docker-compose\\.ya?ml|compose\\.ya?ml|" +
-            "\\.pre-commit-config\\.ya?ml|.*\\.config\\.(js|ts|mjs|cjs)|VESTA\\.md|CLAUDE\\.md|AGENTS\\.md)$",
+        "^(.*\\.config\\.[a-z]+|.*rc(\\.[a-z]+)?|(gulpfile|gruntfile|jakefile|noxfile|tasks|dodo|fabfile|toxfile|conftest|setup|manage|build|" +
+            "webpack|rollup|vite|babel|jest|vitest|eslint|prettier|tailwind|postcss|next|nuxt|svelte|astro)\\.[a-z]+|" +
+            "VESTA\\.md|CLAUDE\\.md|AGENTS\\.md|GEMINI\\.md)$",
         RegexOption.IGNORE_CASE,
     )
 
@@ -39,10 +36,9 @@ internal object AutoApprove {
         return targets.isNotEmpty() && targets.all { target ->
             val path = Path.of(target).normalize()
             val name = path.fileName?.toString() ?: return@all false
-            val fileOk = event.tool == "make_directory" || name.substringAfterLast('.', "").lowercase() in SAFE_EXTENSIONS
+            val fileOk = if (event.tool == "make_directory") true else name.substringAfterLast('.', "").lowercase() in SOURCE_EXTENSIONS && !PROTECTED_FILE.matches(name)
             path.startsWith(root) && path != root && fileOk &&
-                root.relativize(path).none { it.toString().lowercase() in PROTECTED_DIRS } &&
-                !PROTECTED_FILE.matches(name)
+                root.relativize(path).none { part -> part.toString().let { it.startsWith(".") || it.lowercase() in PROTECTED_DIRS } }
         }
     }
 }
