@@ -69,6 +69,9 @@ class DiscordVoiceService(
 ) : DiscordVoiceControl {
     private var jda: JDA? = null
     private val rooms = ConcurrentHashMap<String, Room>()
+    /** 사람별 질문 시각·음성 인식 시각 (한 시간 창). 방을 다시 만들어도 이어진다 */
+    private val questions = Budget(settings.perHour)
+    private val transcriptions = Budget(settings.perHour * TRANSCRIBE_PER_QUESTION)
 
     /** JDA를 띄운다. libopus·DAVE를 쓸 수 없으면 false (음성 채널 없이 계속) */
     fun start(): Boolean = runCatching {
@@ -103,6 +106,12 @@ class DiscordVoiceService(
         client.awaitReady()
         val guild = client.getGuildById(guildId) ?: return@withContext "이 서버의 음성 채널을 찾지 못했습니다"
         val channel = guild.getMemberById(userId)?.voiceState?.channel ?: return@withContext "먼저 음성 채널에 들어간 뒤 불러 주세요"
+        // 다른 채널에서 사람들과 대화 중이면 그 채널 사람만 옮길 수 있다
+        val current = guild.selfMember.voiceState?.channel
+        if (current != null && current.id != channel.id && current.members.any { !it.user.isBot } && current.members.none { it.id == userId }) {
+            return@withContext "지금 ${current.name}에서 대화 중입니다. 그 채널에 있는 사람만 옮길 수 있어요"
+        }
+        if (current?.id == channel.id && rooms.containsKey(guildId)) return@withContext "이미 ${channel.name}에 있습니다"
         rooms.remove(guildId)?.close()
         val room = Room(guild)
         rooms[guildId] = room
@@ -115,9 +124,12 @@ class DiscordVoiceService(
         "🔊 ${channel.name}에 들어왔습니다. $call. 끝내려면 @봇 !leave"
     }
 
-    override suspend fun leave(guildId: String): String = withContext(Dispatchers.IO) {
-        val room = rooms.remove(guildId) ?: return@withContext "음성 채널에 있지 않습니다"
-        room.close()
+    override suspend fun leave(guildId: String, userId: String): String = withContext(Dispatchers.IO) {
+        val guild = jda?.getGuildById(guildId) ?: return@withContext "음성 채널에 있지 않습니다"
+        if (!rooms.containsKey(guildId)) return@withContext "음성 채널에 있지 않습니다"
+        val current = guild.selfMember.voiceState?.channel
+        if (current != null && current.members.none { it.id == userId }) return@withContext "${current.name}에 있는 사람만 내보낼 수 있어요"
+        rooms.remove(guildId)?.close()
         "음성 채널에서 나왔습니다"
     }
 
@@ -138,7 +150,6 @@ class DiscordVoiceService(
         private var loop: Job? = null
         @Volatile private var answering: Job? = null
         private var session: SessionId? = null
-        private val calls = HashMap<String, ArrayDeque<Long>>()
 
         override fun canReceiveUser() = true
 
@@ -165,6 +176,8 @@ class DiscordVoiceService(
         }
 
         private suspend fun onUtterance(utterance: Utterance) {
+            // 호출어를 찾으려면 모든 말을 인식해야 한다: 사람마다 인식 횟수에도 상한을 둔다 (누구나 말할 수 있어 Mac이 붙잡히지 않게)
+            if (!transcriptions.allow(utterance.userId)) return
             val text = speechToText.transcribe(Pcm.toWav16k(utterance.pcm)).trim()
             if (text.isBlank() || text in HALLUCINATIONS) return
             val humans = guild.selfMember.voiceState?.channel?.members?.count { !it.user.isBot } ?: 1
@@ -180,18 +193,9 @@ class DiscordVoiceService(
             }
             val question = if (humans > 1) stripped ?: return else (stripped ?: text)
             if (question.isBlank()) { speaker.say("네, 말씀하세요."); return }
-            if (!allow(utterance.userId)) { speaker.say("한 시간에 ${settings.perHour}번까지 물어볼 수 있어요. 잠시 뒤에 불러 주세요."); return }
+            if (!questions.allow(utterance.userId)) { speaker.say("한 시간에 ${settings.perHour}번까지 물어볼 수 있어요. 잠시 뒤에 불러 주세요."); return }
             log.info { "Discord 음성 질문 (${utterance.userId}, %.1f초): ${question.take(60)}".format(utterance.seconds) }
             answering = scope.launch { answer(question) }
-        }
-
-        private fun allow(userId: String): Boolean {
-            val now = System.currentTimeMillis()
-            val list = calls.getOrPut(userId) { ArrayDeque() }
-            while (list.isNotEmpty() && now - list.first() > 3_600_000) list.removeFirst()
-            if (list.size >= settings.perHour) return false
-            list.addLast(now)
-            return true
         }
 
         /** 답이 생성되는 대로 문장마다 미리 합성해 순서대로 보낸다 */
@@ -238,6 +242,21 @@ class DiscordVoiceService(
         private fun Speaker.say(text: String) = scope.launch { runCatching { textToSpeech.synthesize(text, AudioFormat.PCM_48K_STEREO) }.getOrNull()?.let(::enqueue) }
     }
 
+    /** 사람별 한 시간 횟수 (스레드 안전) */
+    class Budget(private val perHour: Int, private val now: () -> Long = System::currentTimeMillis) {
+        private val calls = HashMap<String, ArrayDeque<Long>>()
+
+        @Synchronized
+        fun allow(userId: String): Boolean {
+            val t = now()
+            val list = calls.getOrPut(userId) { ArrayDeque() }
+            while (list.isNotEmpty() && t - list.first() > 3_600_000) list.removeFirst()
+            if (list.size >= perHour) return false
+            list.addLast(t)
+            return true
+        }
+    }
+
     /** 보낼 소리 (48kHz 16비트 스테레오 BE). JDA가 20ms마다 3,840바이트씩 가져간다 */
     class Speaker : AudioSendHandler {
         private val queue = ConcurrentLinkedQueue<ByteArray>()
@@ -277,6 +296,8 @@ class DiscordVoiceService(
     private companion object {
         /** 첫 조각 뒤로 한 번에 합성할 최소 글자 수 */
         const val LATER_CHARS = 80
+        /** 질문 하나에 인식할 수 있는 말 수 (호출어 없는 대화까지 인식하므로 넉넉히) */
+        const val TRANSCRIBE_PER_QUESTION = 10
         /** 음성 인식 모델(Whisper)이 조용한 소리에서 자주 지어내는 말 (M19 시제품: 짧은 잡음이 "감사합니다."로) */
         val HALLUCINATIONS = setOf("감사합니다.", "감사합니다", "시청해 주셔서 감사합니다.", "MBC 뉴스 이덕영입니다.", "구독과 좋아요 부탁드립니다.")
     }

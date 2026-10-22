@@ -119,7 +119,7 @@ class DiscordBot(
         if (voice != null && guild != null) {
             val command = when {
                 JOIN.matches(text) -> voice::join
-                LEAVE.matches(text) -> { g: String, _: String -> voice.leave(g) }
+                LEAVE.matches(text) -> voice::leave
                 else -> null
             }
             if (command != null) {
@@ -261,5 +261,6 @@ private fun kindOf(mime: String?) = when {
 interface DiscordVoiceControl {
     /** [userId]가 들어가 있는 음성 채널로 들어간다 */
     suspend fun join(guildId: String, userId: String): String
-    suspend fun leave(guildId: String): String
+    /** 봇과 같은 음성 채널에 있는 사람만 내보낼 수 있다 */
+    suspend fun leave(guildId: String, userId: String): String
 }

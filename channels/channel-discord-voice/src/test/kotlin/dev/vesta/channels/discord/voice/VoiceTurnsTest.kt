@@ -49,6 +49,17 @@ class VoiceTurnsTest : FunSpec({
         Pcm.trimSilence(silence).size shouldBe 0
     }
 
+    test("사람별 한 시간 횟수: 넘으면 막고, 한 시간이 지나면 다시") {
+        var now = 0L
+        val budget = DiscordVoiceService.Budget(2) { now }
+        budget.allow("a") shouldBe true
+        budget.allow("a") shouldBe true
+        budget.allow("a") shouldBe false
+        budget.allow("b") shouldBe true
+        now = 3_600_001
+        budget.allow("a") shouldBe true
+    }
+
     test("나중 조각은 길게 묶는다") {
         val text = "첫 문장은 이렇습니다. 둘째 문장입니다. 셋째 문장도 있어요. 넷째"
         val first = Sentences.cut(text, 0, false)
