@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M15 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.6, 2026-10-22)
+> 상태: M0~M9·M13~M16 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.7, 2026-10-22)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -42,6 +42,7 @@
 | v3.4 | 2026-10-21 | **M13 이미지 생성**: 미디어 워커에 mflux FLUX.1-schnell(공식 가중치를 한 번 받아 4bit 9GB로 저장, 10분 유휴 시 내림), `ImageAgent`(한국어 → 영어 프롬프트·비율, 이어서 고치기), `/image`·D1 판정, 그리기 전 `ModelManager.reserve`로 자리 비우기, 갤러리(`media_asset` GENERATED, schema v11), 메신저 사진 보내기. 13.15 진행 기록 |
 | v3.5 | 2026-10-22 | **M14 모델 학습**: 답변 피드백·담당 정정(C-09, schema v12), `trainer/`(uv·MLX) — Winnow GGUF → HF 변환, 선택지 로짓 LoRA 학습, Q8_0 GGUF에 병합해 Ollaya 등록(`winnow-vesta:rN`), Ollaya 평가 게이트(정답 증가·질문별 하락 없음·판단 재현 95%), 버전·롤백(`vesta train`, 웹 UI 상태 탭). r2가 210문항 582→628로 통과해 결정 모델로 활성화. Laya → ONNX 경로는 winnow 전환(v2.5)으로 쓰지 않음. 13.16 진행 기록 |
 | v3.6 | 2026-10-22 | **M15 멀티 유저**: `identity` 모듈(`RolePolicy` 역할 표, `UserService`, `FairScheduler` 요청 큐, `PasswordHasher` 이동), 사용자 관리(`vesta user`, `/api/users`, 웹 UI 사용자 카드), 이름 로그인·이름별 잠금·본인 비밀번호 변경, 컬렉션 공유(`collection_share`, schema v13), MEMBER 자기 폴더(`users.memberRoot`)·셸 없음, 역할로 막힌 요청은 모델 없이 안내, 학습 데이터는 동의한 사용자만(L-09), 메신저 `pair --user`. 13.17 진행 기록 |
+| v3.7 | 2026-10-22 | **M16 주간 자가 개선**: `evolution` 모듈(ollama.com 모델 목록 읽기·후보 고르기, `Scorecard`·`Gate` 평가 비교, `ThresholdTuner` 임계값 조정, `EvolutionService` 제안·승인·되돌리기), `vesta evolve run/list/approve/reject/rollback`, launchd `dev.vesta.evolve`(일요일 03:00), 기준 답 평가셋(`eval/answers-ko.tsv`)·저장소에 없는 코드 질문(`eval/code-absent-ko.tsv`), 설정 덮어쓰기 `~/.vesta/tuned.properties`, 메인 모델 교체는 메신저·웹 UI 승인 후 반영, 서버가 바뀐 설정을 보고 쉬는 때 다시 시작, D6 임계값 설정화(`decision.thresholds.codeSufficient`), schema v14. 7.13·13.18 |
 
 ---
 
@@ -823,6 +824,46 @@ MCP `annotations`는 서버가 주는 **힌트일 뿐**이라 그대로 믿지 �
 | U-07 | 사용자별 설정 | P2 | 기본 에이전트, 말투(시스템 프롬프트), 음성 출력 여부 |
 | U-08 | 원격 접속 | P2 | Tailscale 노드 공유(개인 무료 플랜 최대 3명) 또는 같은 공유기(LAN) 안에서만 접속 허용 중 선택 |
 
+### 7.13 주간 자가 개선 (Evolution)
+**목적**: 새로 나온 모델과 쌓인 기록으로 Vesta가 스스로 나아지게 한다. 매주 같은 평가셋으로 지금 상태와 바꿀 안을 비교하고, 확실히 좋아질 때만 바꾼다. 모든 일은 이 Mac에서 한다 (모델 목록을 읽고 받는 것만 외부 접속).
+
+#### 매주 하는 일 (launchd `dev.vesta.evolve`, 일요일 03:00, `vesta evolve run`)
+1. **후보 찾기**: 지켜보는 계열(`evolution.families`)의 새 태그 + ollama.com "새로 나온 모델" 중 도구 호출(tools)을 지원하는 계열. 크기별로 양자화 순서(`mxfp8` → `nvfp4` → `q8_0`)에서 하나, 8GB~`maxCandidateGigabytes`(48GB), 평가한 적 없는 태그(이름+digest)만, 최대 `maxCandidates`(2)개.
+2. **평가**: 지금 모델과 후보를 같은 점검에서 같은 평가셋으로 잰다 (`Scorecard`).
+   | 항목 | 평가셋·방법 | 비중 |
+   |------|-------------|------|
+   | 답변 내용 | `eval/answers-ko.tsv` 31문항(쉬운 21 + 추론·함정·관용어 10): 대화 에이전트처럼 묻고, 핵심 내용을 담았는지 결정 모델이 항목마다 판정(0.7 이상). 정확한 값은 글자로 확인(`=값`, `!틀린 값`) | 0.4 |
+   | 라우팅 | `eval/routing-ko.tsv` (결정 모델이 못 정한 질문은 메인 모델이 판정) | 0.2 |
+   | 근거율 | 문서 컬렉션(없으면 코드 저장소) 질문 10개의 D7 결과. 평가용 대화는 지운다 | 0.15 |
+   | 한국어 | 한자 섞임·빈 답변·조사 띄움이 없는 답변 비율 | 0.15 |
+   | 도구 형식 | 도구 호출 JSON 3문항 | 0.1 |
+   | 속도·메모리 | 답변 시작(중앙값), tok/s, 올라간 크기 | 게이트만 |
+3. **게이트** (`Gate`): 종합 점수 +3%p 이상, 어느 항목도 5%p 넘게 떨어지지 않음, 빈 답변 0, 답변 시작이 1.5배 이내 (같은 모델을 두 번 재면 항목이 3~6%p, 종합이 1%p 흔들린다). 떨어진 후보는 받은 경우에만 지운다.
+4. **제안**: 통과한 후보 중 가장 좋은 것을 승인 요청으로 남긴다. 서버가 Mac 주인의 메신저로 비교표와 [승인]/[거절] 버튼을 보낸다 (웹 UI 상태 탭·CLI에서도 처리). 7일 지나면 만료.
+5. **결정 모델 재학습**: 지난 학습 뒤 라우팅 정정이 `retrainMinCorrections`(5)건 이상이면 서버에 학습을 맡긴다 (M14 평가 게이트 그대로).
+6. **임계값 조정** (`ThresholdTuner`): 라우터 신뢰도(`decision.thresholds.agent`)와 D6 코드 근거 충분도(`decision.thresholds.codeSufficient`)를 평가셋으로 다시 맞춘다. 질문 해시로 3분의 1을 확인용으로 떼어, 맞추는 쪽 정확도가 오르고 확인용이 떨어지지 않을 때만 바로 반영하고 [되돌리기] 버튼과 함께 알린다.
+
+#### 원칙
+- **메인 모델 교체는 승인을 받는다.** 결정 모델 재학습과 임계값 조정은 평가 게이트를 통과하면 바로 반영한다 (되돌리기 가능).
+- **코드는 스스로 고치지 않는다.** 바꾸는 것은 정해진 설정 키(`TunedSettings.KEYS`)뿐이다. 검증 수단이 평가셋뿐이라 코드 변경을 맡기기에는 위험하다.
+- **바뀐 값은 한 곳에**: `~/.vesta/tuned.properties`가 `config.yaml`보다 우선한다. 승인·되돌리기는 이 파일만 고친다. 서버는 파일이 바뀐 것을 보고, 하던 답변·학습이 없을 때 끝나고 launchd가 다시 띄운다.
+- **과적합 줄이기**: 같은 평가셋에 매주 맞추지 않도록 임계값은 확인용 문항에서 떨어지면 바꾸지 않고, 모델 비교는 지금 모델과 같은 점검에서 같은 조건으로 잰다. 평가셋은 피드백으로 늘린다 (E-09).
+- **이전 모델은 지우지 않는다** (되돌리기). 떨어진 후보만 지운다.
+
+#### 기능 목록
+| ID | 기능 | 우선순위 | 설명 |
+|----|------|----------|------|
+| E-01 | 주간 점검 실행 | P1 | launchd 일요일 03:00, `vesta evolve run`(수동·`--dry-run`·`--candidate`), 실행 기록 `evolution_run` |
+| E-02 | 새 모델 찾기 | P1 | ollama.com 태그·새 모델 페이지, 계열·양자화·크기·이미 본 digest로 거르기 |
+| E-03 | 모델 평가 | P1 | 답변 내용·라우팅·근거율·한국어·도구 형식·속도·메모리 (`Scorecard`) |
+| E-04 | 평가 게이트 | P1 | 종합 +3%p, 항목별 하락 5%p 이내, 빈 답변 0, 느려짐 1.5배 이내 |
+| E-05 | 승인 요청 | P1 | 메신저 카드 [승인]/[거절], 웹 UI 상태 탭, `vesta evolve approve/reject`. OWNER만 |
+| E-06 | 임계값 조정 | P1 | 라우터 `agent`·D6 `codeSufficient`, 확인용 문항으로 과적합 확인, 바로 반영 |
+| E-07 | 반영·되돌리기 | P1 | `tuned.properties`, 서버 자동 재시작(쉬는 때), `vesta evolve rollback` |
+| E-08 | 결정 모델 재학습 | P1 | 라우팅 정정이 쌓이면 M14 학습 시작 |
+| E-09 | 평가셋 키우기 | P2 | 👍 받은 답을 기준 답 평가셋에 더하기, 👎·정정 질문을 회귀 평가셋에 |
+| E-10 | 생성 모델 미세조정 연결 | P2 | M14 QLoRA가 생기면 후보로 같이 평가 |
+
 ---
 
 ## 8. 시스템 아키텍처
@@ -1070,6 +1111,7 @@ vesta/   (저장소 폴더: LocalAI/)
 ├── identity/      # 사용자·역할·인증, 사용자 범위 강제, 요청 큐
 ├── media/         # STT·TTS·이미지 생성 클라이언트, 오디오 변환(ffmpeg)
 ├── training/      # 데이터셋 내보내기, 학습 작업 실행·감시, 평가 게이트, 모델 버전
+├── evolution/     # 주간 자가 개선: 모델 목록·후보 고르기, 평가 비교 게이트, 임계값 조정, 제안·승인·되돌리기
 ├── mcp/           # MCP 클라이언트(Kotlin SDK), 서버 프로세스 관리, McpTool, 위험 등급 매핑
 ├── storage/       # SQLite, 세션/문서/캐시 저장
 ├── app-cli/       # CLI 진입점
@@ -1138,6 +1180,9 @@ app-cli / app-server
 | MediaAsset | id, userId, sessionId, kind(image/audio), mimeType, path, prompt, model, createdAt |
 | TrainingRun | id, target(decision/general/code), datasetHash, baseModel, params(JSON), status, metrics(JSON), startedAt, finishedAt |
 | ModelVersion | id, role, name, adapterPath, trainingRunId, evalScore, active, createdAt |
+| EvolutionRun | id, status, stage, report, error, startedAt, finishedAt, notifiedAt |
+| Proposal | id, runId, kind(MODEL/TUNING), title, summary, changes, previous, status, createdAt, notifiedAt, decidedAt |
+| EvolutionCandidate | name, digest, result, score, note, runId, checkedAt |
 | ToolRun | id, userId, sessionId, mcpServer(nullable), tool, args, result, risk, approved, approvedVia(channel), durationMs, createdAt |
 
 ---
@@ -1183,6 +1228,7 @@ app-cli / app-server
 | **M13. 이미지 생성** | mflux + FLUX.1-schnell, `ImageAgent`, `/image`, MediaAsset 갤러리, 메모리 LRU 연동 | 한국어 요청으로 이미지 생성, 코드 모델과 메모리 충돌 없이 동작 |
 | **M14. 모델 학습** | 피드백 수집(C-09), 데이터셋 내보내기, 결정 모델(winnow:e4b) LoRA 미세조정 → GGUF → Ollaya, 평가 게이트, 버전·롤백, 이후 생성 모델 QLoRA | 미세조정한 결정 모델이 한국어 평가셋에서 기존보다 높은 점수 |
 | **M15. 멀티 유저** | identity 모듈, 사용자·역할, 사용자별 인증·데이터 분리, 공유 컬렉션, 요청 큐, 역할별 도구 정책 | 두 사용자가 서로의 대화·문서를 볼 수 없음, MEMBER는 Orchard·셸 사용 불가 |
+| **M16. 주간 자가 개선** | evolution 모듈, 새 모델 찾기·받기·평가 게이트, 메신저 승인, 임계값 조정, 결정 모델 재학습 연결, launchd 주간 실행, 되돌리기 | 실제 모델로 점검이 끝나고, 더 나쁜 모델은 제안하지 않으며, 승인·되돌리기가 서버 재시작으로 반영됨 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -1853,6 +1899,40 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - MEMBER가 셸이 필요할 때 Mac 주인에게 승인을 넘기는 방식(7.12 "설정")은 넣지 않았다. 지금은 거부만.
 - 사용자별 설정(U-07, P2)·원격 접속 방식(U-08, P2).
 
+### 13.18 M16 진행 기록 (2026-10-22)
+
+#### 완료
+- **`evolution` 모듈** (core·inference만 의존): `OllamaLibraryCatalog`·`OllamaLibraryHtml`(ollama.com 태그·새 모델 페이지 해석, 공개 API가 없어 HTML), `CandidatePicker`, `Scorecard`·`Gate`, `ThresholdTuner`(질문 해시로 3분의 1 확인용), `EvolutionService`(제안·바로 반영·승인·거절·되돌리기·만료, 제안 뒤 같은 설정이 바뀌면 승인 거부).
+- **설정 덮어쓰기** `~/.vesta/tuned.properties` (`TunedSettings`, 바꿀 수 있는 키 4개만): hoplite `PropsPropertySource`를 config.yaml보다 앞에 둬 키 단위로 덮어쓴다. `decision.thresholds.codeSufficient`(D6, CodeAgent 상수 → 설정).
+- **평가 실행** (app-cli `ModelEvaluator`·`WeeklyCheck`): 답변 내용·도구 형식·라우팅·근거율·한국어·속도·메모리, 문항별 답변·판정을 `~/.vesta/evolution/run-<번호>/<모델>.md`에 남김. 후보는 `AppContainer(generalOverride)`로 같은 구성에서 메인·코드 모델만 바꿔 잰다. 끝나면 메인 모델을 다시 올려 둔다.
+- **Ollama 받기·지우기** (`OllamaAdmin.pull`(시간 제한 없음, 진행률)·`delete`·`localModels`).
+- **schema v14**: `evolution_run`·`evolution_proposal`·`evolution_candidate`. 세션 지우기(`SessionRepository.delete`, 근거율 평가용 대화 정리).
+- **서버** `EvolutionDesk`: 30초마다 알리지 않은 점검 결과·제안을 Mac 주인 메신저로(메인 모델 [승인]/[거절], 바로 반영한 임계값 [되돌리기]). `ChannelBot`에 `ChannelNotifier.notify`·`ChannelActions`(버튼 `ev:<번호>:<a|r|u>`, 누르면 결과를 덧붙이고 버튼을 없앤다). `tuned.properties`가 바뀌면 하던 답변·학습이 없을 때 끝내고 launchd가 다시 띄운다(launchd 아래일 때만, `XPC_SERVICE_NAME`).
+- **API·웹 UI**: `GET /api/evolution`, `POST /api/evolution/{id}/{approve|reject|rollback}`(OWNER), 상태 탭 "주간 자가 개선" 카드.
+- **CLI**: `vesta evolve run [--candidate …] [--no-pull] [--dry-run] [--skip-models|--skip-tune|--skip-retrain]`, `list`, `approve`, `reject`, `rollback`.
+- **launchd** `dev.vesta.evolve`: 일요일 03:00 `vesta evolve run --scheduled`(caffeinate). `install-vesta.sh`가 `eval/*.tsv`를 `~/.vesta/evalsets`에 복사.
+- **평가셋**: `eval/answers-ko.tsv`(31문항), `eval/code-absent-ko.tsv`(저장소에 없는 질문 12개).
+
+#### 확인 (실제 서버·모델)
+- 후보 찾기: 새 도구 호출 계열 minimax-m3.1-flash·flint·bonsai-2·beam·muse-spark-open, 후보 `gemma4:31b-mxfp8`(34GB)·`gemma4:12b-mxfp8`(13GB). cloud 태그·48GB 초과는 빠짐.
+- 지금 모델 `gemma4:26b-mxfp8`: 종합 95% · 답변 97% · 라우팅 100% · 근거 77%(코드 저장소) · 한국어 97% · 도구 100% · 답변 시작 125ms · 93 tok/s · 38GB.
+- 받아 둔 `gpt-oss:20b`를 후보로: 빈 답변 1개, 답변 시작 106 → 892ms, 종합 차이 +0.0%p → 탈락.
+- 임계값: 라우터 0.6 그대로(평가셋 100%), D6 0.2 그대로(96%, 답이 있는 질문 하나가 0.057로 낮음 — 더 나은 값 없음).
+- 점검 결과가 Telegram으로 옴(`자가 개선 알림 run:N → 대화방 1곳`).
+
+#### 발견·수정
+- 쉬운 21문항만으로는 두 모델 모두 98%라 차이가 안 남 → 추론·함정·관용어 10문항 추가.
+- 결정 모델이 틀린 정확한 값을 받아들임(`[2, 4, 6]`을 "[4, 6]이 출력된다"로 0.61) → 정확한 값은 글자로 확인(`=값`, `!값`), 판정 기준 0.5 → 0.7.
+- 같은 모델을 두 번 재면 답변 97→94%, 한국어 97→94%, 근거 77→83%, 종합 95→94% → 게이트를 항목 하락 3→5%p, 종합 향상 +2→+3%p로.
+- 문서 컬렉션 `b`가 없어 근거율을 못 잼 → 코드 저장소 질문으로 대신 잰다.
+- `--dry-run`도 후보를 받던 문제 → 시험 실행은 받지 않는다. 핵심 내용에 `%`가 있으면 기록 서식이 깨지던 문제 수정.
+
+#### 남은 일
+- 실제 후보를 받아 승인 → 서버 재시작 → 되돌리기까지 메신저 버튼으로 한 번 해 보기 (첫 일요일 점검 때).
+- 평가셋 키우기(E-09): 👍 받은 답을 기준 답으로, 👎·정정 질문을 회귀 평가셋으로. 지금은 피드백이 0건.
+- D6 겹침: 답이 있는 코드 질문 중 D6 0.057이 하나 있다. 검색 개선이나 D6 질문 문구로 다시 볼 것.
+- 결정 모델 재학습 뒤 임계값을 같은 점검에서 다시 맞추기 (지금은 재학습이 서버에서 따로 돌아 다음 주에 반영).
+
 ---
 
 ## 14. 결정 사항 / 남은 질문
@@ -1883,6 +1963,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 셸 실행: 도구로 포함, 매번 승인 후 실행 (차단 목록·타임아웃·경로 제한 적용)
 - 범위 확대 (v1.5): 모델 학습(LoRA·결정 모델 미세조정), 이미지(비전 입력·생성)·음성(STT·TTS), 멀티 유저(최대 5명, OWNER/MEMBER/GUEST). 비목표는 클라우드 배포·대규모 사용자·사전학습·영상 생성·음성 복제·전이중 음성
 - Apple 앱 연동: Orchard **Pro**를 구매해 MCP(stdio)로 연동 (무료 원칙의 유일한 예외), `PersonalAgent` 추가. 메일·메시지 발송과 단축어 실행은 매번 승인
+- 주간 자가 개선 (v3.7): 매주 새 모델·임계값·결정 모델을 평가한다. **메인 모델 교체는 승인 후 반영**, 임계값 조정·결정 모델 재학습은 평가 통과 시 바로 반영(되돌리기 가능). 코드는 스스로 고치지 않는다
 
 ### 남은 질문
 - 없음. M0(준비) 단계 진행 가능.

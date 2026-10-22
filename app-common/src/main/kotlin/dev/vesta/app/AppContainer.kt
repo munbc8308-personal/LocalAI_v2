@@ -61,9 +61,14 @@ import dev.vesta.storage.VestaDatabase
  */
 class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val paths = VestaPaths.default()
-    val config: VestaConfig = ConfigLoader.load(paths.configFile).let { loaded ->
+    val config: VestaConfig = ConfigLoader.load(paths.configFile, paths.tunedFile).let { loaded ->
         if (generalOverride == null) loaded
-        else loaded.copy(models = loaded.models.copy(general = (loaded.models.general ?: DEFAULT_GENERAL).copy(name = generalOverride)))
+        else {
+            // 코드 모델이 메인 모델과 같으면 함께 바꾼다 (주간 점검이 후보를 평가할 때, M16)
+            val general = loaded.models.general ?: DEFAULT_GENERAL
+            val code = loaded.models.code?.let { if (it.name == general.name) it.copy(name = generalOverride) else it }
+            loaded.copy(models = loaded.models.copy(general = general.copy(name = generalOverride), code = code))
+        }
     }
 
     private val http = HttpClients.local(config.inference.requestTimeoutSeconds)
@@ -84,6 +89,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val feedback = dev.vesta.storage.ExposedFeedbackRepository(database.db)
     val trainingRuns = dev.vesta.storage.ExposedTrainingRepository(database.db)
     val modelVersions = dev.vesta.storage.ExposedModelVersionRepository(database.db)
+    /** 주간 자가 개선 (M16) */
+    val evolutionRepository = dev.vesta.storage.ExposedEvolutionRepository(database.db)
+    val evolution = dev.vesta.evolution.EvolutionService(evolutionRepository, paths.tunedFile, java.time.Duration.ofDays(config.evolution.proposalTtlDays.toLong()))
     /** 질문에 붙인 이미지 등 (M12) */
     val mediaStore = dev.vesta.storage.FileMediaStore(database.db, paths.home.resolve("media"))
     val ffmpeg = dev.vesta.media.Ffmpeg(config.media.ffmpeg)
@@ -197,6 +205,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         decision = decisionClient,
         llm = LlmRouter(inference, modelManager),
     )
+    /** 요청 큐 (U-05). 서버가 설정을 다시 읽으려고 다시 시작할 때 하던 요청이 없는지 본다 (M16) */
+    val scheduler = dev.vesta.identity.FairScheduler(config.users.maxParallel)
     val conversation = DefaultConversationService(
         sessions = sessions,
         messages = messages,
@@ -219,11 +229,11 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         },
         approvals = approvals,
         media = mediaStore,
-        scheduler = dev.vesta.identity.FairScheduler(config.users.maxParallel),
+        scheduler = scheduler,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
-            AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever, judge = judge),
+            AgentType.CODE to CodeAgent(inference, modelManager, knowledge, retriever, judge = judge, unanswerable = config.decision.thresholds.codeSufficient),
             AgentType.PERSONAL to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,

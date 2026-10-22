@@ -46,9 +46,12 @@ class DiscordBot(
     nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
     speechToText: SpeechToText? = null,
     mediaLimits: MediaConfig = MediaConfig(),
+    actions: dev.vesta.channels.ChannelActions? = null,
 ) {
     // 음성 답변은 보내지 않는다 (Discord 음성 메시지 형식은 따로 만들어야 함)
-    private val bot = ChannelBot(DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits)
+    private val bot = ChannelBot(DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions)
+    /** 먼저 보내는 알림 (M16) */
+    val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     private val json = Json { ignoreUnknownKeys = true }
     private var selfId: String? = null
 

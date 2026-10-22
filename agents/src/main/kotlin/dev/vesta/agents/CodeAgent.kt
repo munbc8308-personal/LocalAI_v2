@@ -47,6 +47,11 @@ class CodeAgent(
     private val maxAttachedLines: Int = 400,
     /** D7 판정 (없으면 건너뜀) */
     private val judge: dev.vesta.decision.Judge? = null,
+    /**
+     * D6 점수가 이보다 낮으면 "코드에서 찾지 못함" (`decision.thresholds.codeSufficient`, 주간 점검이 다시 맞춘다).
+     * 판정 기준(0.5)보다 낮게 둔다: 코드 조각은 문서보다 D6 점수가 낮게 나온다
+     */
+    private val unanswerable: Double = DEFAULT_UNANSWERABLE,
 ) : Agent {
     override val type = AgentType.CODE
 
@@ -85,7 +90,7 @@ class CodeAgent(
         val searchedOnly = attached.isEmpty() && evidence.none { it.title == "git diff" }
         val sufficiency = if (wantsRepo && searchedOnly && context != null && judge != null) judge.sufficient(question, context.text) else null
         sufficiency?.let { log.info { "D6 코드 근거 충분도 %.3f: %s".format(it, question.take(60)) } }
-        val unanswerable = wantsRepo && searchedOnly && (context == null || (sufficiency ?: 1.0) < UNANSWERABLE)
+        val unanswerable = wantsRepo && searchedOnly && (context == null || (sufficiency ?: 1.0) < unanswerable)
         val messages = if (context == null || unanswerable) {
             if (wantsRepo) {
                 emit(AgentEvent.Status("관련 코드를 찾지 못해 일반 지식으로 답합니다"))
@@ -128,14 +133,11 @@ class CodeAgent(
         Evidence(SourceType.CODE, "$root (git diff HEAD)", "git diff", "$name · 파일 ${files}개", diff.take(20_000), 1.0)
     }.getOrNull()
 
-    private companion object {
-        /**
-         * D6 점수가 이보다 낮으면 "코드에서 찾지 못함". 판정 기준(0.5)보다 낮게 둔다: 코드 조각은 문서보다 D6 점수가 낮게 나온다.
-         * 평가셋(eval/code-vesta.tsv 20문항 + 저장소에 없는 질문 3개): 있는 질문 최저 0.317, 없는 질문 최고 0.096
-         */
-        const val UNANSWERABLE = 0.2
-        val DIFF_HINT = Regex("diff|변경 ?(사항|점|내용)|바뀐 (코드|부분)|수정한 (코드|부분)|커밋 전|작업한 (코드|부분)", RegexOption.IGNORE_CASE)
-        val REPO_HINT = Regex("저장소|레포|리포|repo|코드베이스|우리 (코드|프로젝트)|내 프로젝트|이 프로젝트|어디서 (쓰|사용|처리|호출)|어디에 (있|정의)|구현(돼|되어) ?있")
-        val FILE_REF = Regex("([\\w./-]+\\.(?:kt|kts|java|py|js|ts|tsx|go|rs|swift|rb|sql|sh|yaml|yml|toml|gradle|md))(?::(\\d+)(?:[-–](\\d+))?)?")
+    companion object {
+        /** 평가셋(eval/code-vesta.tsv 20문항 + 저장소에 없는 질문 3개): 있는 질문 최저 0.317, 없는 질문 최고 0.096 */
+        const val DEFAULT_UNANSWERABLE = 0.2
+        private val DIFF_HINT = Regex("diff|변경 ?(사항|점|내용)|바뀐 (코드|부분)|수정한 (코드|부분)|커밋 전|작업한 (코드|부분)", RegexOption.IGNORE_CASE)
+        private val REPO_HINT = Regex("저장소|레포|리포|repo|코드베이스|우리 (코드|프로젝트)|내 프로젝트|이 프로젝트|어디서 (쓰|사용|처리|호출)|어디에 (있|정의)|구현(돼|되어) ?있")
+        private val FILE_REF = Regex("([\\w./-]+\\.(?:kt|kts|java|py|js|ts|tsx|go|rs|swift|rb|sql|sh|yaml|yml|toml|gradle|md))(?::(\\d+)(?:[-–](\\d+))?)?")
     }
 }

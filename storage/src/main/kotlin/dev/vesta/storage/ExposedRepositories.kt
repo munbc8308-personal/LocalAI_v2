@@ -20,6 +20,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -69,6 +70,15 @@ class ExposedSessionRepository(
                 it[Sessions.title] = title
             }
         }
+    }
+
+    override suspend fun delete(userId: UserId, id: SessionId): Boolean = db.io {
+        if (Sessions.selectAll().where { (Sessions.id eq id.value) and (Sessions.userId eq userId.value) }.empty()) return@io false
+        // 메시지·피드백은 CASCADE. 라우팅·도구 기록은 세션 ID로만 묶여 있어 따로 지운다
+        RoutingLogs.deleteWhere { RoutingLogs.sessionId eq id.value }
+        ToolRuns.deleteWhere { ToolRuns.sessionId eq id.value }
+        ChannelBindings.update({ ChannelBindings.sessionId eq id.value }) { it[sessionId] = null }
+        Sessions.deleteWhere { (Sessions.id eq id.value) and (Sessions.userId eq userId.value) } > 0
     }
 
     private fun ResultRow.toSession() = Session(

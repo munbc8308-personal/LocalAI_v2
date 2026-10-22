@@ -2,7 +2,9 @@ package dev.vesta.server
 
 import dev.vesta.app.AppContainer
 import dev.vesta.app.BotTokens
+import dev.vesta.channels.ChannelActions
 import dev.vesta.channels.ChannelFiles
+import dev.vesta.channels.ChannelNotifier
 import dev.vesta.channels.discord.DiscordBot
 import dev.vesta.channels.discord.DiscordGateway
 import dev.vesta.channels.discord.HttpDiscordApi
@@ -30,10 +32,14 @@ import kotlin.io.path.writeBytes
 
 private val log = KotlinLogging.logger {}
 
-/** 메신저 봇을 띄운다 (PROJECT.md 6.2: 서버가 채널 어댑터를 기동). 토큰이 없으면 건너뛴다 */
-fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -> String) {
+/**
+ * 메신저 봇을 띄운다 (PROJECT.md 6.2: 서버가 채널 어댑터를 기동). 토큰이 없으면 건너뛴다.
+ * 띄운 봇의 알림 창구를 돌려준다 (주간 점검 알림, M16). [actions]는 알림 카드 버튼 처리
+ */
+fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActions? = null, status: suspend () -> String): List<ChannelNotifier> {
     val channels = app.config.channels
     val files = ServerChannelFiles(app)
+    val notifiers = mutableListOf<ChannelNotifier>()
 
     val telegram = channels.telegram
     val telegramToken = BotTokens.read("telegram")
@@ -43,8 +49,9 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
         else -> {
             val bot = TelegramBot(
                 HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status,
-                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media,
+                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media, actions = actions,
             )
+            notifiers += bot.notifier
             scope.launch { bot.run() }
         }
     }
@@ -57,7 +64,8 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
         else -> {
             val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
             val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() })
-            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media)
+            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions)
+            notifiers += bot.notifier
             scope.launch { bot.run() }
         }
     }
@@ -72,11 +80,13 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, status: suspend () -
             val api = HttpSlackApi(slackBot, slackApp, baseUrl = slack.apiUrl)
             val bot = SlackBot(
                 api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status,
-                speechToText = app.speechToText, mediaLimits = app.config.media,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions,
             )
+            notifiers += bot.notifier
             scope.launch { bot.run() }
         }
     }
+    return notifiers
 }
 
 /** 메신저로 받은 파일: `~/.vesta/inbox/<채널>/`에 저장, 본문 읽기, 문서 컬렉션 색인 */

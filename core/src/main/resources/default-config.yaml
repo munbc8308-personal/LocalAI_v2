@@ -30,6 +30,7 @@ decision:
     agent: 0.6
     needsWeb: 0.5
     needsLocal: 0.5
+    codeSufficient: 0.2        # D6: 코드 검색 결과로 답할 수 있는 정도가 이보다 낮으면 "코드에서 찾지 못함"
   fallback: general
 
 web:
@@ -67,3 +68,17 @@ users:
   memberRoot: ~/Vesta/users    # MEMBER 파일 도구 폴더: <memberRoot>/<이름>
   # paths:                     # 사용자별 추가 허용 폴더
   #   mina: [~/Shared/가족사진]
+
+# 주간 자가 개선 (PROJECT.md 7.13, M16). 매주 일요일 03:00 launchd가 vesta evolve run을 실행한다.
+# 새 모델을 받아 지금 모델과 같은 평가셋으로 비교하고, 더 좋으면 메신저로 승인을 묻는다.
+# 임계값 조정·결정 모델 재학습은 평가를 통과하면 바로 반영한다. 바뀐 값은 ~/.vesta/tuned.properties (되돌리기: vesta evolve rollback)
+evolution:
+  enabled: true
+  families: [gemma4, qwen3.6, devstral]   # 새 태그를 지켜볼 모델 계열
+  discoverNew: true                       # "새로 나온 모델" 중 도구 호출을 지원하는 계열도 본다
+  quantizations: [mxfp8, nvfp4, q8_0]     # 같은 크기면 앞에 있는 양자화 (Apple Silicon은 MLX 태그가 빠르다)
+  maxCandidateGigabytes: 48
+  maxCandidates: 2                        # 한 번에 받아 평가할 후보 수 (모델 하나에 30분~1시간 반)
+  minImprovement: 0.03                    # 종합 점수가 이만큼 높아야 제안 (같은 모델도 1%p 안팎 흔들린다)
+  maxSlowdown: 1.5                        # 답변 시작이 지금 모델의 이 배수보다 느리면 탈락
+  retrainMinCorrections: 5                # 라우팅 정정이 이만큼 쌓이면 결정 모델 재학습

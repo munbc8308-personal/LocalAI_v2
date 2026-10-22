@@ -139,3 +139,17 @@ open class ChannelApiException(message: String, val retryAfterMillis: Long? = nu
     /** 같은 내용으로 고치려 해서 난 오류 (성공으로 본다) */
     open val notModified: Boolean get() = false
 }
+
+/** 알림 카드의 버튼 처리 (M16). 버튼 값이 `[prefix]:키:동작`이면 여기로 온다 */
+interface ChannelActions {
+    val prefix: String
+    /** [user]가 누른 버튼. 돌려준 글을 카드에 덧붙인다 */
+    suspend fun onButton(user: dev.vesta.core.UserContext, data: String): String
+}
+
+/** 사용자에게 먼저 보내는 알림 (주간 점검 결과·승인 요청, M16) */
+interface ChannelNotifier {
+    val name: String
+    /** 보낸 대화방 수 */
+    suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>): Int
+}

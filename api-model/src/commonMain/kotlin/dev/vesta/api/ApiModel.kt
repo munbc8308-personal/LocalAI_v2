@@ -68,6 +68,48 @@ data class TrainingStateDto(
 @Serializable
 data class ActivateDto(val name: String)
 
+/** 주간 점검 한 번 (M16, E-01). [report]는 마크다운 요약 */
+@Serializable
+data class EvolutionRunDto(
+    val id: Long,
+    /** RUNNING / DONE / FAILED */
+    val status: String,
+    val stage: String?,
+    val report: String?,
+    val error: String?,
+    val startedAt: String,
+    val finishedAt: String?,
+)
+
+/** 설정 변경안 (E-05). [kind] MODEL(승인 필요) / TUNING(바로 반영), [status] PENDING / APPLIED / REJECTED / ROLLED_BACK / EXPIRED */
+@Serializable
+data class ProposalDto(
+    val id: Long,
+    val kind: String,
+    val title: String,
+    val summary: String,
+    val changes: Map<String, String>,
+    val previous: Map<String, String?>,
+    val status: String,
+    val createdAt: String,
+)
+
+/** 자가 개선 화면 (`GET /api/evolution`) */
+@Serializable
+data class EvolutionStateDto(
+    val enabled: Boolean,
+    val lastRun: EvolutionRunDto?,
+    val proposals: List<ProposalDto>,
+    /** 지금 덮어쓴 설정 (`~/.vesta/tuned.properties`) */
+    val tuned: Map<String, String>,
+    /** 반영한 설정을 쓰려고 서버가 다시 시작하기를 기다리는 중 */
+    val restartPending: Boolean,
+)
+
+/** 제안 승인·거절·되돌리기 결과 */
+@Serializable
+data class ProposalResultDto(val ok: Boolean, val message: String)
+
 /** 갤러리 항목 (`GET /api/media?kind=GENERATED`) */
 @Serializable
 data class MediaItemDto(val id: String, val mime: String, val caption: String?, val createdAt: String?)

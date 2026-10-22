@@ -49,6 +49,8 @@ interface SessionRepository {
     suspend fun find(userId: UserId, id: SessionId): Session?
     suspend fun listRecent(userId: UserId, limit: Int): List<Session>
     suspend fun updateTitle(userId: UserId, id: SessionId, title: String)
+    /** 세션과 메시지·라우팅 기록을 지운다 (평가용으로 만든 대화 정리, M16). 지웠으면 true */
+    suspend fun delete(userId: UserId, id: SessionId): Boolean = false
 }
 
 interface MessageRepository {

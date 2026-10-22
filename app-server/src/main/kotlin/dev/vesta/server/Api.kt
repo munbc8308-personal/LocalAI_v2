@@ -119,6 +119,8 @@ class ServerDeps(
     val training: TrainingEndpoints? = null,
     /** 사용자 관리 (M15, U-01). 목록·추가·역할·삭제는 OWNER만, 본인 비밀번호 바꾸기는 누구나 */
     val users: dev.vesta.identity.UserService? = null,
+    /** 주간 자가 개선 (M16). OWNER만 */
+    val evolution: EvolutionDesk? = null,
 )
 
 /** 학습 API가 쓰는 동작 (서버가 TrainingService로 채운다) */
@@ -302,6 +304,21 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val agent = dto.correctAgent?.let { name -> runCatching { dev.vesta.core.AgentType.valueOf(name) }.getOrNull() ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"correctAgent"}""") }
                 val ok = repo.save(user.userId, dev.vesta.core.training.Feedback(messageId, dto.rating, agent, dto.comment))
                 call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("saved", ok) }.toString())
+            }
+            // 주간 자가 개선 (E-05·E-07): 점검 결과, 제안 승인·거절·되돌리기. Mac 주인만
+            route("/evolution") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val desk = call.evolutionFor(user, deps) ?: return@get
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.EvolutionStateDto.serializer(), desk.state()))
+                }
+                post("/{id}/{action}") {
+                    val user = call.principal(deps) ?: return@post
+                    val desk = call.evolutionFor(user, deps) ?: return@post
+                    val result = desk.decide(user, call.parameters["id"]?.toLongOrNull() ?: -1, call.parameters["action"].orEmpty())
+                    if (!result.ok) return@post call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", result.message) }.toString())
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.ProposalResultDto.serializer(), result))
+                }
             }
             // 모델 학습 (L-05·L-07): 상태, 시작, 취소, 버전 전환·되돌리기. Mac 주인만
             route("/training") {
@@ -604,6 +621,12 @@ private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
 }
 
 /** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */
+private suspend fun ApplicationCall.evolutionFor(user: UserContext, deps: ServerDeps): EvolutionDesk? {
+    val desk = deps.evolution ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"자가 개선이 설정돼 있지 않습니다"}"""); return null }
+    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"설정 변경은 Mac 주인만 할 수 있습니다"}"""); return null }
+    return desk
+}
+
 private suspend fun ApplicationCall.trainingFor(user: UserContext, deps: ServerDeps): TrainingEndpoints? {
     val training = deps.training ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"학습이 설정돼 있지 않습니다"}"""); return null }
     if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"학습은 Mac 주인만 할 수 있습니다"}"""); return null }

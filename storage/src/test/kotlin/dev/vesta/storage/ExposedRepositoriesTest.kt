@@ -40,6 +40,17 @@ class ExposedRepositoriesTest : FunSpec({
         sessions.listRecent(UserId(owner.value + 999), 10).shouldBeEmpty()
     }
 
+    test("세션 지우기: 본인 세션만, 메시지도 함께") {
+        val (db, sessions, messages) = setup()
+        val owner = db.ensureOwner("owner")
+        val session = sessions.create(owner, ChannelType.CLI, "평가")
+        messages.append(session.id, NewMessage(ChatRole.USER, "질문"))
+        sessions.delete(UserId(owner.value + 999), session.id) shouldBe false
+        sessions.delete(owner, session.id) shouldBe true
+        sessions.find(owner, session.id) shouldBe null
+        messages.list(session.id).shouldBeEmpty()
+    }
+
     test("최근 사용 순으로 정렬된다") {
         val (db, sessions, messages) = setup()
         val owner = db.ensureOwner("owner")

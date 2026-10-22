@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Vesta 주간 자가 개선 (PROJECT.md 7.13, M16). 매주 일요일 03:00에 vesta evolve run.
+     Mac이 잠자고 있었으면 깨어난 뒤 한 번 실행한다(launchd StartCalendarInterval). 점검 중 잠들지 않게 caffeinate -i.
+     끄려면 config.yaml에 evolution.enabled: false. scripts/install-vesta.sh가 __HOME__·__JAVA_HOME__을 바꿔 설치한다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.evolve</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>__HOME__/.vesta/app/cli/bin/vesta</string>
+        <string>evolve</string>
+        <string>run</string>
+        <string>--scheduled</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JAVA_HOME</key>
+        <string>__JAVA_HOME__</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key>
+        <string>ko_KR.UTF-8</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/.vesta</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/evolve.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/evolve.err.log</string>
+</dict>
+</plist>

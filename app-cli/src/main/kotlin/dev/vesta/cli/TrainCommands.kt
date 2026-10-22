@@ -41,7 +41,7 @@ class TrainCommand : CliktCommand(name = "train") {
 }
 
 /** 서버 API (Bearer 토큰). 서버가 꺼져 있으면 알려 주고 끝낸다 */
-private class TrainingClient : AutoCloseable {
+internal class TrainingClient : AutoCloseable {
     private val base = ConfigLoader.load(VestaPaths.default().configFile).server.baseUrl
     private val token = ApiToken.read()
     private val http = HttpClient(CIO) { expectSuccess = false }
@@ -63,7 +63,7 @@ private class TrainingClient : AutoCloseable {
     override fun close() = http.close()
 }
 
-private class TrainingError(message: String) : Exception(message)
+internal class TrainingError(message: String) : Exception(message)
 
 private fun CliktCommand.withClient(block: suspend (TrainingClient) -> Unit) = runBlocking {
     TrainingClient().use { client ->

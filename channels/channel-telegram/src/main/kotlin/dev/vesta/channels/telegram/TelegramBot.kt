@@ -43,8 +43,11 @@ class TelegramBot(
     speechToText: SpeechToText? = null,
     textToSpeech: TextToSpeech? = null,
     mediaLimits: MediaConfig = MediaConfig(),
+    actions: dev.vesta.channels.ChannelActions? = null,
 ) {
-    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits)
+    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions)
+    /** 먼저 보내는 알림 (M16) */
+    val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     private val maxImageBytes = mediaLimits.maxImageMegabytes * 1024L * 1024
 
     /** 끝날 때까지 long polling. 토큰이 거부되면 멈춘다 */

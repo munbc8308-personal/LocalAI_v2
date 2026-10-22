@@ -66,13 +66,15 @@ internal suspend fun evalRetrieval(app: AppContainer, collection: String, file: 
 }
 
 /** 근거율 (12장: 출처 없는 사실 주장 최소화). 실제 DocsAgent로 답하고 D7 판정을 모은다 */
-internal suspend fun evalGrounding(app: AppContainer, collection: String, file: Path, limit: Int, echo: (String) -> Unit): GroundingScore {
+internal suspend fun evalGrounding(app: AppContainer, collection: String, file: Path, limit: Int, cleanup: Boolean = false, echo: (String) -> Unit): GroundingScore {
     var claims = 0
     var unsupported = 0
     var uncited = 0
     val rows = readTsv(file).take(limit)
     for ((question) in rows) {
         val events = app.conversation.send(app.owner, ChannelType.CLI, null, UserInput("@$collection $question")).toList()
+        // 주간 점검은 매주 돌므로 평가용 대화를 대화 목록에 남기지 않는다
+        if (cleanup) events.filterIsInstance<AgentEvent.SessionReady>().forEach { app.sessions.delete(app.owner.userId, it.sessionId) }
         val answer = events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }
         events.filterIsInstance<AgentEvent.Grounding>().firstOrNull()?.let { g ->
             claims += g.checked
@@ -106,7 +108,7 @@ class EvalGroundingCommand : CliktCommand(name = "grounding") {
     override fun run() = runBlocking {
         AppContainer().use { app ->
             if (app.judge == null) { echo("결정 모델이 꺼져 있어 근거 검증을 할 수 없습니다", err = true); throw ProgramResult(1) }
-            val s = evalGrounding(app, collection, file, limit, ::echo)
+            val s = evalGrounding(app, collection, file, limit, echo = ::echo)
             echo("$collection: 주장 ${s.claims}문장 중 근거 미확인 ${s.unsupported} (%.0f%%) · 출처 없이 답한 질문 ${s.uncited}/${s.questions}".format(s.unsupported * 100.0 / maxOf(1, s.claims)))
         }
     }
@@ -134,7 +136,7 @@ class EvalAllCommand : CliktCommand(name = "all") {
                 val r = evalRetrieval(app, docs, Path("eval/retrieval-project-md.tsv"), ::echo)
                 row("문서 검색 hit@5 ($docs)", r.hit5 * 100.0 / r.questions, 85.0)
                 echo("근거율 평가 (답변 생성, 몇 분 걸림)…")
-                val g = evalGrounding(app, docs, Path("eval/retrieval-project-md.tsv"), 15, ::echo)
+                val g = evalGrounding(app, docs, Path("eval/retrieval-project-md.tsv"), 15, echo = ::echo)
                 row("근거 미확인 문장 비율", g.unsupported * 100.0 / maxOf(1, g.claims), 15.0, higherIsBetter = false)
             } else lines += "- 문서 컬렉션 '$docs' 없음 → 문서 평가 건너뜀"
 

@@ -2,6 +2,7 @@ package dev.vesta.channels
 
 import dev.vesta.core.AgentType
 import dev.vesta.core.RiskLevel
+import dev.vesta.core.UserId
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.channel.ChannelBinding
@@ -54,8 +55,13 @@ class ChannelBot(
     /** 음성 답변 (V-03). 음성으로 물었고 `/voice`를 켰을 때만 */
     private val textToSpeech: TextToSpeech? = null,
     private val mediaLimits: MediaConfig = MediaConfig(),
-) {
+    /** 알림 카드의 버튼 처리 (주간 점검 제안 승인 등, M16) */
+    private val actions: ChannelActions? = null,
+) : ChannelNotifier {
     private val channel = surface.channel
+    override val name: String get() = surface.name
+    /** 보낸 알림 카드: "대화방|키" → (메시지 ID, 본문). 버튼을 누르면 결과를 덧붙여 고친다. 알림은 다른 작업에서 보내므로 동시 접근용 */
+    private val notices = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
     private val chats = mutableMapOf<String, ChatState>()
     private var pairingFailures = 0
 
@@ -369,10 +375,41 @@ class ChannelBot(
         val state = chats.getOrPut(chat) { ChatState() }
         val parts = button.data.split(':')
         when (parts.getOrNull(0)) {
+            actions?.prefix -> onActionButton(binding, chat, button.reply, button.data, parts)
             "ap" -> onApprovalButton(binding, state, chat, button.reply, parts.getOrNull(1).orEmpty(), parts.getOrNull(2).orEmpty())
             "fq", "fc" -> onFileButton(binding, state, chat, button.reply, parts, scope)
             else -> button.reply.ack()
         }
+    }
+
+    /**
+     * 사용자에게 먼저 보내는 알림 (M16). [user]와 연결된 대화방마다 보낸다. [key]가 같은 버튼(`키:동작`)을 누르면
+     * [actions]가 처리하고 결과를 카드에 덧붙인다. 보낸 대화방 수를 돌려준다
+     */
+    override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>): Int {
+        val chats = bindings.list(channel).filter { it.user.userId == user }.map { it.externalChatId }.distinct()
+        val body = if (text.length > surface.approvalBodyLimit) text.take(surface.approvalBodyLimit) + "\n…" else text
+        return chats.count { chat ->
+            runCatching {
+                val id = if (buttons.isEmpty()) surface.sendText(chat, body) else surface.sendButtons(chat, body, listOf(buttons))
+                if (buttons.isNotEmpty()) notices["$chat|$key"] = id to body
+            }.onFailure { log.warn { "${surface.name} 알림 실패: ${it.message}" } }.isSuccess
+        }
+    }
+
+    private suspend fun onActionButton(binding: ChannelBinding, chat: String, reply: ButtonReply, data: String, parts: List<String>) {
+        val handler = actions ?: return reply.ack()
+        val key = parts.take(2).joinToString(":")
+        val result = try {
+            handler.onButton(binding.user, data)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn(e) { "${surface.name} 버튼 처리 실패: $data" }
+            "처리하지 못했습니다: ${e.message}"
+        }
+        reply.ack(result.take(150), minor = true)
+        notices.remove("$chat|$key")?.let { (messageId, body) -> runCatching { surface.editText(chat, messageId, "$body\n\n→ $result") } }
     }
 
     private suspend fun onApprovalButton(binding: ChannelBinding, state: ChatState, chat: String, reply: ButtonReply, id: String, action: String) {

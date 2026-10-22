@@ -53,9 +53,12 @@ class SlackBot(
     nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
     speechToText: SpeechToText? = null,
     mediaLimits: MediaConfig = MediaConfig(),
+    actions: dev.vesta.channels.ChannelActions? = null,
 ) {
     // 음성 답변은 보내지 않는다 (Slack 음성 메시지 형식은 따로 만들어야 함)
-    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits)
+    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions)
+    /** 먼저 보내는 알림 (M16) */
+    val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     internal var selfId: String? = null
 
     /** 끝날 때까지 Socket Mode 연결을 유지한다. 토큰이 거부되면 멈춘다 */

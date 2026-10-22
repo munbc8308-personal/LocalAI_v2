@@ -230,3 +230,41 @@ object ModelVersions : LongIdTable("model_version") {
     val metrics = text("metrics").nullable()
     val createdAt = timestamp("created_at")
 }
+
+/** 주간 점검 (PROJECT.md 7.13, v14) */
+object EvolutionRuns : LongIdTable("evolution_run") {
+    val status = varchar("status", 16)
+    val stage = varchar("stage", 64).nullable()
+    val report = text("report").nullable()
+    val error = text("error").nullable()
+    val startedAt = timestamp("started_at")
+    val finishedAt = timestamp("finished_at").nullable()
+    /** 결과를 메신저로 알린 시각 */
+    val notifiedAt = timestamp("notified_at").nullable()
+}
+
+/** 설정 변경안 (v14). changes·previous는 JSON 객체 */
+object EvolutionProposals : LongIdTable("evolution_proposal") {
+    val runId = long("run_id").nullable()
+    val kind = varchar("kind", 16)
+    val title = varchar("title", 200)
+    val summary = text("summary")
+    val changes = text("changes")
+    val previous = text("previous")
+    val status = varchar("status", 16).index()
+    val createdAt = timestamp("created_at")
+    val notifiedAt = timestamp("notified_at").nullable()
+    val decidedAt = timestamp("decided_at").nullable()
+}
+
+/** 평가한 후보 모델 (v14) */
+object EvolutionCandidates : org.jetbrains.exposed.v1.core.Table("evolution_candidate") {
+    val name = varchar("name", 200)
+    val digest = varchar("digest", 80)
+    val result = varchar("result", 16)
+    val score = double("score").nullable()
+    val note = text("note").nullable()
+    val runId = long("run_id").nullable()
+    val checkedAt = timestamp("checked_at")
+    override val primaryKey = PrimaryKey(name, digest)
+}

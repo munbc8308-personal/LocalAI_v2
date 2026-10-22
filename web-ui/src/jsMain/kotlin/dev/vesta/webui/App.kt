@@ -13,6 +13,8 @@ import dev.vesta.api.DashboardDto
 import dev.vesta.api.LoginDto
 import dev.vesta.api.ActivateDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.EvolutionStateDto
+import dev.vesta.api.ProposalResultDto
 import dev.vesta.api.TrainingStateDto
 import dev.vesta.api.MediaItemDto
 import dev.vesta.api.RoutingDto
@@ -606,11 +608,93 @@ private fun DashboardView(me: MeDto) {
         Div({ classes("card") }) {
             d.models.forEach { (role, name) -> Div({ classes("row", "small") }) { Span { Text(role) }; Span({ classes("mono") }) { Text(name) } } }
         }
+        if (me.role == "OWNER") EvolutionCard()
         if (me.role == "OWNER") TrainingCard()
         if (me.role == "OWNER") UsersCard(me)
         PasswordCard()
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
     }
+}
+
+/** 주간 자가 개선 (M16, E-05·E-07): 마지막 점검 결과, 승인 요청 [승인]/[거절], 반영한 변경 [되돌리기]. 점검 중이면 10초마다 새로 읽는다 */
+@Composable
+private fun EvolutionCard() {
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<EvolutionStateDto?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var tick by remember { mutableStateOf(0) }
+    var showReport by remember { mutableStateOf(false) }
+    fun load() = scope.launch {
+        runCatching { Http.get("/api/evolution", EvolutionStateDto.serializer()) }
+            .onSuccess { state = it; error = null }
+            .onFailure { error = it.message }
+    }
+    fun act(id: Long, action: String) = scope.launch {
+        runCatching { Http.post("/api/evolution/$id/$action", "{}", ProposalResultDto.serializer()) }
+            .onSuccess { notice = it.message; error = null }
+            .onFailure { error = it.message; notice = null }
+        load()
+    }
+    LaunchedEffect(tick) {
+        load()
+        if (state?.lastRun?.status == "RUNNING" || state?.restartPending == true) {
+            kotlinx.coroutines.delay(10_000)
+            tick++
+        }
+    }
+    val s = state ?: return
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span { B { Text("주간 자가 개선") } }
+            Span({ classes("muted", "small") }) { Text(if (s.enabled) "매주 일요일 03:00" else "꺼짐") }
+        }
+        val run = s.lastRun
+        if (run == null) Div({ classes("muted", "small") }) { Text("아직 점검한 적이 없습니다 (vesta evolve run)") }
+        else {
+            Div({ classes("row", "small") }) {
+                Span { Text("마지막 점검 #${run.id} · ${run.startedAt.take(16).replace('T', ' ')}") }
+                Span { Text(when (run.status) { "RUNNING" -> "진행 중 · ${run.stage ?: ""}"; "DONE" -> "완료"; else -> "실패" }) }
+            }
+            run.error?.let { Div({ classes("error", "small") }) { Text(it) } }
+            run.report?.let { report ->
+                Button({ classes("link", "small"); onClick { showReport = !showReport } }) { Text(if (showReport) "보고서 접기" else "보고서 보기") }
+                if (showReport) Div({ classes("small") }) { Markdown(report) }
+            }
+        }
+        if (s.restartPending) Div({ classes("muted", "small") }) { Text("바뀐 설정을 쓰려고, 하던 답변이 끝나면 서버를 다시 시작합니다") }
+        notice?.let { P({ classes("small") }) { Text(it) } }
+        error?.let { P({ classes("error", "small") }) { Text(it) } }
+        s.proposals.take(5).forEach { p ->
+            Div({ classes("run") }) {
+                Div({ classes("row", "small") }) {
+                    Span { Text("#${p.id} ${p.title}") }
+                    Span { Text(proposalStatus(p.status)) }
+                }
+                p.changes.forEach { (key, value) -> Div({ classes("muted", "small", "mono") }) { Text("$key: ${p.previous[key] ?: "(config.yaml)"} → $value") } }
+                if (p.status == "PENDING") Div({ classes("muted", "small") }) { p.summary.lines().forEach { Div { Text(it) } } }
+                Div({ classes("row", "small") }) {
+                    Span {}
+                    Span {
+                        if (p.status == "PENDING") {
+                            Button({ classes("primary", "small"); onClick { act(p.id, "approve") } }) { Text("승인") }
+                            Button({ classes("link", "small"); onClick { act(p.id, "reject") } }) { Text("거절") }
+                        }
+                        if (p.status == "APPLIED") Button({ classes("link", "small"); onClick { act(p.id, "rollback") } }) { Text("되돌리기") }
+                    }
+                }
+            }
+        }
+        if (s.tuned.isNotEmpty()) Div({ classes("muted", "small") }) { Text("덮어쓴 설정: " + s.tuned.entries.joinToString { "${it.key}=${it.value}" }) }
+    }
+}
+
+private fun proposalStatus(status: String) = when (status) {
+    "PENDING" -> "승인 대기"
+    "APPLIED" -> "반영함"
+    "REJECTED" -> "거절함"
+    "ROLLED_BACK" -> "되돌림"
+    else -> "만료"
 }
 
 /** 결정 모델 학습 (M14, L-05·L-07): 진행률·손실, 취소, 버전 전환·되돌리기. 진행 중이면 5초마다 새로 읽는다 */

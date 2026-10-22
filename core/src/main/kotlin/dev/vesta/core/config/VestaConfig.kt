@@ -17,6 +17,43 @@ data class VestaConfig(
     val media: MediaConfig = MediaConfig(),
     val training: TrainingConfig = TrainingConfig(),
     val users: UsersConfig = UsersConfig(),
+    val evolution: EvolutionConfig = EvolutionConfig(),
+)
+
+/**
+ * 주간 자가 개선 (PROJECT.md 7.13, M16). launchd가 매주 `vesta evolve run`을 실행한다.
+ * 새 모델 찾기 → 받기 → 지금 모델과 같은 평가 → 더 좋으면 메신저로 승인 요청. 설정값 조정·결정 모델 재학습은 평가를 통과하면 바로 반영한다.
+ */
+data class EvolutionConfig(
+    val enabled: Boolean = true,
+    /** 새 모델을 찾는 곳 (Ollama 라이브러리 웹 페이지) */
+    val catalogUrl: String = "https://ollama.com",
+    /** 새 태그를 지켜볼 모델 계열 */
+    val families: List<String> = listOf("gemma4", "qwen3.6", "devstral"),
+    /** 라이브러리 "새로 나온 모델"에서 도구 호출(tools)을 지원하는 계열도 후보로 본다 */
+    val discoverNew: Boolean = true,
+    /** 태그 고르기: 같은 크기면 앞에 있는 양자화를 고른다 (Apple Silicon은 MLX 태그가 빠르다) */
+    val quantizations: List<String> = listOf("mxfp8", "nvfp4", "q8_0"),
+    /** 이보다 큰 모델은 받지 않는다 (메인 모델과 임베딩·결정 모델이 함께 올라가야 한다) */
+    val maxCandidateGigabytes: Int = 48,
+    /** 한 번에 받아 평가할 후보 수 (받는 데 모델 하나에 30분~1시간 반) */
+    val maxCandidates: Int = 2,
+    /** 종합 점수가 지금 모델보다 이만큼 높아야 제안한다 (같은 모델을 두 번 재면 종합이 1%p 안팎 흔들린다) */
+    val minImprovement: Double = 0.03,
+    /** 답변 시작 시간(중앙값)이 지금 모델의 이 배수를 넘으면 탈락 */
+    val maxSlowdown: Double = 1.5,
+    /** 정정이 이만큼 새로 쌓였으면 결정 모델을 다시 학습한다 */
+    val retrainMinCorrections: Int = 5,
+    /** 라우터·D6 임계값을 평가셋으로 다시 맞춘다 */
+    val tune: Boolean = true,
+    /** 승인 요청을 이 시간 안에 처리하지 않으면 만료 */
+    val proposalTtlDays: Int = 7,
+    /** 평가셋 폴더 (scripts/install-vesta.sh가 저장소의 eval/을 복사한다) */
+    val evalDir: String = "~/.vesta/evalsets",
+    /** 근거율을 재는 문서 컬렉션 (eval/retrieval-project-md.tsv: PROJECT.md를 넣은 컬렉션). 없으면 [codeCollection] 질문으로 잰다 */
+    val docsCollection: String = "b",
+    /** D6 임계값을 맞추는 코드 저장소 (eval/code-vesta.tsv·code-absent-ko.tsv: 이 저장소) */
+    val codeCollection: String = "vesta",
 )
 
 /** 멀티 유저 (PROJECT.md 7.12, M15) */
@@ -203,6 +240,11 @@ data class DecisionThresholds(
     val agent: Double = 0.6,
     val needsWeb: Double = 0.5,
     val needsLocal: Double = 0.5,
+    /**
+     * D6: 코드 검색 결과로 답할 수 있는 정도가 이보다 낮으면 "코드에서 찾지 못함" (CodeAgent).
+     * 코드 조각은 문서보다 D6 점수가 낮게 나와 0.5보다 낮게 둔다 (M15: 있는 질문 최저 0.317, 없는 질문 최고 0.096)
+     */
+    val codeSufficient: Double = 0.2,
 )
 
 data class DecisionConfig(

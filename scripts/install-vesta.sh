@@ -4,7 +4,8 @@
 #   2. ~/.vesta/app/{cli,server} 로 복사, ~/.local/bin/vesta 링크
 #   3. 미디어 워커(음성 인식)를 ~/.vesta/media-worker에 복사하고 uv로 Python 환경을 만든다 (M12)
 #   4. 학습기(결정 모델 미세조정)를 ~/.vesta/trainer에 복사하고 uv로 Python 환경을 만든다 (M14)
-#   5. launchd dev.vesta.server 등록·재시작 (Ollaya·미디어 워커도 함께)
+#   5. 평가셋(eval/)을 ~/.vesta/evalsets에 복사 (주간 자가 개선, M16)
+#   6. launchd dev.vesta.server 등록·재시작 (Ollaya·미디어 워커·주간 점검 dev.vesta.evolve도 함께)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP="$HOME/.vesta/app"
@@ -35,6 +36,10 @@ if [ -x "$UV" ]; then
     "$UV" sync --quiet --frozen --project "$TRAINER"
     echo "학습기: $TRAINER (vesta train decision)"
 fi
+
+mkdir -p "$HOME/.vesta/evalsets"
+rsync -a --delete --include '*.tsv' --exclude '*' "$ROOT/eval/" "$HOME/.vesta/evalsets/"
+echo "평가셋: $HOME/.vesta/evalsets (주간 점검: vesta evolve run, 매주 일요일 03:00)"
 
 "$ROOT/scripts/install-launchd.sh"
 echo "서버 확인: curl -s http://127.0.0.1:8787/api/health"

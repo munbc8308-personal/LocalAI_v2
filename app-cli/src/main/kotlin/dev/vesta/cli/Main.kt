@@ -19,6 +19,6 @@ fun main(args: Array<String>) = Vesta()
         EvalCommand().subcommands(EvalRoutingCommand(), EvalRetrievalCommand(), EvalGroundingCommand(), EvalAllCommand()),
         StatusCommand(), PasswdCommand(), UserCommand.create(),
         *messengerCommands().toTypedArray(),
-        TrainCommand.create(),
+        TrainCommand.create(), EvolveCommand.create(),
         ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
     .main(args)

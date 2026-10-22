@@ -89,6 +89,16 @@ fun main() {
     }
     val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val training = trainingEndpoints(app, background)
+    // 주간 자가 개선 (M16): 알림·승인 버튼·설정이 바뀌면 다시 시작. 봇은 아래에서 띄운다
+    var notifiers: List<dev.vesta.channels.ChannelNotifier> = emptyList()
+    val evolution = EvolutionDesk(
+        app.evolutionRepository, app.evolution, app.owner.userId, app.config.evolution.enabled, app.paths.tunedFile,
+        notifiers = { notifiers },
+        busy = {
+            val (running, waiting) = app.scheduler.load()
+            running > 0 || waiting > 0 || app.trainingRuns.list(1).firstOrNull()?.status == dev.vesta.core.training.TrainingStatus.RUNNING
+        },
+    )
     val deps = ServerDeps(
         conversation = app.conversation,
         sessions = app.sessions,
@@ -127,12 +137,14 @@ fun main() {
         feedback = app.feedback,
         training = training,
         users = app.users,
+        evolution = evolution,
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
     val channels = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    startChannels(app, channels) { dashboard().statusText() }
+    notifiers = startChannels(app, channels, evolution) { dashboard().statusText() }
+    evolution.start(background)
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
     embeddedServer(CIO, port = app.config.server.port, host = host) { vestaApi(deps) }.start(wait = true)

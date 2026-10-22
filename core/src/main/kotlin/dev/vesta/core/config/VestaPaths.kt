@@ -12,6 +12,8 @@ class VestaPaths(val home: Path) {
     val database: Path get() = home.resolve("vesta.db")
     val logs: Path get() = home.resolve("logs")
     val bench: Path get() = home.resolve("bench")
+    /** 주간 자가 개선(M16)이 바꾼 설정. config.yaml보다 우선한다 (`models.general.name=…` 같은 점 표기) */
+    val tunedFile: Path get() = home.resolve("tuned.properties")
 
     companion object {
         fun default(env: Map<String, String> = System.getenv()): VestaPaths {

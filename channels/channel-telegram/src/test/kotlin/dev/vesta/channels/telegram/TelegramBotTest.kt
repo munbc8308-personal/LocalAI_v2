@@ -63,6 +63,35 @@ private class Harness(
 }
 
 class TelegramBotTest : FunSpec({
+    test("알림 카드(M16): 연결된 주인 대화방에 버튼과 함께 보내고, 누르면 처리 결과를 덧붙이며 버튼을 없앤다") {
+        runTest {
+            val pressed = mutableListOf<Pair<UserContext, String>>()
+            val actions = object : dev.vesta.channels.ChannelActions {
+                override val prefix = "ev"
+                override suspend fun onButton(user: UserContext, data: String): String { pressed += user to data; return "반영했습니다" }
+            }
+            val api = FakeTelegram()
+            val bindings = MemoryBindings().apply {
+                users = mapOf(1L to owner)
+                items[ME.toString()] = dev.vesta.core.channel.ChannelBinding(owner, ChannelType.TELEGRAM, ME.toString(), ME.toString(), null)
+                items["7"] = dev.vesta.core.channel.ChannelBinding(UserContext(UserId(2), UserRole.MEMBER), ChannelType.TELEGRAM, "7", "7", null)
+            }
+            val bot = TelegramBot(api, FakeConversation { _, _ -> }, bindings, FakeFiles(), TelegramConfig(streamIntervalMillis = 0), nowMillis = { 0L }, actions = actions)
+            bot.notifier.notify(owner.userId, "ev:3", "메인 모델 교체: a → b", listOf(dev.vesta.channels.ChannelButton("승인", "ev:3:a"), dev.vesta.channels.ChannelButton("거절", "ev:3:r"))) shouldBe 1
+            api.messages.single().keyboard?.rows?.flatten()?.map { it.callbackData } shouldBe listOf("ev:3:a", "ev:3:r")
+
+            // 다른 사람(연결 안 된 대화방에서 누름)은 처리하지 않는다
+            bot.handle(button("ev:3:a", from = 9, chat = 9), this)
+            pressed.shouldBeEmpty()
+
+            bot.handle(button("ev:3:a"), this)
+            advanceUntilIdle()
+            pressed.single() shouldBe (owner to "ev:3:a")
+            api.messages.single().text shouldContain "→ 반영했습니다"
+            api.messages.single().keyboard shouldBe null
+        }
+    }
+
     test("연결되지 않은 계정은 답하지 않고, 일회용 코드로만 연결된다. 5번 틀리면 코드가 지워진다") {
         runTest {
             val h = Harness({ _, _ -> emit(AgentEvent.Token("hi")) }, bound = false)

@@ -58,6 +58,7 @@ include(
     "tools",
     "media",
     "training",
+    "evolution",
     "identity",
     "mcp",
     "agents",

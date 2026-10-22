@@ -130,7 +130,17 @@ internal data class OllamaVersion(val version: String)
 internal data class OllamaTagsResponse(val models: List<OllamaLocalModel> = emptyList())
 
 @Serializable
-internal data class OllamaLocalModel(val name: String, val size: Long = 0)
+internal data class OllamaLocalModel(val name: String, val size: Long = 0, val digest: String = "")
+
+/** 모델 받기 요청. 진행 상황은 줄마다 JSON으로 온다 */
+@Serializable
+internal data class OllamaPullRequest(val model: String, val stream: Boolean = true)
+
+@Serializable
+internal data class OllamaPullProgress(val status: String = "", val total: Long = 0, val completed: Long = 0, val error: String? = null)
+
+@Serializable
+internal data class OllamaDeleteRequest(val model: String)
 
 /** 모델 내리기: keep_alive 0으로 빈 요청을 보낸다. */
 @Serializable

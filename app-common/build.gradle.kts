@@ -18,6 +18,7 @@ dependencies {
     api(project(":mcp"))
     api(project(":media"))
     api(project(":training"))
+    api(project(":evolution"))
     api(project(":identity"))
     api(project(":api-model"))
     implementation(libs.kotlin.logging)
