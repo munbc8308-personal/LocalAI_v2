@@ -199,10 +199,11 @@ class DiscordVoiceService(
 
         private suspend fun onUtterance(utterance: Utterance) {
             // 호출어를 찾으려면 모든 말을 인식해야 한다: 사람마다 인식 횟수에도 상한을 둔다 (누구나 말할 수 있어 Mac이 붙잡히지 않게)
+            // 무시한 말은 봇에게 한 말이 아닐 수 있다(사람끼리 대화): 내용은 남기지 않고 이유·길이만
             fun skip(reason: String) = log.info { "Discord 음성 무시 (${utterance.userId}, %.1f초): $reason".format(utterance.seconds) }
             if (!transcriptions.allow(utterance.userId)) return skip("음성 인식 횟수 초과")
             val text = speechToText.transcribe(Pcm.toWav16k(utterance.pcm)).trim()
-            if (text.isBlank() || text in HALLUCINATIONS) return skip("알아듣지 못함 (\"${text.take(20)}\")")
+            if (text.isBlank() || text in HALLUCINATIONS) return skip("알아듣지 못함 (${text.length}자)")
             val humans = guild.selfMember.voiceState?.channel?.members?.count { !it.user.isBot } ?: 1
             val stripped = WakeWord.strip(text, settings.wakeWords)
             // 말하는 중: 호출어+"그만"이면 멈춘다. 다른 말은 듣지 않는다 (스피커 소리를 다시 듣지 않게)
@@ -211,10 +212,10 @@ class DiscordVoiceService(
                     answering?.cancel()
                     speaker.clear()
                     log.info { "Discord 음성: 멈춤 (${utterance.userId})" }
-                } else skip("답하는 중 (\"${text.take(30)}\")")
+                } else skip("답하는 중 (${text.length}자)")
                 return
             }
-            val question = if (humans > 1) stripped ?: return skip("호출어 없음, ${humans}명 (\"${text.take(30)}\")") else (stripped ?: text)
+            val question = if (humans > 1) stripped ?: return skip("호출어 없음, ${humans}명 (${text.length}자)") else (stripped ?: text)
             if (question.isBlank()) { speaker.say("네, 말씀하세요."); return }
             if (!questions.allow(utterance.userId)) { speaker.say("한 시간에 ${settings.perHour}번까지 물어볼 수 있어요. 잠시 뒤에 불러 주세요."); return }
             log.info { "Discord 음성 질문 (${utterance.userId}, %.1f초): ${question.take(60)}".format(utterance.seconds) }
