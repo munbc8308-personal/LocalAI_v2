@@ -1,0 +1,11 @@
+<configuration>
+    <!-- 테스트 로그는 콘솔에 경고 이상만: main의 logback.xml(~/.vesta/logs/)에 테스트 로그가 섞이지 않게 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%-5level %logger{20} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
