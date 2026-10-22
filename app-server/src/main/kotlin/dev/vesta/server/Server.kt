@@ -149,7 +149,10 @@ fun main() {
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
     val channels = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    notifiers = startChannels(app, channels, evolution) { dashboard().statusText() }
+    // 셸 승인 넘기기 (M20): MEMBER의 셸 요청을 주인 메신저로
+    val ownerApprovals = OwnerApprovals(app.owner.userId, { notifiers }, { app.userRepository.get(it)?.name })
+    app.escalation.target = ownerApprovals
+    notifiers = startChannels(app, channels, dev.vesta.channels.ChannelActionSet(listOf(evolution, ownerApprovals))) { dashboard().statusText() }
     evolution.start(background)
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }

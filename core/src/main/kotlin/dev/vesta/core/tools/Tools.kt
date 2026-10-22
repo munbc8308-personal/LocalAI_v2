@@ -84,6 +84,14 @@ interface ApprovalBroker {
     fun close(id: String)
 }
 
+/**
+ * 다른 사람(Mac 주인)에게 넘기는 승인 (PROJECT.md 7.12, M20). MEMBER가 셸(EXEC)을 써야 할 때, MEMBER 본인이 아니라
+ * 주인의 메신저로 승인 카드를 보내고 결과를 기다린다. 물을 곳이 없거나 시간이 지나면 거부
+ */
+interface ApprovalEscalation {
+    suspend fun ask(requester: UserContext, tool: String, details: ApprovalDetails, reason: String?, timeoutSeconds: Long): ApprovalDecision
+}
+
 /** 도구 실행 기록 (PROJECT.md T-08, 11장 ToolRun). 셸 명령·승인 여부·결과를 남긴다. */
 interface ToolRunLog {
     suspend fun record(

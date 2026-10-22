@@ -208,11 +208,14 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 // 이름 규칙(UserService)이 막지만, 폴더가 memberRoot 밖이 되면 도구를 주지 않는다
                 if (home.parent != root) return emptyList()
                 runCatching { java.nio.file.Files.createDirectories(home) }
-                tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = false)
-            }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) }
+                // 셸은 자기 폴더 안에서만, 실행마다 Mac 주인 승인 (TaskAgent가 주인에게 넘긴다, M20)
+                tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = config.users.memberShell)
+            }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) || (it.risk == dev.vesta.core.RiskLevel.EXEC && config.users.memberShell) }
         }
     }
     val approvals = InMemoryApprovalBroker()
+    /** 주인이 아닌 사용자의 셸 승인을 넘길 곳. 서버가 메신저를 띄운 뒤 채운다 (M20) */
+    val escalation = EscalationRelay()
 
     /** Apple 앱 (Orchard MCP, PROJECT.md 7.7a). 실행 파일이 있을 때만. 서버는 처음 쓸 때 띄운다. */
     val orchard: McpToolSource? = config.mcp.servers["orchard"]
@@ -283,6 +286,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 maxToolOutputChars = config.tools.maxOutputChars,
                 toolsFor = { request -> toolsFor(request.user, request.workspace) },
                 judge = judge,
+                escalation = escalation,
             ),
             AgentType.IMAGE to (imageGenerator?.let { generator ->
                 dev.vesta.agents.ImageAgent(
@@ -325,4 +329,13 @@ class DecisionModelSelector(private val configured: String, private val active: 
 
     /** 버전을 바꾼 직후 바로 쓰게 */
     fun refresh() { readAt = 0 }
+}
+
+/** 셸 승인 넘길 곳을 나중에 채운다 (서버가 메신저를 띄운 뒤, M20). 비어 있으면 거부 */
+class EscalationRelay : dev.vesta.core.tools.ApprovalEscalation {
+    @Volatile var target: dev.vesta.core.tools.ApprovalEscalation? = null
+
+    override suspend fun ask(requester: UserContext, tool: String, details: dev.vesta.core.tools.ApprovalDetails, reason: String?, timeoutSeconds: Long) =
+        target?.ask(requester, tool, details, reason, timeoutSeconds)
+            ?: dev.vesta.core.tools.ApprovalDecision.Deny("Mac 주인에게 승인을 물을 곳이 없습니다 (서버 메신저가 꺼져 있음)")
 }

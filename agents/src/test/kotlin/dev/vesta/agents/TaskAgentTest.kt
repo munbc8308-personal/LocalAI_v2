@@ -111,6 +111,39 @@ class TaskAgentTest : FunSpec({
         model.requests[1].messages.last().content shouldContain "실행되지 않았다"
     }
 
+    test("Mac 주인이 아닌 사용자의 셸은 본인에게 묻지 않고 주인에게 넘긴다 (M20). 넘길 곳이 없으면 거부") {
+        val member = UserContext(UserId(2), UserRole.MEMBER)
+        val memberRequest = request.copy(user = member)
+        val asked = mutableListOf<Pair<UserContext, String>>()
+        val relay = object : dev.vesta.core.tools.ApprovalEscalation {
+            override suspend fun ask(requester: UserContext, tool: String, details: dev.vesta.core.tools.ApprovalDetails, reason: String?, timeoutSeconds: Long): ApprovalDecision {
+                asked += requester to tool
+                return ApprovalDecision.Approve
+            }
+        }
+        val shell = RecordingTool("run_shell", RiskLevel.EXEC)
+        val broker = AutoBroker(ApprovalDecision.Deny("본인에게 물으면 안 됨"))
+        val events = TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "run_shell", """{"command":"ls","reason":"목록"}""")))), models, ToolRegistry(listOf(shell)), broker, escalation = relay)
+            .handle(memberRequest).toList()
+        asked.single() shouldBe (member to "run_shell")
+        shell.calls.size shouldBe 1
+        broker.opened shouldBe 0
+        events.none { it is AgentEvent.ApprovalRequested } shouldBe true
+        events.filterIsInstance<AgentEvent.Status>().any { "Mac 주인" in it.text } shouldBe true
+
+        // 넘길 곳이 없으면 실행하지 않는다
+        val shell2 = RecordingTool("run_shell", RiskLevel.EXEC)
+        TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "run_shell", """{"command":"ls"}""")))), models, ToolRegistry(listOf(shell2)), AutoBroker(ApprovalDecision.Approve))
+            .handle(memberRequest).toList()
+        shell2.calls.size shouldBe 0
+        // 쓰기(WRITE)는 지금처럼 본인이 승인
+        val write = RecordingTool("write_file", RiskLevel.WRITE)
+        val own = AutoBroker(ApprovalDecision.Approve)
+        TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "write_file", "{}")))), models, ToolRegistry(listOf(write)), own, escalation = relay).handle(memberRequest).toList()
+        own.opened shouldBe 1
+        write.calls.size shouldBe 1
+    }
+
     test("거부된 작업은 모델 답변과 상관없이 마지막에 시스템이 표시한다") {
         val send = RecordingTool("mail_send", RiskLevel.EXEC)
         val model = ScriptedModel(listOf(

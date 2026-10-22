@@ -418,8 +418,8 @@ class ChannelBot(
         }
         val state = chats.getOrPut(chat) { ChatState() }
         val parts = button.data.split(':')
+        if (actions?.handles(parts.getOrNull(0).orEmpty()) == true) return onActionButton(binding, chat, button.reply, button.data, parts)
         when (parts.getOrNull(0)) {
-            actions?.prefix -> onActionButton(binding, chat, button.reply, button.data, parts)
             "ap" -> onApprovalButton(binding, state, chat, button.reply, parts.getOrNull(1).orEmpty(), parts.getOrNull(2).orEmpty())
             "fq", "fc" -> onFileButton(binding, state, chat, button.reply, parts, scope)
             else -> button.reply.ack()

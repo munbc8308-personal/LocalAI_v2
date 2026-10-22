@@ -145,6 +145,8 @@ open class ChannelApiException(message: String, val retryAfterMillis: Long? = nu
 /** 알림 카드의 버튼 처리 (M16). 버튼 값이 `[prefix]:키:동작`이면 여기로 온다 */
 interface ChannelActions {
     val prefix: String
+    /** 이 버튼 머리([prefix])를 처리하는가 (여러 처리기를 묶을 때 [ChannelActionSet]) */
+    fun handles(head: String): Boolean = head == prefix
     /** [user]가 누른 버튼. 돌려준 글을 카드에 덧붙인다 */
     suspend fun onButton(user: dev.vesta.core.UserContext, data: String): String
 }
@@ -156,4 +158,12 @@ interface ChannelNotifier {
     val channel: dev.vesta.core.ChannelType
     /** 보낸 대화방 수 */
     suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>): Int
+}
+
+/** 여러 버튼 처리기를 하나로 (주간 점검 "ev", 셸 승인 넘기기 "sh" 등, M20) */
+class ChannelActionSet(private val actions: List<ChannelActions>) : ChannelActions {
+    override val prefix: String = actions.joinToString("|") { it.prefix }
+    override fun handles(head: String) = actions.any { it.handles(head) }
+    override suspend fun onButton(user: dev.vesta.core.UserContext, data: String): String =
+        actions.first { it.handles(data.substringBefore(':')) }.onButton(user, data)
 }

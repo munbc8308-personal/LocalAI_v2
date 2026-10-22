@@ -58,6 +58,8 @@ class TaskAgent(
     private val toolsFor: suspend (AgentRequest) -> List<Tool> = { tools.all },
     /** D8(셸 위험도 경고)·D10(도구 결과 속 지시문) 판정 (없으면 건너뜀) */
     private val judge: dev.vesta.decision.Judge? = null,
+    /** Mac 주인이 아닌 사용자의 셸 승인을 주인에게 넘긴다 (M20). 없으면 주인이 아닌 사람의 셸은 거부 */
+    private val escalation: dev.vesta.core.tools.ApprovalEscalation? = null,
 ) : Agent {
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
@@ -179,6 +181,17 @@ class TaskAgent(
     }
 
     private suspend fun FlowCollector<AgentEvent>.askApproval(tool: Tool, arguments: JsonObject, request: AgentRequest): ApprovalDecision {
+        val details = describeForApproval(tool, arguments)
+        // 셸은 Mac 주인만 승인할 수 있다: 다른 사용자의 셸은 주인의 메신저로 넘기고 기다린다
+        if (tool.risk == dev.vesta.core.RiskLevel.EXEC && request.user.role != dev.vesta.core.UserRole.OWNER) {
+            val relay = escalation ?: return ApprovalDecision.Deny("Mac 주인만 셸을 승인할 수 있습니다")
+            emit(AgentEvent.Status("Mac 주인에게 셸 실행 승인을 요청했습니다. 기다리는 중…"))
+            return relay.ask(request.user, tool.spec.name, details, (arguments["reason"] as? kotlinx.serialization.json.JsonPrimitive)?.content, approvalTimeoutSeconds)
+        }
+        return askOwnApproval(tool, arguments, request, details)
+    }
+
+    private suspend fun describeForApproval(tool: Tool, arguments: JsonObject): dev.vesta.core.tools.ApprovalDetails {
         var details = tool.describe(arguments)
         // D8: 셸 명령이 지우기·덮어쓰기 등 되돌릴 수 없는 변경을 할 수 있으면 경고
         if (tool is ShellTool && judge != null) {
@@ -188,6 +201,15 @@ class TaskAgent(
                 details = details.copy(warning = "결정 모델 판정: 파일 삭제·덮어쓰기 등 되돌릴 수 없는 변경 가능성 %.0f%%".format(risk * 100))
             }
         }
+        return details
+    }
+
+    private suspend fun FlowCollector<AgentEvent>.askOwnApproval(
+        tool: Tool,
+        arguments: JsonObject,
+        request: AgentRequest,
+        details: dev.vesta.core.tools.ApprovalDetails,
+    ): ApprovalDecision {
         val pending = approvals.open(request.user)
         emit(
             AgentEvent.ApprovalRequested(

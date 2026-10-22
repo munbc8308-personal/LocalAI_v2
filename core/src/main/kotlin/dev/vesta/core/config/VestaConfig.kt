@@ -64,6 +64,8 @@ data class UsersConfig(
     val memberRoot: String = "~/Vesta/users",
     /** 사용자 이름별 추가 허용 폴더 (MEMBER) */
     val paths: Map<String, List<String>> = emptyMap(),
+    /** MEMBER도 셸을 쓰되, 실행마다 Mac 주인의 메신저 승인을 받는다 (M20). false면 MEMBER는 셸 없음 */
+    val memberShell: Boolean = true,
 )
 
 /** 모델 학습 (PROJECT.md 7.10, M14). Python 학습기(trainer, uv)는 Vesta가 자식 프로세스로 실행한다 */
