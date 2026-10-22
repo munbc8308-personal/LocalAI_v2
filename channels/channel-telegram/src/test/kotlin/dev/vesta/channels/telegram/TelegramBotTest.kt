@@ -89,6 +89,10 @@ class TelegramBotTest : FunSpec({
             pressed.single() shouldBe (owner to "ev:3:a")
             api.messages.single().text shouldContain "→ 반영했습니다"
             api.messages.single().keyboard shouldBe null
+
+            // 자르면 안 되는 카드(exact)는 한도를 넘으면 보내지 않는다
+            bot.notifier.notify(owner.userId, "sh:1", "x".repeat(5_000), listOf(dev.vesta.channels.ChannelButton("승인", "sh:1:a")), exact = true) shouldBe 0
+            api.messages.size shouldBe 1
         }
     }
 

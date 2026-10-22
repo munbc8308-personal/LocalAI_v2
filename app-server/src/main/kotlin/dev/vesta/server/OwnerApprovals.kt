@@ -36,23 +36,25 @@ class OwnerApprovals(
     private val random = SecureRandom()
 
     override suspend fun ask(requester: UserContext, tool: String, details: ApprovalDetails, reason: String?, timeoutSeconds: Long): ApprovalDecision {
-        if (details.body.length > bodyLimit) return ApprovalDecision.Deny("명령이 너무 길어 Mac 주인에게 전부 보여 줄 수 없습니다")
         val id = (1..8).map { "abcdefghjkmnpqrstuvwxyz23456789"[random.nextInt(31)] }.joinToString("")
         val result = CompletableDeferred<ApprovalDecision>()
         pending[id] = result
         try {
             val who = userName(requester.userId) ?: "사용자 ${requester.userId.value}"
+            // 경고를 명령보다 먼저. 명령은 한 번만(본문에 전체가 있으면 제목은 빼고)
             val text = buildString {
-                append("$who 님이 셸 실행 승인을 요청했습니다\n\n")
-                append(details.title).append('\n')
-                if (details.body.isNotBlank()) append(details.body).append('\n')
-                reason?.takeIf { it.isNotBlank() }?.let { append("이유: ").append(it.take(300)).append('\n') }
+                append("$who 님이 셸 실행 승인을 요청했습니다\n")
                 details.warning?.let { append("⚠ ").append(it).append('\n') }
+                append('\n')
+                append(details.body.ifBlank { details.title }).append('\n')
+                reason?.takeIf { it.isNotBlank() }?.let { append("이유: ").append(it.take(300)).append('\n') }
                 append("\n${timeoutSeconds / 60}분 안에 답하지 않으면 거부합니다")
             }
+            // 카드 전체가 다 보여야 승인받는다 (메신저마다 한도를 넘으면 그 메신저는 보내지 않는다)
+            if (text.length > bodyLimit) return ApprovalDecision.Deny("명령이 너무 길어 Mac 주인에게 전부 보여 줄 수 없습니다")
             val buttons = listOf(ChannelButton("승인", "sh:$id:a", ButtonStyle.PRIMARY), ChannelButton("거부", "sh:$id:d", ButtonStyle.DANGER))
-            val sent = notifiers().sumOf { runCatching { it.notify(owner, "sh:$id", text, buttons) }.getOrDefault(0) }
-            if (sent == 0) return ApprovalDecision.Deny("Mac 주인에게 승인을 물을 메신저가 없습니다 (주인 계정을 메신저에 연결하세요)")
+            val sent = notifiers().sumOf { runCatching { it.notify(owner, "sh:$id", text, buttons, exact = true) }.getOrDefault(0) }
+            if (sent == 0) return ApprovalDecision.Deny("Mac 주인에게 승인 카드를 보내지 못했습니다 (주인 메신저 연결이 없거나 명령이 그 메신저에 다 보이지 않음)")
             log.info { "셸 승인 넘김: $who → 주인 (${details.title.take(80)})" }
             return withTimeoutOrNull(timeoutSeconds.seconds) { result.await() } ?: ApprovalDecision.Deny("Mac 주인이 ${timeoutSeconds / 60}분 동안 답하지 않아 거부")
         } finally {

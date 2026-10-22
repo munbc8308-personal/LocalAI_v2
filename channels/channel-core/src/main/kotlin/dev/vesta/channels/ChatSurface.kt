@@ -156,8 +156,11 @@ interface ChannelNotifier {
     val name: String
     /** 어느 메신저인지 (웹 UI 연결 화면에 켜진 메신저를 보여 줄 때, M20) */
     val channel: dev.vesta.core.ChannelType
-    /** 보낸 대화방 수 */
-    suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>): Int
+    /**
+     * 보낸 대화방 수. [exact]면 글을 자르지 않는다: 이 메신저 한도를 넘으면 보내지 않고 0
+     * (승인 카드는 잘린 명령에 버튼이 붙으면 안 된다, M20)
+     */
+    suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>, exact: Boolean = false): Int
 }
 
 /** 여러 버튼 처리기를 하나로 (주간 점검 "ev", 셸 승인 넘기기 "sh" 등, M20) */

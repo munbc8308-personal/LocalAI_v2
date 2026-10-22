@@ -430,7 +430,11 @@ class ChannelBot(
      * 사용자에게 먼저 보내는 알림 (M16). [user]와 연결된 대화방마다 보낸다. [key]가 같은 버튼(`키:동작`)을 누르면
      * [actions]가 처리하고 결과를 카드에 덧붙인다. 보낸 대화방 수를 돌려준다
      */
-    override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>): Int {
+    override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>, exact: Boolean): Int {
+        if (exact && text.length > surface.approvalBodyLimit) {
+            log.warn { "${surface.name} 알림이 길어 보내지 않음 (${text.length}자 > ${surface.approvalBodyLimit}자, 자르면 안 되는 카드)" }
+            return 0
+        }
         val chats = bindings.list(channel).filter { it.user.userId == user }.map { it.externalChatId }.distinct()
         val body = if (text.length > surface.approvalBodyLimit) text.take(surface.approvalBodyLimit) + "\n…" else text
         return chats.count { chat ->

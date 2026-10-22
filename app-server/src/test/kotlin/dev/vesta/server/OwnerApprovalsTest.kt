@@ -26,7 +26,7 @@ class OwnerApprovalsTest : FunSpec({
         val notifier = object : ChannelNotifier {
             override val name = "가짜"
             override val channel = ChannelType.TELEGRAM
-            override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>): Int { cards += Card(user, text, buttons); return 1 }
+            override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>, exact: Boolean): Int { cards += Card(user, text, buttons); return 1 }
         }
         val approvals = OwnerApprovals(owner, { listOf(notifier) }, { if (it == member.userId) "mina" else null })
         coroutineScope {
@@ -47,11 +47,11 @@ class OwnerApprovalsTest : FunSpec({
 
     test("메신저가 없거나, 시간이 지나거나, 명령이 너무 길면 거부") {
         val none = OwnerApprovals(owner, { emptyList() }, { "mina" })
-        none.ask(member, "run_shell", ApprovalDetails("셸", "ls"), null, 60).shouldBeInstanceOf<ApprovalDecision.Deny>().reason shouldContain "메신저"
+        none.ask(member, "run_shell", ApprovalDetails("셸", "ls"), null, 60).shouldBeInstanceOf<ApprovalDecision.Deny>().reason shouldContain "보내지 못했습니다"
         val silent = object : ChannelNotifier {
             override val name = "가짜"
             override val channel = ChannelType.TELEGRAM
-            override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>) = 1
+            override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>, exact: Boolean) = 1
         }
         OwnerApprovals(owner, { listOf(silent) }, { "mina" }).ask(member, "run_shell", ApprovalDetails("셸", "ls"), null, 1)
             .shouldBeInstanceOf<ApprovalDecision.Deny>().reason shouldContain "답하지 않아"
