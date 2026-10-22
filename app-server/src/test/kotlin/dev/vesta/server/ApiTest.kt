@@ -191,16 +191,29 @@ class ApiTest : FunSpec({
         // 본인 비밀번호 바꾸기: 지금 비밀번호가 맞아야 하고, 바꾸면 로그인이 풀린다
         client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"nope","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.Forbidden
         client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"mina-pass-1","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.OK
+        // 세션을 훔쳐도 지금 비밀번호를 무제한 대입할 수 없다: 로그인과 같은 잠금
+        val again = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }
+        val cookie2 = again.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        val csrf2 = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), again.bodyAsText()).csrf
+        repeat(5) { client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"guess$it","new":"mina-pass-3"}""") } }
+        client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"mina-pass-2","new":"mina-pass-3"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        client.post("/api/logout") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2) }
         client.get("/api/sessions") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Unauthorized
 
-        // mina가 여러 번 틀려 잠겨도 Mac 주인은 로그인할 수 있다
-        repeat(5) { client.post("/api/login") { setBody("""{"name":"mina","password":"x"}""") } }
+        // mina(위에서 잠김)가 잠겨도 Mac 주인은 로그인할 수 있다
         client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        // 없는 이름 하나를 잠가도 다른 없는 이름은 401: 잠김 응답으로 계정 유무를 알 수 없다
+        repeat(5) { client.post("/api/login") { setBody("""{"name":"ghost","password":"x"}""") } }
+        client.post("/api/login") { setBody("""{"name":"ghost","password":"x"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        client.post("/api/login") { setBody("""{"name":"ghost2","password":"x"}""") }.status shouldBe HttpStatusCode.Unauthorized
         client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.OK
 
         // 이름을 비운 로그인과 이름을 적은 로그인은 같은 계정(OWNER)의 횟수를 쓴다. 없는 이름을 많이 보내도 초기화되지 않는다
         repeat(3) { client.post("/api/login") { setBody("""{"password":"x"}""") } }
-        repeat(1_100) { i -> client.post("/api/login") { setBody("""{"name":"nobody$i","password":"x"}""") } }
+        repeat(30) { i -> client.post("/api/login") { setBody("""{"name":"nobody$i","password":"x"}""") } }
+        // 이름을 적은 비밀번호 없는 계정도 "비밀번호 없음"이 아니라 401 (계정 유무를 알리지 않는다)
+        client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"nopass","role":"GUEST"}""") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/login") { setBody("""{"name":"nopass","password":"x"}""") }.status shouldBe HttpStatusCode.Unauthorized
         repeat(2) { client.post("/api/login") { setBody("""{"name":"owner","password":"x"}""") } }
         client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.TooManyRequests
 

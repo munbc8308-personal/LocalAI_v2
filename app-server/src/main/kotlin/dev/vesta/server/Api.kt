@@ -378,18 +378,21 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.userAction { users.delete(call.parameters["name"].orEmpty()); null }
                 }
             }
-            // 본인 비밀번호 바꾸기 (U-02). 바꾸면 다른 기기 로그인도 풀린다
+            // 본인 비밀번호 바꾸기 (U-02). 지금 비밀번호 확인은 로그인과 같은 잠금을 쓴다. 바꾸면 모든 기기 로그아웃
             post("/me/password") {
                 val user = call.principal(deps) ?: return@post
                 val users = deps.users ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}""")
+                val auth = deps.auth ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"웹 로그인이 꺼져 있음"}""")
                 val dto = ApiJson.decodeFromString(ChangePasswordDto.serializer(), call.receiveText())
-                val ok = try {
-                    users.changeOwnPassword(user.userId, dto.current, dto.new)
-                } catch (e: dev.vesta.identity.UserException) {
-                    return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
+                when (val failed = auth.verify(user, dto.current)) {
+                    null -> Unit
+                    is LoginResult.Locked -> {
+                        call.response.header(HttpHeaders.RetryAfter, failed.retryAfterSeconds.toString())
+                        return@post call.respondJson(HttpStatusCode.TooManyRequests, """{"error":"여러 번 틀려 잠시 잠겼습니다. ${failed.retryAfterSeconds}초 뒤에 다시 시도하세요"}""")
+                    }
+                    else -> return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"지금 비밀번호가 맞지 않습니다"}""")
                 }
-                if (ok) call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
-                else call.respondJson(HttpStatusCode.Forbidden, """{"error":"지금 비밀번호가 맞지 않습니다"}""")
+                call.userAction { users.setOwnPassword(user.userId, dto.new); null }
             }
             get("/collections") {
                 val user = call.principal(deps) ?: return@get

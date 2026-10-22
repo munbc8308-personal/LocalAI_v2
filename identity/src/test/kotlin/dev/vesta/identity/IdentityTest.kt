@@ -105,6 +105,7 @@ class IdentityTest : FunSpec({
         val service = UserService(ExposedUserRepository(db.db), WebAuthRepository(db.db), maxUsers = 3)
         shouldThrow<UserException> { service.create("boss", UserRole.OWNER, "password1") }
         shouldThrow<UserException> { service.create("a b", UserRole.MEMBER, "password1") }
+        listOf(".", "..", ".hidden", "-x", "_x").forEach { shouldThrow<UserException> { service.create(it, UserRole.MEMBER, "password1") } }
         shouldThrow<UserException> { service.create("mina", UserRole.MEMBER, "short") }
         val mina = service.create("mina", UserRole.MEMBER, "password1")
         mina.hasPassword shouldBe true
@@ -119,8 +120,8 @@ class IdentityTest : FunSpec({
         service.setConsent("mina", true)
         service.trainingUsers() shouldBe setOf(owner, mina.id)
 
-        service.changeOwnPassword(mina.id, "wrong-pass", "password2") shouldBe false
-        service.changeOwnPassword(mina.id, "password1", "password2") shouldBe true
+        shouldThrow<UserException> { service.setOwnPassword(mina.id, "short") }
+        service.setOwnPassword(mina.id, "password2")
         PasswordHasher.verify("password2", WebAuthRepository(db.db).credential("mina")!!.passwordHash!!) shouldBe true
     }
 

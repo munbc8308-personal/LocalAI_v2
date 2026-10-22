@@ -35,7 +35,7 @@ class UserService(
 
     suspend fun create(name: String, role: UserRole, password: String?): User {
         val clean = name.trim()
-        if (!NAME.matches(clean)) throw UserException("이름은 1~32자 글자·숫자·._- 만 쓸 수 있습니다")
+        if (!NAME.matches(clean)) throw UserException("이름은 글자·숫자로 시작하는 1~32자(글자·숫자·._-)여야 합니다")
         if (role == UserRole.OWNER) throw UserException("OWNER는 Mac 주인 한 명뿐입니다. MEMBER나 GUEST로 만드세요")
         if (users.find(clean) != null) throw UserException("이미 있는 이름입니다: $clean")
         if (users.list().size >= maxUsers) throw UserException("사용자는 ${maxUsers}명까지입니다")
@@ -58,14 +58,11 @@ class UserService(
         auth.setPasswordHash(user.id, withContext(Dispatchers.Default) { PasswordHasher.hash(password) })
     }
 
-    /** 본인 비밀번호 바꾸기: 지금 비밀번호가 맞아야 한다 */
-    suspend fun changeOwnPassword(id: UserId, current: String, new: String): Boolean {
-        val user = users.get(id) ?: return false
-        val stored = auth.credential(user.name)?.passwordHash ?: return false
-        if (!withContext(Dispatchers.Default) { PasswordHasher.verify(current, stored) }) return false
+    /** 본인 비밀번호 바꾸기. 지금 비밀번호 확인은 로그인 잠금을 함께 쓰는 쪽(서버 WebAuth.verify)이 먼저 한다 */
+    suspend fun setOwnPassword(id: UserId, new: String) {
         checkPassword(new)
+        if (users.get(id) == null) throw UserException("없는 사용자입니다")
         auth.setPasswordHash(id, withContext(Dispatchers.Default) { PasswordHasher.hash(new) })
-        return true
     }
 
     suspend fun setConsent(name: String, consent: Boolean): User {
@@ -96,6 +93,7 @@ class UserService(
 
     companion object {
         const val MIN_PASSWORD = 8
-        private val NAME = Regex("^[\\p{L}\\p{N}._-]{1,32}$")
+        /** 글자·숫자로 시작: "."·".."처럼 경로를 벗어나는 이름을 막는다 (MEMBER 폴더 `<memberRoot>/<이름>`) */
+        private val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}._-]{0,31}$")
     }
 }

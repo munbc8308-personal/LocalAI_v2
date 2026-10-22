@@ -35,6 +35,11 @@ class WebAuthRepository(private val db: Database, private val clock: Clock = Clo
         query.firstOrNull()?.let { Credential(UserContext(UserId(it[Users.id].value), it[Users.role]), it[Users.name], it[Users.passwordHash]) }
     }
 
+    suspend fun credentialById(id: UserId): Credential? = io {
+        Users.selectAll().where { Users.id eq id.value }.firstOrNull()
+            ?.let { Credential(UserContext(UserId(it[Users.id].value), it[Users.role]), it[Users.name], it[Users.passwordHash]) }
+    }
+
     suspend fun setPasswordHash(userId: UserId, hash: String) = io {
         Users.update({ Users.id eq userId.value }) { it[passwordHash] = hash }
         // 비밀번호를 바꾸면 이미 로그인한 기기도 모두 로그아웃

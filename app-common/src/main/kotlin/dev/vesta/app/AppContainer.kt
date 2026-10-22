@@ -169,9 +169,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         UserRole.MEMBER -> {
             val name = userRepository.get(user.userId)?.name ?: return emptyList()
             memberTools.getOrPut(user.userId.value) {
-                val home = "${config.users.memberRoot.trimEnd('/')}/$name"
-                runCatching { java.nio.file.Files.createDirectories(java.nio.file.Path.of(home.replaceFirst("~", System.getProperty("user.home")))) }
-                tools(PathSandbox(listOf(home) + config.users.paths[name].orEmpty()), shell = false)
+                val root = java.nio.file.Path.of(config.users.memberRoot.replaceFirst(Regex("^~"), System.getProperty("user.home"))).toAbsolutePath().normalize()
+                val home = root.resolve(name).normalize()
+                // 이름 규칙(UserService)이 막지만, 폴더가 memberRoot 밖이 되면 도구를 주지 않는다
+                if (home.parent != root) return emptyList()
+                runCatching { java.nio.file.Files.createDirectories(home) }
+                tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = false)
             }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) }
         }
     }

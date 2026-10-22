@@ -1,5 +1,6 @@
 package dev.vesta.server
 
+import dev.vesta.core.UserContext
 import dev.vesta.identity.PasswordHasher
 import dev.vesta.storage.WebAuthRepository
 import dev.vesta.storage.WebSession
@@ -40,33 +41,56 @@ class WebAuth(
     private class Attempts(var failures: Int = 0, var lockedUntil: Instant = Instant.EPOCH)
 
     /**
-     * 키는 사용자 ID: 이름을 비운 로그인과 이름을 적은 로그인(OWNER)이 같은 횟수를 쓴다.
-     * 없는 이름은 모두 [UNKNOWN] 하나로 센다 → 기록은 사용자 수 + 1개를 넘지 않아 지울 일이 없다
-     * (지우는 방식이면 없는 이름을 많이 보내 실제 계정의 실패 횟수를 초기화할 수 있다).
+     * 있는 계정은 사용자 ID로 센다: 이름을 비운 로그인과 이름을 적은 로그인(OWNER)이 같은 횟수를 쓰고, 지우지 않는다.
+     * 없는 이름은 이름마다 따로 센다(이름 해시). 하나로 묶으면 그 칸이 잠긴 뒤 "잠김 = 없는 이름"으로 계정 유무가 드러난다.
+     * 없는 이름 기록만 오래된 것부터 지운다: 지워져도 그 이름은 어차피 로그인할 수 없고, 있는 계정의 횟수에는 영향이 없다.
      */
-    private val attempts = HashMap<Long, Attempts>()
+    private val accounts = HashMap<Long, Attempts>()
+    private val unknown = object : LinkedHashMap<String, Attempts>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Attempts>) = size > MAX_UNKNOWN
+    }
 
     suspend fun login(name: String?, password: String, userAgent: String?): LoginResult = mutex.withLock {
-        val now = clock.instant()
-        val credential = repo.credential(name?.trim()?.takeIf { it.isNotBlank() })
-        val tries = attempts.getOrPut(credential?.user?.userId?.value ?: UNKNOWN) { Attempts() }
-        if (now.isBefore(tries.lockedUntil)) return LoginResult.Locked(Duration.between(now, tries.lockedUntil).seconds + 1)
-        if (credential != null && credential.passwordHash == null) return LoginResult.NoPassword
-        // 사용자가 없어도 같은 시간이 걸리게 해시를 계산한다
-        val ok = withContext(Dispatchers.Default) { PasswordHasher.verify(password, credential?.passwordHash ?: DUMMY_HASH) } && credential != null
-        if (!ok) {
-            tries.failures++
-            if (tries.failures >= MAX_FAILURES) {
-                val minutes = minOf(15L, 1L shl minOf(tries.failures - MAX_FAILURES, 4))
-                tries.lockedUntil = clock.instant().plus(Duration.ofMinutes(minutes))
-            }
-            return LoginResult.Invalid
+        val login = name?.trim()?.takeIf { it.isNotBlank() }
+        val credential = repo.credential(login)
+        // 비밀번호를 아직 정하지 않았다는 안내는 Mac 주인(이름 비움)에게만: 이름을 적은 경우에 알려 주면 계정 유무가 드러난다
+        if (login == null && credential != null && credential.passwordHash == null) return LoginResult.NoPassword
+        val tries = if (credential != null) accounts.getOrPut(credential.user.userId.value) { Attempts() }
+            else unknown.getOrPut(sha256(login.orEmpty().lowercase())) { Attempts() }
+        when (val result = check(tries, credential?.passwordHash, password)) {
+            null -> Unit
+            else -> return result
         }
-        tries.failures = 0
         val token = randomToken()
-        val session = WebSession(credential.user, credential.name, randomToken())
+        val session = WebSession(credential!!.user, credential.name, randomToken())
         repo.createSession(credential.user.userId, sha256(token), session.csrf, userAgent, sessionTtl)
         return LoginResult.Ok(token, session)
+    }
+
+    /**
+     * 로그인한 사용자의 비밀번호 확인 (본인 비밀번호 바꾸기). 로그인과 같은 잠금을 쓴다:
+     * 세션 쿠키를 훔쳐도 이 경로로 비밀번호를 무제한 대입할 수 없다. 맞으면 null
+     */
+    suspend fun verify(user: UserContext, password: String): LoginResult? = mutex.withLock {
+        val credential = repo.credentialById(user.userId)
+        check(accounts.getOrPut(user.userId.value) { Attempts() }, credential?.passwordHash, password)
+    }
+
+    /** 잠김·틀림이면 그 결과, 맞으면 null. 해시가 없어도(없는 계정) 같은 시간이 걸리게 계산한다 */
+    private suspend fun check(tries: Attempts, hash: String?, password: String): LoginResult? {
+        val now = clock.instant()
+        if (now.isBefore(tries.lockedUntil)) return LoginResult.Locked(Duration.between(now, tries.lockedUntil).seconds + 1)
+        val ok = withContext(Dispatchers.Default) { PasswordHasher.verify(password, hash ?: DUMMY_HASH) } && hash != null
+        if (ok) {
+            tries.failures = 0
+            return null
+        }
+        tries.failures++
+        if (tries.failures >= MAX_FAILURES) {
+            val minutes = minOf(15L, 1L shl minOf(tries.failures - MAX_FAILURES, 4))
+            tries.lockedUntil = clock.instant().plus(Duration.ofMinutes(minutes))
+        }
+        return LoginResult.Invalid
     }
 
     suspend fun session(token: String): WebSession? = repo.findSession(sha256(token))
@@ -77,8 +101,8 @@ class WebAuth(
 
     private companion object {
         const val MAX_FAILURES = 5
-        /** 없는 이름의 실패를 모으는 키 (사용자 ID는 1부터) */
-        const val UNKNOWN = -1L
+        /** 기억해 두는 없는 이름 수 */
+        const val MAX_UNKNOWN = 1_024
         val DUMMY_HASH: String = PasswordHasher.hash("vesta-dummy-password")
 
         fun sha256(value: String): String =
