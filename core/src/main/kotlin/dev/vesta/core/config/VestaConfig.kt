@@ -171,6 +171,8 @@ data class DiscordConfig(
     val voiceEndSilenceMillis: Long = 800,
     /** Apple Silicon용 libopus (`brew install opus`) */
     val opusLibrary: String = "/opt/homebrew/lib/libopus.dylib",
+    /** 음성 채널에서 답을 다 만든 뒤 한 번에 읽는다 (느려도 끊김 없이). false면 생성되는 대로 */
+    val voiceWholeAnswer: Boolean = true,
 ) : MessengerConfig
 
 data class SlackConfig(

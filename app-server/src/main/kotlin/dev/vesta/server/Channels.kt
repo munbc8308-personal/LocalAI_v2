@@ -72,7 +72,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             val voice = if (discord.voice && stt != null && tts != null) {
                 dev.vesta.channels.discord.voice.DiscordVoiceService(
                     discordToken, app.conversation, { publicGuest(app, "discord-guest") }, stt, tts,
-                    dev.vesta.channels.discord.voice.VoiceSettings(discord.wakeWords, discord.voiceEndSilenceMillis, discord.publicPerHour, discord.opusLibrary),
+                    dev.vesta.channels.discord.voice.VoiceSettings(discord.wakeWords, discord.voiceEndSilenceMillis, discord.publicPerHour, discord.opusLibrary, discord.voiceWholeAnswer),
                     scope,
                     streaming = app.streamingSpeech,
                 ).takeIf { it.start() }

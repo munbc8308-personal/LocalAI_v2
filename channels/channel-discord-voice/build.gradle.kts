@@ -15,4 +15,5 @@ dependencies {
     // opus-java가 끌어오는 JNA 4는 Apple Silicon용이 없어 5로 올린다 (높은 버전이 이긴다)
     implementation(libs.jna)
     implementation(libs.kotlin.logging)
+    testImplementation(project(":media"))
 }

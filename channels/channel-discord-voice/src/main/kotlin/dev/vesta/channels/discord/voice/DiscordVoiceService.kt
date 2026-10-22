@@ -48,6 +48,8 @@ data class VoiceSettings(
     val perHour: Int = 20,
     /** Apple Silicon용 libopus (JDA에 든 것은 x86_64뿐) */
     val opusLibrary: String = "/opt/homebrew/lib/libopus.dylib",
+    /** 답을 다 만든 뒤 한 번에 읽는다 (느려도 끊김 없이, M19 실사용 요청). false면 생성되는 대로 문장마다 */
+    val wholeAnswer: Boolean = true,
 )
 
 /**
@@ -203,7 +205,11 @@ class DiscordVoiceService(
         private suspend fun answer(question: String) {
             val stream = streaming ?: run { answerByPieces(question); return }
             // 이어 말하기: 문장이 끝나는 대로 넣고, 나오는 소리를 그대로 보낸다 (첫 소리 0.4초, 문장 사이 끊김 없음)
-            val speech = stream.open(speaker::enqueue)
+            val began = System.currentTimeMillis()
+            var synthesized = 0L
+            var sentences = 0
+            speaker.resetStats()
+            val speech = stream.open { synthesized += it.size; speaker.enqueue(it) }
             try {
                 val text = StringBuilder()
                 var spoken = 0
@@ -212,19 +218,30 @@ class DiscordVoiceService(
                     if (end > spoken) {
                         speech.say(text.substring(spoken, end))
                         spoken = end
+                        sentences++
                     }
                 }
                 conversation.send(guest(), ChannelType.DISCORD, session, UserInput(question, spoken = true)).collect { event ->
                     when (event) {
                         is AgentEvent.SessionReady -> session = event.sessionId
-                        is AgentEvent.Token -> { text.append(event.text); flush(false) }
+                        is AgentEvent.Token -> { text.append(event.text); if (!settings.wholeAnswer) flush(false) }
                         is AgentEvent.Error -> text.append("\n오류가 났어요.")
                         else -> Unit
                     }
                 }
-                flush(true)
+                // 다 만든 답은 문장마다 바로 이어 넣는다 (합성이 읽기보다 빨라 끊기지 않는다)
+                while (spoken < text.length) {
+                    val end = Sentences.cut(text.toString(), spoken, false).takeIf { it > spoken } ?: text.length
+                    speech.say(text.substring(spoken, end))
+                    spoken = end
+                    sentences++
+                }
                 speech.finish()
                 speech.await()
+                log.info {
+                    "Discord 음성 답: 글 ${text.length}자 · 문장 $sentences · 합성 %.1f초 · 생성·합성 ${System.currentTimeMillis() - began}ms · 보낸 소리 %.1f초 · 빈 대기열 ${speaker.underruns}번"
+                        .format(synthesized / Utterance.BYTES_PER_SECOND.toDouble(), speaker.sentSeconds)
+                }
             } finally {
                 speech.close()
             }
@@ -294,6 +311,14 @@ class DiscordVoiceService(
         private val queue = ConcurrentLinkedQueue<ByteArray>()
         private var current: ByteArray? = null
         private var position = 0
+        /** 진단: 보낸 프레임, 말하는 도중 대기열이 빈 횟수 */
+        @Volatile private var sent = 0
+        @Volatile var underruns = 0
+            private set
+        private var wasSpeaking = false
+        val sentSeconds: Double get() = sent * 0.02
+
+        fun resetStats() { sent = 0; underruns = 0 }
 
         fun enqueue(pcm: ByteArray) { if (pcm.isNotEmpty()) queue.add(pcm) }
 
@@ -301,7 +326,10 @@ class DiscordVoiceService(
         fun clear() { queue.clear(); current = null; position = 0 }
 
         @Synchronized
-        override fun canProvide(): Boolean = current != null || queue.isNotEmpty()
+        override fun canProvide(): Boolean = (current != null || queue.isNotEmpty()).also { available ->
+            if (!available && wasSpeaking) underruns++
+            wasSpeaking = available
+        }
 
         @Synchronized
         override fun provide20MsAudio(): ByteBuffer? {
@@ -315,6 +343,7 @@ class DiscordVoiceService(
                 position += n
                 if (position >= data.size) current = null
             }
+            if (filled > 0) sent++
             return if (filled == 0) null else ByteBuffer.wrap(frame)
         }
 
