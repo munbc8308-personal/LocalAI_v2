@@ -56,6 +56,9 @@ interface DiscordApi {
     /** 파일을 붙인 메시지 (만든 이미지) */
     suspend fun createMessageWithFile(channelId: String, content: String, fileName: String, bytes: ByteArray, contentType: String)
 
+    /** 글에서 공개 스레드를 만든다 (공개 대화방 답장, M18). 스레드 ID */
+    suspend fun createThread(channelId: String, messageId: String, name: String): String
+
     /** 음성 메시지 (flags IS_VOICE_MESSAGE 8192, M18). 글은 붙일 수 없고, 길이·파형이 있어야 한다 */
     suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String)
     /** 첨부 파일. Discord CDN 주소만 받는다. [maxBytes]를 넘으면 받지 않는다 */
@@ -89,7 +92,12 @@ data class DcMessage(
     /** ISO 8601 */
     val timestamp: String? = null,
     val attachments: List<DcAttachment> = emptyList(),
+    /** 이 글이 부른(@멘션) 사용자. 봇을 부른 서버 글은 Message Content 권한 없이도 내용이 온다 */
+    val mentions: List<DcUser> = emptyList(),
 )
+
+@Serializable
+data class DcChannel(val id: String)
 
 /** [style]: 1 파랑(primary), 2 회색, 4 빨강 */
 data class DcButton(val label: String, val customId: String, val style: Int = 2)
@@ -171,6 +179,11 @@ class HttpDiscordApi(
             }
             if (!response.status.isSuccess()) throw DiscordException(response.status.value, response.bodyAsText().take(200))
         }
+    }
+
+    override suspend fun createThread(channelId: String, messageId: String, name: String): String {
+        val body = buildJsonObject { put("name", name.ifBlank { "Vesta" }.take(90)); put("auto_archive_duration", 1440) }
+        return json.decodeFromString(DcChannel.serializer(), call(HttpMethod.Post, "/channels/$channelId/messages/$messageId/threads", body)).id
     }
 
     override suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String) {
@@ -316,6 +329,10 @@ class HttpDiscordApi(
         fun looksLikeToken(token: String) = TOKEN.matches(token)
 
         /** 봇을 내 서버에 넣는 주소 (권한 없음: DM만 쓴다) */
-        fun inviteUrl(applicationId: String) = "https://discord.com/oauth2/authorize?client_id=$applicationId&scope=bot&permissions=0"
+        /**
+         * 초대 주소. 권한: 채널 보기·메시지 보내기·파일 첨부·기록 읽기·공개 스레드 만들기·스레드에 보내기 (공개 대화방 답장, M18)
+         */
+        fun inviteUrl(applicationId: String) = "https://discord.com/oauth2/authorize?client_id=$applicationId&scope=bot&permissions=$PERMISSIONS"
+        private const val PERMISSIONS = 1024L + 2048L + 32768L + 65536L + (1L shl 35) + (1L shl 38)
     }
 }

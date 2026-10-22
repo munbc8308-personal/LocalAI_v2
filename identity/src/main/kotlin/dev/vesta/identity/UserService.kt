@@ -38,7 +38,7 @@ class UserService(
         if (!NAME.matches(clean)) throw UserException("이름은 글자·숫자로 시작하는 1~32자(글자·숫자·._-)여야 합니다")
         if (role == UserRole.OWNER) throw UserException("OWNER는 Mac 주인 한 명뿐입니다. MEMBER나 GUEST로 만드세요")
         if (users.find(clean) != null) throw UserException("이미 있는 이름입니다: $clean")
-        if (users.list().size >= maxUsers) throw UserException("사용자는 ${maxUsers}명까지입니다")
+        if (users.list().count { it.name !in SYSTEM_USERS } >= maxUsers) throw UserException("사용자는 ${maxUsers}명까지입니다")
         password?.let(::checkPassword)
         val hash = password?.let { withContext(Dispatchers.Default) { PasswordHasher.hash(it) } }
         return users.create(clean, role, hash)
@@ -93,6 +93,8 @@ class UserService(
 
     companion object {
         const val MIN_PASSWORD = 8
+        /** 공개 대화방 손님처럼 서버가 만드는 계정 (사용자 수에 세지 않는다, M18) */
+        val SYSTEM_USERS = setOf("discord-guest")
         /** 글자·숫자로 시작: "."·".."처럼 경로를 벗어나는 이름을 막는다 (MEMBER 폴더 `<memberRoot>/<이름>`) */
         private val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}._-]{0,31}$")
     }

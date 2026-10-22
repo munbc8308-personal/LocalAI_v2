@@ -50,6 +50,7 @@ class FakeConversation(
     val inputs = mutableListOf<String>()
     val userInputs = mutableListOf<UserInput>()
     val sessions = mutableListOf<SessionId?>()
+    val users = mutableListOf<UserContext>()
     val decisions = mutableMapOf<String, CompletableDeferred<ApprovalDecision>>()
 
     fun open(id: String) = CompletableDeferred<ApprovalDecision>().also { decisions[id] = it }
@@ -58,6 +59,7 @@ class FakeConversation(
         inputs += input.text
         userInputs += input
         sessions += sessionId
+        users += user
         script(input, this@FakeConversation)
     }
 

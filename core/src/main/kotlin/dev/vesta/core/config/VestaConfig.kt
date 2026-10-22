@@ -158,6 +158,10 @@ data class DiscordConfig(
     override val apiUrl: String = "https://discord.com/api/v10",
     /** 음성으로 물으면 음성 메시지로도 답할지 (`!voice`로 대화방마다 바꿀 수 있다, M18) */
     override val voiceReply: Boolean = false,
+    /** 서버 채널에서 `@봇`으로 부르면 누구나 손님(GUEST: 대화·웹 검색만)으로 쓸 수 있다 (M18). 내 권한은 1:1 대화에서 */
+    val publicChannels: Boolean = true,
+    /** 서버 채널에서 한 사람이 한 시간에 부를 수 있는 횟수 */
+    val publicPerHour: Int = 20,
 ) : MessengerConfig
 
 data class SlackConfig(

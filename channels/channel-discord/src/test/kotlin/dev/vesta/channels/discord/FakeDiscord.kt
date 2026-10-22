@@ -38,6 +38,14 @@ class FakeDiscord : DiscordApi {
         files += content to bytes
     }
 
+    val threads = mutableListOf<Pair<String, String>>()
+    var threadFails = false
+    override suspend fun createThread(channelId: String, messageId: String, name: String): String {
+        if (threadFails) throw DiscordException(403, "Missing Permissions")
+        threads += messageId to name
+        return "thread-$messageId"
+    }
+
     val voices = mutableListOf<Triple<ByteArray, Double, String>>()
     override suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String) {
         voices += Triple(ogg, durationSeconds, waveform)

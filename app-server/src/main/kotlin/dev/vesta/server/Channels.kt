@@ -63,8 +63,14 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         discordToken == null -> log.info { "Discord 토큰 없음 — 켜려면 vesta discord token" }
         else -> {
             val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
-            val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() })
-            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, textToSpeech = app.textToSpeech)
+            // 서버 채널에서 부르면 받으려면 서버 글 이벤트도 받는다 (M18)
+            val intents = DiscordGateway.DIRECT_MESSAGES or (if (discord.publicChannels) DiscordGateway.GUILD_MESSAGES else 0)
+            val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() }, intents = intents)
+            val bot = DiscordBot(
+                api, gateway, app.conversation, app.channelBindings, files, discord, status,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, textToSpeech = app.textToSpeech,
+                publicGuest = if (discord.publicChannels) ({ publicGuest(app, "discord-guest") }) else null,
+            )
             notifiers += bot.notifier
             scope.launch { bot.run() }
         }
@@ -87,6 +93,16 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         }
     }
     return notifiers
+}
+
+/**
+ * 공개 대화방 손님 계정 (GUEST, M18). 처음 부를 때 만든다. 사용자 수 제한(가족·팀 5명)에는 세지 않는 시스템 계정이라
+ * UserService를 거치지 않고 저장소에 바로 만든다
+ */
+private suspend fun publicGuest(app: AppContainer, name: String): UserContext {
+    val user = app.userRepository.find(name) ?: runCatching { app.userRepository.create(name, dev.vesta.core.UserRole.GUEST, null) }
+        .getOrElse { app.userRepository.find(name) ?: throw it }
+    return UserContext(user.id, dev.vesta.core.UserRole.GUEST)
 }
 
 /** 메신저로 받은 파일: `~/.vesta/inbox/<채널>/`에 저장, 본문 읽기, 문서 컬렉션 색인 */

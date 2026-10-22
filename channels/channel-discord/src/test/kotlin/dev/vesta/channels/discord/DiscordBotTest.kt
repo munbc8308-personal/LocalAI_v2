@@ -41,9 +41,9 @@ private const val DM = "dm42"
 
 private fun obj(text: String) = Json.parseToJsonElement(text).jsonObject
 
-private fun message(content: String, from: String = ME, channel: String = DM, guild: String? = null, bot: Boolean = false, attachment: String = "") = obj(
-    """{"id":"in1","channel_id":"$channel",${guild?.let { "\"guild_id\":\"$it\"," } ?: ""}"author":{"id":"$from","username":"u$from","bot":$bot},
-       "content":${JsonPrimitive(content)},"attachments":[$attachment]}""",
+private fun message(content: String, from: String = ME, channel: String = DM, guild: String? = null, bot: Boolean = false, attachment: String = "", mentions: String = "", id: String = "in1") = obj(
+    """{"id":"$id","channel_id":"$channel",${guild?.let { "\"guild_id\":\"$it\"," } ?: ""}"author":{"id":"$from","username":"u$from","bot":$bot},
+       "content":${JsonPrimitive(content)},"attachments":[$attachment],"mentions":[${if (mentions.isEmpty()) "" else "{\"id\":\"$mentions\",\"username\":\"vesta\"}"}]}""",
 )
 
 private fun button(customId: String, from: String = ME, channel: String = DM) = obj(
@@ -69,7 +69,8 @@ private class Harness(
     val files = FakeFiles()
     val stt = dev.vesta.channels.testing.FakeSpeechToText()
     val tts = dev.vesta.channels.testing.FakeTextToSpeech()
-    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt, textToSpeech = tts)
+    val guest = UserContext(UserId(9), dev.vesta.core.UserRole.GUEST)
+    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt, textToSpeech = tts, publicGuest = { guest })
 
     suspend fun TestScope.send(type: String, data: JsonObject) {
         bot.dispatch(type, data, this)
@@ -287,6 +288,49 @@ class DiscordBotTest : FunSpec({
                 }
                 send("MESSAGE_CREATE", message("글로 질문"))
                 api.voices.size shouldBe 1
+            }
+        }
+    }
+
+    test("서버 채널(M18): 봇을 부른 글만, 누구든(주인도) 손님으로, 스레드에서 답하고 이어 간다. 승인은 하지 않는다") {
+        runTest {
+            val h = Harness({ input, _ ->
+                emit(AgentEvent.SessionReady(dev.vesta.core.SessionId("ps1"), null, created = true))
+                if ("셸" in input.text) emit(AgentEvent.ApprovalRequested("r9", "run_shell", RiskLevel.EXEC, dev.vesta.core.tools.ApprovalDetails("셸", "ls"), null))
+                emit(AgentEvent.Token("안녕하세요")); emit(AgentEvent.Done(AgentType.CHAT, "m", null))
+            }, config = DiscordConfig(streamIntervalMillis = 0, publicPerHour = 2))
+            with(h) {
+                send("READY", obj("""{"user":{"id":"BOT","username":"vesta"}}"""))
+                // 부르지 않은 서버 글은 무시
+                send("MESSAGE_CREATE", message("그냥 대화", from = "7", channel = "c1", guild = "g1"))
+                conversation.inputs.shouldBeEmpty()
+
+                send("MESSAGE_CREATE", message("<@BOT> 오늘 뭐 먹지?", from = "7", channel = "c1", guild = "g1", mentions = "BOT", id = "m1"))
+                api.threads.single().first shouldBe "m1"
+                conversation.inputs.single() shouldBe "오늘 뭐 먹지?"
+                conversation.users.single() shouldBe guest
+                api.messages.last().channelId shouldBe "thread-m1"
+
+                // 스레드 안에서 다시 부르면 같은 스레드·같은 세션. Mac 주인이 불러도 손님
+                send("MESSAGE_CREATE", message("<@!BOT> 더 알려 줘", from = ME, channel = "thread-m1", guild = "g1", mentions = "BOT", id = "m2"))
+                api.threads.size shouldBe 1
+                conversation.sessions.last() shouldBe dev.vesta.core.SessionId("ps1")
+                conversation.users.last() shouldBe guest
+
+                // 승인이 필요한 일은 거부 (버튼을 띄우지 않는다)
+                send("MESSAGE_CREATE", message("<@BOT> 셸 돌려", from = ME, channel = "thread-m1", guild = "g1", mentions = "BOT", id = "m3"))
+                api.messages.any { it.content.contains("공개 대화방에서는 승인이 필요한 작업을 하지 않습니다") } shouldBe true
+                api.messages.none { it.rows.isNotEmpty() } shouldBe true
+
+                // 한 사람이 한 시간에 2번까지
+                send("MESSAGE_CREATE", message("<@BOT> 셋째", from = "7", channel = "thread-m1", guild = "g1", mentions = "BOT", id = "m4"))
+                send("MESSAGE_CREATE", message("<@BOT> 넷째", from = "7", channel = "thread-m1", guild = "g1", mentions = "BOT", id = "m5"))
+                api.messages.last().content shouldContain "한 시간에 2번"
+
+                // 스레드를 못 만들면 그 자리에서
+                api.threadFails = true
+                send("MESSAGE_CREATE", message("<@BOT> 여기서", from = "8", channel = "c2", guild = "g1", mentions = "BOT", id = "m6"))
+                api.messages.last().channelId shouldBe "c2"
             }
         }
     }

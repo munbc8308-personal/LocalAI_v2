@@ -192,6 +192,8 @@ class DiscordGateway(
     companion object {
         /** DM 메시지만 받는다. DM 글 내용은 Message Content 권한 없이도 온다 */
         const val DIRECT_MESSAGES = 1 shl 12
+        /** 서버 채널 글 (봇을 부른 글만 내용이 온다, M18) */
+        const val GUILD_MESSAGES = 1 shl 9
 
         private const val DISPATCH = 0
         private const val HEARTBEAT = 1

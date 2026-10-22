@@ -2,6 +2,7 @@ package dev.vesta.channels
 
 import dev.vesta.core.AgentType
 import dev.vesta.core.RiskLevel
+import dev.vesta.core.UserContext
 import dev.vesta.core.UserId
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.UserInput
@@ -57,12 +58,23 @@ class ChannelBot(
     private val mediaLimits: MediaConfig = MediaConfig(),
     /** 알림 카드의 버튼 처리 (주간 점검 제안 승인 등, M16) */
     private val actions: ChannelActions? = null,
+    /**
+     * 공개 대화방(서버 채널)에서 봇을 부르면 쓸 손님 계정 (GUEST: 대화·웹 검색만). 누가 불러도, Mac 주인이 불러도 이 계정이다:
+     * 공개 대화방에 내 자료가 나가지 않게. 내 권한은 봇과 1:1 대화에서. null이면 공개 대화방은 받지 않는다
+     */
+    private val publicGuest: (suspend () -> UserContext)? = null,
+    /** 공개 대화방에서 한 사람이 한 시간에 부를 수 있는 횟수 */
+    private val publicPerHour: Int = 20,
 ) : ChannelNotifier {
     private val channel = surface.channel
     override val name: String get() = surface.name
     /** 보낸 알림 카드: "대화방|키" → (메시지 ID, 본문). 버튼을 누르면 결과를 덧붙여 고친다. 알림은 다른 작업에서 보내므로 동시 접근용 */
     private val notices = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
     private val chats = mutableMapOf<String, ChatState>()
+    /** 공개 대화방(스레드)마다 이어 가는 세션 (서버를 다시 시작하면 새로) */
+    private val publicSessions = mutableMapOf<String, dev.vesta.core.SessionId>()
+    /** 공개 대화방에서 사람마다 부른 시각 (한 시간 창) */
+    private val publicCalls = mutableMapOf<String, ArrayDeque<Long>>()
     private var pairingFailures = 0
 
     private class ApprovalMessage(val card: ApprovalCard, val field: String?, val value: String?) {
@@ -102,6 +114,8 @@ class ChannelBot(
 
     private suspend fun onMessage(message: Inbound.Message, scope: CoroutineScope) {
         if (!message.direct) {
+            val guest = publicGuest
+            if (message.mentioned && guest != null) return onPublic(message, guest(), scope)
             log.info { "1:1 대화가 아닌 ${surface.name} 메시지 무시 (${message.chat})" }
             return
         }
@@ -157,6 +171,27 @@ class ChannelBot(
         startTurn(binding, state, chat, UserInput(input), scope)
     }
 
+    /**
+     * 공개 대화방에서 부름: 손님 계정(GUEST)으로 답한다. 승인이 필요한 일은 하지 않고, 로컬 자료는 보내지 않는다.
+     * 대화방마다 질문 하나씩, 사람마다 한 시간에 [publicPerHour]번까지 (누구나 부를 수 있어 Mac이 붙잡히지 않게)
+     */
+    private suspend fun onPublic(message: Inbound.Message, guest: UserContext, scope: CoroutineScope) {
+        val sentAt = message.sentAt
+        if (sentAt != null && clock.instant().epochSecond - sentAt.epochSecond > STALE_SECONDS) return
+        val chat = message.chat
+        val text = message.text?.trim().orEmpty()
+        if (text.isEmpty()) return send(chat, "무엇이든 물어보세요. 여기서는 대화·웹 검색만 합니다 (내 자료·도구는 봇과 1:1 대화에서).")
+        val now = clock.millis()
+        val calls = publicCalls.getOrPut(message.userId) { ArrayDeque() }
+        while (calls.isNotEmpty() && now - calls.first() > HOUR_MILLIS) calls.removeFirst()
+        if (calls.size >= publicPerHour) return send(chat, "한 사람이 한 시간에 ${publicPerHour}번까지 부를 수 있습니다. 잠시 뒤에 불러 주세요.")
+        val state = chats.getOrPut(chat) { ChatState() }
+        if (state.job?.isActive == true) return send(chat, "앞 질문에 답하는 중입니다. 끝나면 다시 불러 주세요.")
+        calls.addLast(now)
+        log.info { "${surface.name} 공개 대화방 질문: ${who(message)} (${chat})" }
+        startTurn(ChannelBinding(guest, channel, PUBLIC_PREFIX + chat, chat, publicSessions[chat]), state, chat, UserInput(routed(text)), scope)
+    }
+
     /** `/new`, `!new`, `/new@봇이름` → "new". 엔진 명령이 아니면 null */
     private fun command(text: String): String? {
         if (text.firstOrNull() !in PREFIXES) return null
@@ -205,6 +240,7 @@ class ChannelBot(
     private suspend fun runTurn(binding: ChannelBinding, state: ChatState, chat: String, input: UserInput, voice: Boolean) {
         // 생성 중 메시지 수정은 이 턴의 하위 작업으로 (턴이 끝나거나 취소되면 함께 멈춘다)
         val turnScope = CoroutineScope(currentCoroutineContext())
+        val public = binding.externalUserId.startsWith(PUBLIC_PREFIX)
         fun newReply() = LiveReply(surface, chat, config.streamIntervalMillis, nowMillis, turnScope).also {
             // 로컬 자료를 보내지 않는 설정이면 어느 에이전트가 맡을지 알기 전까지 글자를 보여 주지 않는다
             it.streaming = config.allowLocalSources
@@ -237,10 +273,11 @@ class ChannelBot(
                 if (event is AgentEvent.Done) mark("생성 끝")
                 when (event) {
                     is AgentEvent.SessionReady -> if (event.sessionId != binding.sessionId) {
-                        bindings.setSession(channel, binding.externalUserId, event.sessionId)
+                        if (public) publicSessions[chat] = event.sessionId
+                        else bindings.setSession(channel, binding.externalUserId, event.sessionId)
                     }
                     is AgentEvent.Routed -> {
-                        if (!config.allowLocalSources && event.decision.agent in LOCAL_AGENTS) withheld = true
+                        if ((!config.allowLocalSources || public) && event.decision.agent in LOCAL_AGENTS) withheld = true
                         reply.status(ChannelText.agentName(event.decision.agent))
                     }
                     is AgentEvent.Status -> reply.status(event.text)
@@ -261,7 +298,7 @@ class ChannelBot(
                     }
                     is AgentEvent.Sources -> {
                         evidence = event.evidence
-                        if (!config.allowLocalSources && event.evidence.any(ChannelText::isLocal)) withheld = true
+                        if ((!config.allowLocalSources || public) && event.evidence.any(ChannelText::isLocal)) withheld = true
                     }
                     is AgentEvent.Grounding -> unsupported = event.unsupported.size
                     is AgentEvent.Token -> reply.append(event.text)
@@ -335,6 +372,8 @@ class ChannelBot(
         val id = event.requestId
         val limit = surface.approvalBodyLimit
         val deny = when {
+            // 공개 대화방은 누구나 볼 수 있고 누구나 버튼을 누를 수 있다
+            binding.externalUserId.startsWith(PUBLIC_PREFIX) -> "공개 대화방에서는 승인이 필요한 작업을 하지 않습니다. 봇과 1:1 대화에서 요청하세요."
             event.risk == RiskLevel.EXEC && !config.allowExecApproval -> "이 메신저에서는 셸 승인을 받지 않도록 설정돼 있어 거부했습니다 (channels.${surface.key}.allowExecApproval: false)."
             // 실행할 내용을 전부 보여 줄 수 없으면 승인받지 않는다
             event.risk == RiskLevel.EXEC && event.details.body.length > limit -> "명령이 너무 길어 이 메신저에 전부 보여 줄 수 없어 거부했습니다. CLI나 웹 UI에서 요청하세요."
@@ -587,6 +626,9 @@ class ChannelBot(
     companion object {
         /** 이보다 오래된 메시지는 실행하지 않는다 */
         const val STALE_SECONDS = 600L
+        /** 공개 대화방 턴의 가짜 연결 ID 머리 (세션은 연결 저장소가 아니라 메모리에) */
+        private const val PUBLIC_PREFIX = "public:"
+        private const val HOUR_MILLIS = 3_600_000L
         const val MAX_PAIRING_FAILURES = 5
         const val FILE_CHARS = 30_000
         private const val MAX_COLLECTION_BUTTONS = 6

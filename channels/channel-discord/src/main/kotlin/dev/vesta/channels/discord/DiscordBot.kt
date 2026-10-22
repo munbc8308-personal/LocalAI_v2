@@ -49,8 +49,16 @@ class DiscordBot(
     actions: dev.vesta.channels.ChannelActions? = null,
     /** 음성 답변 (음성 메시지, M18). 음성으로 묻고 `!voice`를 켰을 때만 */
     textToSpeech: dev.vesta.core.media.TextToSpeech? = null,
+    /** 서버 채널에서 부르면 쓸 손님 계정 (M18). null이면 서버 채널은 받지 않는다 */
+    publicGuest: (suspend () -> dev.vesta.core.UserContext)? = null,
 ) {
-    private val bot = ChannelBot(DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions)
+    private val bot = ChannelBot(
+        DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions,
+        publicGuest = publicGuest, publicPerHour = config.publicPerHour,
+    )
+    private val publicEnabled = publicGuest != null
+    /** 봇이 만든 스레드 (그 안에서 부르면 새 스레드 없이 그 자리에서 답한다) */
+    private val threads = mutableSetOf<String>()
     /** 먼저 보내는 알림 (M16) */
     val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     private val json = Json { ignoreUnknownKeys = true }
@@ -80,6 +88,7 @@ class DiscordBot(
         val author = message.author ?: return
         // 봇 자신(과 다른 봇)이 보낸 글
         if (author.bot || author.id == selfId) return
+        if (message.guildId != null) return onGuildMessage(message, author, scope)
         val attachment = message.attachments.firstOrNull()
         bot.handle(
             Inbound.Message(
@@ -90,6 +99,33 @@ class DiscordBot(
                 direct = message.guildId == null,
                 sentAt = message.timestamp?.let { runCatching { OffsetDateTime.parse(it).toInstant() }.getOrNull() },
                 file = attachment?.let { a -> InboundFile(a.filename, a.size, kindOf(a.contentType)) { max -> api.download(a.url, max) } },
+            ),
+            scope,
+        )
+    }
+
+    /**
+     * 서버 채널 글: 봇을 부른 글만 (M18). 글에서 스레드를 만들어 그 안에서 답한다 (채널을 답으로 덮지 않게).
+     * 스레드를 만들 수 없으면(권한·이미 스레드 안) 그 자리에서 답한다. 첨부 파일은 받지 않는다
+     */
+    private suspend fun onGuildMessage(message: DcMessage, author: DcUser, scope: CoroutineScope) {
+        val me = selfId ?: return
+        if (!publicEnabled || message.mentions.none { it.id == me }) return
+        val text = message.content.replace(Regex("<@!?$me>"), " ").trim()
+        val chat = if (message.channelId in threads) message.channelId else {
+            runCatching { api.createThread(message.channelId, message.id, text.lineSequence().firstOrNull().orEmpty().take(40).ifBlank { "Vesta" }) }
+                .onFailure { log.info { "Discord 스레드를 만들지 못해 그 자리에서 답합니다: ${it.message}" } }
+                .getOrNull()?.also { threads += it } ?: message.channelId
+        }
+        bot.handle(
+            Inbound.Message(
+                userId = author.id,
+                userName = author.username,
+                chat = chat,
+                text = text.ifEmpty { null },
+                direct = false,
+                mentioned = true,
+                sentAt = message.timestamp?.let { runCatching { OffsetDateTime.parse(it).toInstant() }.getOrNull() },
             ),
             scope,
         )

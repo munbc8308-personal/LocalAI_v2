@@ -793,6 +793,7 @@ MCP `annotations`는 서버가 주는 **힌트일 뿐**이라 그대로 믿지 �
 | V-07 | 이미지 편집 | 보류 | 인페인팅·변형. 모델·메모리 검토 후 결정 |
 | V-08 | 생성물 보관 | P2 | 생성 이미지를 `MediaAsset`으로 저장, 사용자별 갤러리 |
 | V-09 | 음성 대화 모드 | P1 | 웹 UI 🗣: 손 안 대고 말 → 인식 → 답 → 읽어 주기를 되풀이 (M18). 소리 크기로 말 시작·끝 감지(소음에 맞춰 기준 조정, 0.9초 조용하면 끝), 16kHz WAV로 인식, 답은 문장 단위로 미리 만들어 순서대로 읽음, 생각·읽는 동안 마이크 무시(에코 방지), 읽는 중 눌러 끊기. 휴대폰은 Tailscale HTTPS |
+| I-07 | Discord 서버 채널 | P1 | `@봇 질문`으로 부르면 누구나(Mac 주인도) 손님 계정 `discord-guest`(GUEST: 대화·웹 검색만)로 답한다. 글에서 스레드를 만들어 답하고 스레드 안에서 다시 부르면 이어 간다(못 만들면 그 자리). 승인 작업은 거부, 로컬 자료는 보내지 않음, 한 사람 한 시간 20번(`channels.discord.publicPerHour`), 대화방마다 질문 하나씩. 내 권한은 1:1 DM에서. 끄기 `channels.discord.publicChannels: false` (M18) |
 | V-10 | 메신저 음성 답장 | P1 | Telegram 음성 메시지, Discord 음성 메시지(flags 8192, 길이·파형). 음성으로 묻고 `/voice`·`!voice`를 켰을 때 (M18) |
 
 - 미디어 모델(mflux, mlx-whisper, MeloTTS)은 Python 패키지라 **로컬 미디어 워커**(`127.0.0.1` HTTP, uv 환경, launchd 등록) 하나로 묶어 띄운다. 앱은 `media` 모듈의 클라이언트로 호출한다.
@@ -1992,6 +1993,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 웹 UI `VoiceConversation`(VoiceChat.kt): ScriptProcessor로 마이크를 받아 RMS로 말 시작·끝 감지(소음 바닥 ×3, 최소 0.012, 앞 2프레임 함께, 0.9초 조용하면 끝, 0.3초 미만은 버림, 최대 30초) → 16kHz 16비트 WAV(`Wav.encode`) → `/api/stt` → 질문 전송 → 답이 오는 대로 `SpeechText.cut`(문장 끝, 8자 미만은 붙임, 닫히지 않은 코드 블록 앞까지)·`clean`(코드·표·출처 번호·링크·기호 빼기) → `/api/speech`를 미리(병렬) 만들고 순서대로 재생 → 다시 듣기. 생각·읽는 동안 마이크 무시, 읽는 중 눌러 끊기(생성도 멈춤). 입력란 옆 🗣 단추·상태 줄(단계·마이크 크기·알아들은 말).
 - Discord 음성 답장: `DiscordApi.createVoiceMessage`(flags 8192, `duration_secs`·`waveform`), `OggOpus.durationSeconds`(마지막 granule − OpusHead pre-skip, 48kHz), `DiscordSurface.supportsVoice`, `DiscordBot(textToSpeech)`, `DiscordConfig.voiceReply`.
 - `ChatController.send`가 보낸 묶음(Turn)을 돌려준다.
+- Discord 서버 채널(I-07): `ChannelBot.onPublic`(손님 계정·사람별 한 시간 횟수·대화방별 한 질문·승인 거부·로컬 자료 보류·세션은 메모리), Gateway `GUILD_MESSAGES` 인텐트(봇을 부른 글은 Message Content 권한 없이 내용이 온다), `DiscordApi.createThread`, 초대 주소 권한(채널 보기·보내기·첨부·기록·공개 스레드·스레드에 보내기). 손님 계정은 사용자 수 제한에 세지 않는다(`UserService.SYSTEM_USERS`).
 
 #### 확인
 - 서버: `say`로 만든 16kHz WAV → `/api/stt` 0.44초 "내일 서울 날씨 어때?" 정확. 문장 하나 `/api/speech` 0.70초.

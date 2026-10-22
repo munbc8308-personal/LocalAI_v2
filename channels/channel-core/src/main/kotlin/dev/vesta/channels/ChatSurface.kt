@@ -91,6 +91,8 @@ sealed interface Inbound {
         val text: String?,
         /** 1:1 대화인지. 아니면 받지 않는다 */
         val direct: Boolean = true,
+        /** 공개 대화방에서 봇을 불렀다 (@멘션). 공개 대화방은 부른 글만 받는다 */
+        val mentioned: Boolean = false,
         val sentAt: Instant? = null,
         val file: InboundFile? = null,
     ) : Inbound
