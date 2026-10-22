@@ -77,7 +77,8 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
 
                 val results = mutableListOf<Triple<Candidate, Scorecard?, Verdict?>>()
                 val local = runCatching { admin.localModels().map { it.name }.toSet() }.getOrDefault(emptySet())
-                for (candidate in candidates) {
+                for (picked in candidates) {
+                    var candidate = picked
                     val pulled = candidate.name !in local
                     try {
                         if (pulled) {
@@ -91,6 +92,9 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
                                 if (percent / 10 != shown / 10) { shown = percent; repo.stage(run.id, "받기 ${candidate.name} $percent%"); echo(dim("  $percent%")) }
                             }
                         }
+                        // 직접 지정한 후보는 받은 뒤 digest를 채운다 (모델 목록의 digest 앞 12자리와 같게 기록해 다음 점검에서 다시 평가하지 않게)
+                        if (candidate.digest == "manual") runCatching { admin.localModels().firstOrNull { it.name == candidate.name } }.getOrNull()
+                            ?.let { candidate = candidate.copy(digest = it.digest.take(12), sizeBytes = it.sizeBytes) }
                         repo.stage(run.id, "평가 ${candidate.name}")
                         echo("후보 평가: ${candidate.name}")
                         val card = AppContainer(generalOverride = candidate.name).use { evaluator.score(it) }
