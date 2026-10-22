@@ -79,6 +79,9 @@ class DiscordVoiceService(
 
     /** JDA를 띄운다. libopus·DAVE를 쓸 수 없으면 false (음성 채널 없이 계속) */
     fun start(): Boolean = runCatching {
+        // 진단: 20ms 타이머가 정말 20ms인지 (macOS가 백그라운드 프로세스의 타이머를 묶으면 늘어진다)
+        val probe = (1..25).map { val t = System.nanoTime(); Thread.sleep(20); (System.nanoTime() - t) / 1e6 }
+        log.info { "타이머 정확도: 20ms 잠들기 → 평균 %.1fms, 최대 %.1fms".format(probe.average(), probe.max()) }
         check(club.minnced.opus.util.OpusLibrary.loadFrom(settings.opusLibrary)) { "libopus를 불러오지 못했습니다 (${settings.opusLibrary}, brew install opus)" }
         jda = JDABuilder.createDefault(token, GatewayIntent.GUILD_VOICE_STATES)
             .disableIntents(GatewayIntent.GUILD_MESSAGES, GatewayIntent.GUILD_MESSAGE_REACTIONS, GatewayIntent.GUILD_MESSAGE_TYPING,

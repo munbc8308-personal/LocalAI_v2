@@ -23,6 +23,11 @@
     </dict>
     <key>RunAtLoad</key>
     <true/>
+    <!-- 음성 채널(M19): 소리 조각을 20ms마다 보내야 한다. launchd 기본은 타이머를 묶어 늦게 깨워(20ms → 70ms) 말이 늘어지고 끊긴다 -->
+    <key>LegacyTimers</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
     <key>KeepAlive</key>
     <true/>
     <key>ThrottleInterval</key>
