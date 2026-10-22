@@ -198,6 +198,12 @@ class ApiTest : FunSpec({
         client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.TooManyRequests
         client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.OK
 
+        // 이름을 비운 로그인과 이름을 적은 로그인은 같은 계정(OWNER)의 횟수를 쓴다. 없는 이름을 많이 보내도 초기화되지 않는다
+        repeat(3) { client.post("/api/login") { setBody("""{"password":"x"}""") } }
+        repeat(1_100) { i -> client.post("/api/login") { setBody("""{"name":"nobody$i","password":"x"}""") } }
+        repeat(2) { client.post("/api/login") { setBody("""{"name":"owner","password":"x"}""") } }
+        client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+
         client.delete("/api/users/mina") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
         client.get("/api/users") { bearerAuth("secret") }.bodyAsText() shouldNotContain "mina"
     } }

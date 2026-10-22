@@ -36,18 +36,21 @@ class WebAuth(
 ) {
     private val random = SecureRandom()
     private val mutex = Mutex()
-    /** 이름별 연속 실패 수와 잠금 끝 시각. 이름을 비우면 OWNER */
+    /** 계정별 연속 실패 수와 잠금 끝 시각 */
     private class Attempts(var failures: Int = 0, var lockedUntil: Instant = Instant.EPOCH)
-    private val attempts = HashMap<String, Attempts>()
+
+    /**
+     * 키는 사용자 ID: 이름을 비운 로그인과 이름을 적은 로그인(OWNER)이 같은 횟수를 쓴다.
+     * 없는 이름은 모두 [UNKNOWN] 하나로 센다 → 기록은 사용자 수 + 1개를 넘지 않아 지울 일이 없다
+     * (지우는 방식이면 없는 이름을 많이 보내 실제 계정의 실패 횟수를 초기화할 수 있다).
+     */
+    private val attempts = HashMap<Long, Attempts>()
 
     suspend fun login(name: String?, password: String, userAgent: String?): LoginResult = mutex.withLock {
         val now = clock.instant()
-        val login = name?.trim()?.takeIf { it.isNotBlank() }
-        // 없는 이름을 바꿔 가며 보내도 기록이 끝없이 늘지 않게
-        if (attempts.size > MAX_TRACKED) attempts.entries.removeIf { !now.isBefore(it.value.lockedUntil) && it.value.failures < MAX_FAILURES }
-        val tries = attempts.getOrPut(login?.lowercase() ?: "") { Attempts() }
+        val credential = repo.credential(name?.trim()?.takeIf { it.isNotBlank() })
+        val tries = attempts.getOrPut(credential?.user?.userId?.value ?: UNKNOWN) { Attempts() }
         if (now.isBefore(tries.lockedUntil)) return LoginResult.Locked(Duration.between(now, tries.lockedUntil).seconds + 1)
-        val credential = repo.credential(login)
         if (credential != null && credential.passwordHash == null) return LoginResult.NoPassword
         // 사용자가 없어도 같은 시간이 걸리게 해시를 계산한다
         val ok = withContext(Dispatchers.Default) { PasswordHasher.verify(password, credential?.passwordHash ?: DUMMY_HASH) } && credential != null
@@ -74,7 +77,8 @@ class WebAuth(
 
     private companion object {
         const val MAX_FAILURES = 5
-        const val MAX_TRACKED = 1_000
+        /** 없는 이름의 실패를 모으는 키 (사용자 ID는 1부터) */
+        const val UNKNOWN = -1L
         val DUMMY_HASH: String = PasswordHasher.hash("vesta-dummy-password")
 
         fun sha256(value: String): String =
