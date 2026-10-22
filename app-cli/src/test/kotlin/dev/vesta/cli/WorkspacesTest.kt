@@ -56,6 +56,8 @@ class WorkspacePreviewTest : FunSpec({
         // 보이지 않는 유니코드: 양방향 제어, 폭 없는 공백, 태그 블록(서로게이트 쌍)
         listOf("규칙\u202e뒤집기", "규칙\u200b", "규칙" + String(Character.toChars(0xE0041))).forEach { Workspaces.hasControlChars(it) shouldBe true }
         Workspaces.visible("a" + String(Character.toChars(0xE0041))) shouldBe "a\\u{e0041}"
-        Workspaces.hasControlChars("한국어 English 😀 — “따옴표”") shouldBe false
+        Workspaces.hasControlChars("한국어 English 😀 — “따옴표” ❤️ ✔️") shouldBe false
+        // 기본 무시 문자: 글자 뒤 변형 선택자, 한글 채움, 점자 빈칸, 결합 무시, 변형 선택자 보충
+        listOf("규칙a️", "규칙ㅤ", "규칙⠀", "a͏b", "x" + String(Character.toChars(0xE0100))).forEach { Workspaces.hasControlChars(it) shouldBe true }
     }
 })

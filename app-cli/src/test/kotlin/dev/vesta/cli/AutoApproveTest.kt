@@ -42,6 +42,7 @@ class AutoApproveTest : FunSpec({
         listOf(
             "renovate.json", "Taskfile.yml", "lefthook.yml", "config/app.toml", ".drone.yml", ".woodpecker/ci.yaml", ".gitea/x.md", ".cargo/config.md",
             ".eslintrc.js", "gulpfile.js", "noxfile.py", "setup.py", "vite.config.ts", "tailwind.config.js", "src/.hidden.kt",
+            "buildSrc/src/main/kotlin/Plugin.kt", "project/Build.scala", "Package.swift", "sitecustomize.py", "Jenkinsfile.groovy", "Dangerfile.js", "nginx.conf.js",
         ).forEach { AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false }
         AutoApprove.allows(event("make_directory", ".github"), root.toString()) shouldBe false
         AutoApprove.allows(event("apply_patch", "README.md"), root.toString()) shouldBe false

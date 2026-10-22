@@ -12,18 +12,19 @@ import java.nio.file.Path
  * - 경로의 어느 부분이든 점으로 시작하면(`.git`, `.github`, `.envrc`, `.cargo`…) 묻는다. [PROTECTED_DIRS]도 묻는다
  * - 이름이 빌드·작업 도구 설정 꼴이면(`*.config.*`, `*rc`, `gulpfile.js`, `conftest.py`, `setup.py`…) 묻는다
  * - 비교는 대소문자를 무시한다 (macOS 파일 시스템은 `.GIT/hooks`도 `.git/hooks`다)
+ * 남는 위험: 소스 파일은 빌드·실행하면 결국 돈다. 자동 승인은 사용자가 켜는 것이고, 셸 실행(빌드·테스트)은 늘 따로 묻는다.
  * 셸·MCP 도구·작업 폴더 밖도 늘 묻는다. 지침이나 읽은 파일 속 지시문이 실행되는 코드를 몰래 바꾸지 못하게 한다
  */
 internal object AutoApprove {
     private val TOOLS = setOf("write_file", "make_directory", "move_file")
-    private val PROTECTED_DIRS = setOf("gradle", "node_modules", "vendor", "scripts", "bin", "hooks")
+    private val PROTECTED_DIRS = setOf("gradle", "buildsrc", "project", "node_modules", "vendor", "scripts", "bin", "hooks")
     private val SOURCE_EXTENSIONS = setOf(
         "md", "txt", "rst", "adoc", "kt", "java", "scala", "groovy", "swift", "go", "rs", "py", "rb", "php", "c", "h", "cc", "cpp", "hpp", "m", "mm", "cs",
         "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte", "css", "scss", "less", "html", "sql", "csv", "proto", "graphql", "svg",
     )
     /** 확장자가 소스라도 빌드·작업·테스트 도구가 스스로 찾아 실행하는 이름 */
     private val PROTECTED_FILE = Regex(
-        "^(.*\\.config\\.[a-z]+|.*rc(\\.[a-z]+)?|(gulpfile|gruntfile|jakefile|noxfile|tasks|dodo|fabfile|toxfile|conftest|setup|manage|build|" +
+        "^(.*\\.config\\.[a-z]+|.*\\.conf\\.[a-z]+|.*rc(\\.[a-z]+)?|Package\\.swift|(site|user)customize\\.py|Jenkinsfile.*|Dangerfile.*|Fastfile|Podfile|Brewfile|(gulpfile|gruntfile|jakefile|noxfile|tasks|dodo|fabfile|toxfile|conftest|setup|manage|build|" +
             "webpack|rollup|vite|babel|jest|vitest|eslint|prettier|tailwind|postcss|next|nuxt|svelte|astro)\\.[a-z]+|" +
             "VESTA\\.md|CLAUDE\\.md|AGENTS\\.md|GEMINI\\.md)$",
         RegexOption.IGNORE_CASE,
