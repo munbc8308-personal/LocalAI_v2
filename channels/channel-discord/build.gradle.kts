@@ -6,6 +6,7 @@ plugins {
 dependencies {
     api(project(":channel-core"))
     implementation(libs.bundles.ktor.client)
+    implementation(libs.ktor.client.java)
     implementation(libs.kotlin.logging)
     testImplementation(libs.ktor.client.mock)
     testImplementation(testFixtures(project(":channel-core")))

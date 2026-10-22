@@ -4,6 +4,7 @@ import dev.vesta.channels.ChannelApiException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.java.Java
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.request.forms.formData
@@ -258,12 +259,13 @@ class HttpDiscordApi(
         private val CDN_HOSTS = setOf("cdn.discordapp.com", "media.discordapp.net")
         private const val USER_AGENT = "DiscordBot (https://github.com/munbc8308-personal/LocalAI_v2, 1.0)"
 
-        fun restClient() = HttpClient(CIO) {
+        // REST 호출은 JDK HttpClient 엔진: Ktor CIO는 연결을 다시 쓰지 못해 호출마다 약 1.2초(새 TLS 연결),
+        // JDK 엔진은 연결을 이어 써 약 0.27초 (M15 실기기 확인, 텔레그램 API). JDK 엔진은 읽기 시간 제한이 없어 요청 전체 시간만 제한한다
+        fun restClient() = HttpClient(Java) {
             expectSuccess = false
             install(HttpTimeout) {
                 requestTimeoutMillis = 60_000
                 connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 60_000
             }
         }
 

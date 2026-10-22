@@ -8,5 +8,6 @@ dependencies {
     implementation(libs.bundles.ktor.client)
     implementation(libs.kotlin.logging)
     testImplementation(libs.ktor.client.mock)
+    implementation(libs.ktor.client.java)
     testImplementation(testFixtures(project(":channel-core")))
 }

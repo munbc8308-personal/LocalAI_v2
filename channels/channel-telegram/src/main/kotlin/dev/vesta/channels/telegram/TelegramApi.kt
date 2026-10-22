@@ -3,6 +3,7 @@ package dev.vesta.channels.telegram
 import dev.vesta.channels.ChannelApiException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.java.Java
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
@@ -276,12 +277,13 @@ class HttpTelegramApi(
 
     companion object {
         /** long polling(최대 50초)보다 넉넉한 시간 제한 */
-        fun defaultClient() = HttpClient(CIO) {
+        // REST 호출은 JDK HttpClient 엔진: Ktor CIO는 연결을 다시 쓰지 못해 호출마다 약 1.2초(새 TLS 연결),
+        // JDK 엔진은 연결을 이어 써 약 0.27초 (M15 실기기 확인, 텔레그램 API). JDK 엔진은 읽기 시간 제한이 없어 요청 전체 시간만 제한한다
+        fun defaultClient() = HttpClient(Java) {
             expectSuccess = false
             install(HttpTimeout) {
                 requestTimeoutMillis = 90_000
                 connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 90_000
             }
         }
 

@@ -18,6 +18,7 @@ import dev.vesta.core.media.TextToSpeech
 import dev.vesta.core.tools.ApprovalDecision
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -196,7 +197,9 @@ class ChannelBot(
     }
 
     private suspend fun runTurn(binding: ChannelBinding, state: ChatState, chat: String, input: UserInput, voice: Boolean) {
-        fun newReply() = LiveReply(surface, chat, config.streamIntervalMillis, nowMillis).also {
+        // 생성 중 메시지 수정은 이 턴의 하위 작업으로 (턴이 끝나거나 취소되면 함께 멈춘다)
+        val turnScope = CoroutineScope(currentCoroutineContext())
+        fun newReply() = LiveReply(surface, chat, config.streamIntervalMillis, nowMillis, turnScope).also {
             // 로컬 자료를 보내지 않는 설정이면 어느 에이전트가 맡을지 알기 전까지 글자를 보여 주지 않는다
             it.streaming = config.allowLocalSources
         }
@@ -212,9 +215,20 @@ class ChannelBot(
         val opened = mutableListOf<String>()
         // 만든 이미지는 답변을 마친 뒤 그 아래에 보낸다
         val images = mutableListOf<AgentEvent.Media>()
+        // 단계별 시간 (느린 답변 진단): 첫 이벤트·라우팅·첫 글자·생성 끝·마무리
+        val began = nowMillis()
+        val marks = linkedMapOf<String, Long>()
+        fun mark(name: String) { marks.putIfAbsent(name, nowMillis() - began) }
+        var apiMillis = 0L
+        var apiCalls = 0
         try {
             reply.start("생각 중…")
+            mark("시작 메시지")
             conversation.send(binding.user, channel, binding.sessionId, input).collect { event ->
+                mark("첫 이벤트")
+                if (event is AgentEvent.Routed) mark("라우팅")
+                if (event is AgentEvent.Token) mark("첫 글자")
+                if (event is AgentEvent.Done) mark("생성 끝")
                 when (event) {
                     is AgentEvent.SessionReady -> if (event.sessionId != binding.sessionId) {
                         bindings.setSession(channel, binding.externalUserId, event.sessionId)
@@ -234,6 +248,7 @@ class ChannelBot(
                         val segment = reply.answer
                         reply.finish(if (withheld || !reply.streaming || segment.isBlank()) "아래 요청을 확인해 주세요." else segment, null)
                         earlier.append(segment)
+                        apiMillis += reply.apiMillis; apiCalls += reply.apiCalls
                         reply = newReply()
                         opened += event.requestId
                         requestApproval(binding, state, chat, event)
@@ -266,8 +281,14 @@ class ChannelBot(
                         error?.let { append("\n\n오류: ").append(it) }
                     }.trim().ifEmpty { if (earlier.isNotBlank()) "" else if (cancelled) "(중단됨)" else "(답변 없음)" }
                 }
+                mark("대화 끝")
                 runCatching { reply.finish(body, if (withheld) null else footer(answer, evidence, done, unsupported)) }
                     .onFailure { log.warn { "${surface.name} 답변 마무리 실패: ${it.message}" } }
+                mark("마무리")
+                log.info {
+                    "${surface.name} 답변 ${done?.agent ?: "-"} ${nowMillis() - began}ms (" + marks.entries.joinToString { "${it.key} ${it.value}" } +
+                        ") · 메신저 API ${apiCalls + reply.apiCalls}회 ${apiMillis + reply.apiMillis}ms"
+                }
                 images.forEach { image ->
                     val sent = runCatching { surface.sendImage(chat, image.bytes, image.caption) }
                         .onFailure { log.warn { "${surface.name} 이미지 보내기 실패: ${it.message}" } }
