@@ -37,6 +37,11 @@ class ChatCommand : CliktCommand(name = "chat") {
     private val showThinking by option("--show-thinking", help = "추론 모델의 생각 과정 표시").flag()
 
     private val local by option("--local", help = "서버가 떠 있어도 이 프로세스에서 직접 실행 (임베디드)").flag()
+    private val acceptWrites by option("--accept-writes", help = "파일 쓰기·수정은 묻지 않고 승인 (셸은 계속 묻는다). 대화 중 /accept로 바꾼다").flag()
+    private val noWorkspace by option("--no-workspace", help = "지금 폴더를 작업 폴더로 쓰지 않는다").flag()
+
+    /** 이번 실행에서 파일 쓰기를 묻지 않고 승인할지 (/accept) */
+    private var autoWrites = false
 
     override fun run() = runBlocking {
         openBackend().use { backend ->
@@ -56,8 +61,27 @@ class ChatCommand : CliktCommand(name = "chat") {
             }
 
             out.println(dim("Vesta · ${backend.description} · /help 명령 보기 · Ctrl+D 종료"))
+            autoWrites = acceptWrites
+            val workspace = if (noWorkspace) null else Workspaces.current()
+            workspace?.let { ws ->
+                out.println(dim("작업 폴더 ${Workspaces.display(ws.path)}" + (if (ws.instructions != null) " · ${Workspaces.FILE} 읽음" else "") +
+                    if (autoWrites) " · 파일 쓰기 자동 승인" else ""))
+            }
             session?.let { printHistory(out, backend, it) }
             out.flush()
+            // 작업 폴더가 등록한 저장소면 바뀐 파일만 다시 색인한다. 기다리지 않고 대화를 시작한다
+            // (입력 대기 readLine이 이 스레드를 막으므로 다른 스레드에서)
+            val refresh = workspace?.let { ws ->
+                launch(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        Workspaces.refreshRepo(ws)?.let { reader.printAbove(dim(it)) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        reader.printAbove(dim("저장소 색인 갱신 실패: ${e.message}"))
+                    }
+                }
+            }
 
             while (true) {
                 val line = try {
@@ -89,13 +113,20 @@ class ChatCommand : CliktCommand(name = "chat") {
                             }
                         }
                         "/history" -> session?.let { printHistory(out, backend, it) } ?: out.println(dim("아직 대화가 없습니다."))
+                        "/accept" -> {
+                            autoWrites = when (arg?.lowercase()) { "on" -> true; "off" -> false; else -> !autoWrites }
+                            out.println(dim(if (autoWrites) "파일 쓰기·수정을 묻지 않고 승인합니다 (셸은 계속 묻습니다). 끄기: /accept off" else "파일 쓰기·수정도 매번 묻습니다."))
+                        }
                     }
                     out.flush()
                     continue
                 }
 
-                session = generate(terminal, reader, backend, session, line) ?: session
+                session = generate(terminal, reader, backend, session, line, workspace) ?: session
             }
+            // 색인이 남았으면 멈춘다 (남은 파일은 다음 실행 때). 터미널을 닫기 전에 끝나야 출력이 꼬이지 않는다
+            refresh?.cancel()
+            refresh?.join()
             out.println(dim("종료합니다."))
             out.flush()
             terminal.close()
@@ -127,21 +158,25 @@ class ChatCommand : CliktCommand(name = "chat") {
         return EmbeddedBackend(app)
     }
 
-    private suspend fun generate(terminal: Terminal, reader: LineReader, backend: ChatBackend, session: Session?, text: String): Session? {
+    private suspend fun generate(terminal: Terminal, reader: LineReader, backend: ChatBackend, session: Session?, text: String, workspace: dev.vesta.core.agent.Workspace?): Session? {
         val out = terminal.writer()
         val renderer = StreamRenderer(out, showThinking)
         var current = session
         val start = TimeSource.Monotonic.markNow()
         val job = kotlinx.coroutines.coroutineScope {
             launch {
-                backend.send(session?.id, text).collect { event ->
+                backend.send(session?.id, text, workspace).collect { event ->
                     if (event is AgentEvent.SessionReady && event.created) {
                         current = backend.find(event.sessionId)
                     }
                     renderer.render(event, start.elapsedNow())
                     if (event is AgentEvent.Media) saveImage(backend, event)?.let { out.println("🖼 이미지: $it"); out.flush() }
                     if (event is AgentEvent.ApprovalRequested) {
-                        backend.resolveApproval(event.requestId, Approvals.ask(reader, out, event))
+                        val decision = if (autoWrites && event.risk == dev.vesta.core.RiskLevel.WRITE) {
+                            out.println(dim("✓ 자동 승인 (파일 쓰기): ${event.details.title}"))
+                            dev.vesta.core.tools.ApprovalDecision.Approve
+                        } else Approvals.ask(reader, out, event)
+                        backend.resolveApproval(event.requestId, decision)
                     }
                 }
             }.also { job ->
@@ -188,7 +223,7 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
-        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history")
+        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept")
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val HELP = """
             /new             새 대화
@@ -197,7 +232,10 @@ class ChatCommand : CliktCommand(name = "chat") {
             /history         현재 대화 다시 보기
             /web 질문         웹 검색해서 답하기 (질문에 URL이 있으면 그 페이지를 읽음)
             /docs 질문        등록한 모든 문서에서 찾아 답하기
+            /code 질문        코드 도우미 (작업 폴더가 등록한 저장소면 그 저장소에서 찾음)
+            /task 할 일       작업 에이전트: 파일 읽기·쓰기·셸로 직접 처리 (쓰기·셸은 승인)
             @컬렉션 질문      지정한 컬렉션에서 찾아 답하기 (@a,b 여러 개)
+            /accept [on|off] 파일 쓰기·수정을 묻지 않고 승인 (셸은 계속 묻는다)
             /exit            종료 (Ctrl+D)
             생성 중 Ctrl+C    답변 중단 (그때까지 내용은 저장)
         """.trimIndent()

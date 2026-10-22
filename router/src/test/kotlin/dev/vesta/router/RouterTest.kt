@@ -31,6 +31,8 @@ class RouterTest : FunSpec({
         val decision = FakeDecision("CHAT", 0.99)
         val router = Router(DecisionConfig(), decision, null)
         router.route("/web 환율", emptyList(), all).let { it.agent shouldBe AgentType.WEB; it.stage shouldBe RoutingStage.EXPLICIT; it.question shouldBe "환율" }
+        router.route("/code 이 함수 설명해 줘", emptyList(), all).let { it.agent shouldBe AgentType.CODE; it.question shouldBe "이 함수 설명해 줘" }
+        router.route("/task 테스트 돌려 줘", emptyList(), all).let { it.agent shouldBe AgentType.TASK; it.stage shouldBe RoutingStage.EXPLICIT }
         router.route("요약해 줘 https://a.com", emptyList(), all).stage shouldBe RoutingStage.RULE
         router.route("```kotlin\nfun f() {}\n``` 리뷰", emptyList(), all).agent shouldBe AgentType.CODE
         decision.calls shouldBe 0

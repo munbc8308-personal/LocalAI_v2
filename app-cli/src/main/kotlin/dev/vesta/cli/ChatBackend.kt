@@ -50,7 +50,7 @@ interface ChatBackend : AutoCloseable {
     /** 시작 줄에 보여 줄 설명 */
     val description: String
     val home: Path
-    fun send(sessionId: SessionId?, text: String): Flow<AgentEvent>
+    fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace? = null): Flow<AgentEvent>
     suspend fun resolveApproval(requestId: String, decision: ApprovalDecision)
     suspend fun recent(limit: Int): List<Session>
     suspend fun find(id: SessionId): Session?
@@ -65,7 +65,8 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
         "모델 ${g.name}${g.reasoningEffort?.let { " (생각 $it)" }.orEmpty()} · 임베디드"
     } ?: "임베디드"
     override val home: Path = app.paths.home
-    override fun send(sessionId: SessionId?, text: String) = app.conversation.send(app.owner, ChannelType.CLI, sessionId, UserInput(text))
+    override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?) =
+        app.conversation.send(app.owner, ChannelType.CLI, sessionId, UserInput(text, workspace = workspace))
     override suspend fun resolveApproval(requestId: String, decision: ApprovalDecision) {
         app.conversation.resolveApproval(app.owner, requestId, decision)
     }
@@ -89,11 +90,11 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
     override val description = "서버 $baseUrl (v$version)"
     override val home: Path = VestaPaths.default().home
 
-    override fun send(sessionId: SessionId?, text: String): Flow<AgentEvent> = flow {
+    override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?): Flow<AgentEvent> = flow {
         http.preparePost("$baseUrl/api/chat") {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
-            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI")))
+            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions)))
         }.execute { response ->
             if (!response.status.isSuccess()) {
                 emit(AgentEvent.Error("서버 오류 ${response.status.value}: ${response.bodyAsText().take(200)}"))

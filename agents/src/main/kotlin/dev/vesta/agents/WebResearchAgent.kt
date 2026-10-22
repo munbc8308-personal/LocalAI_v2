@@ -80,7 +80,7 @@ class WebResearchAgent(
         emit(AgentEvent.Sources(context.evidence))
 
         val spec = models.acquire(ModelRole.GENERAL)
-        val system = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + Prompts.WEB_RULES
+        val system = Prompts.system(request, clock, zone) + "\n" + Prompts.WEB_RULES
         val earlier = HistoryWindow.fit(request.history.dropLast(1), ChatAgent.DEFAULT_CONTEXT_CHARS / 2)
             .let { if (it.lastOrNull()?.role == ChatRole.USER) it.dropLast(1) else it }
         val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + earlier +

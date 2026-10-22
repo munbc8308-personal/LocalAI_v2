@@ -74,6 +74,25 @@ private class ScriptedAgent(private val script: suspend kotlinx.coroutines.flow.
 class DefaultConversationServiceTest : FunSpec({
     val user = UserContext(UserId(1), UserRole.OWNER)
 
+    test("CLI 작업 폴더(M17)는 Mac 주인의, 홈 아래 실제 폴더일 때만 에이전트에 넘긴다") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent))
+        val dir = kotlin.io.path.createTempDirectory(java.nio.file.Path.of(System.getProperty("user.home")), ".vesta-ws-test")
+        try {
+            val workspace = dev.vesta.core.agent.Workspace(dir.toString(), "지침")
+            service.send(user, ChannelType.CLI, null, UserInput("/chat 안녕", workspace = workspace)).toList()
+            agent.requests.last().workspace shouldBe workspace
+            service.send(UserContext(UserId(2), UserRole.MEMBER), ChannelType.CLI, null, UserInput("/chat 안녕", workspace = workspace)).toList()
+            agent.requests.last().workspace shouldBe null
+            service.send(user, ChannelType.CLI, null, UserInput("/chat 안녕", workspace = workspace.copy(path = System.getProperty("user.home")))).toList()
+            agent.requests.last().workspace shouldBe null
+            service.send(user, ChannelType.CLI, null, UserInput("/chat 안녕", workspace = workspace.copy(path = "/tmp"))).toList()
+            agent.requests.last().workspace shouldBe null
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     test("새 세션을 만들고 질문·답변을 저장한다. 다음 턴에는 기록이 넘어간다") {
         val sessions = MemorySessions()
         val messages = MemoryMessages()

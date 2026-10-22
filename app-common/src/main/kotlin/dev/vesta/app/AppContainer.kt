@@ -166,13 +166,17 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         deleteMedia = { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
     )
     private val memberTools = java.util.concurrent.ConcurrentHashMap<Long, ToolRegistry>()
+    private val workspaceTools = java.util.concurrent.ConcurrentHashMap<String, ToolRegistry>()
 
     /**
      * 이 사용자에게 줄 도구 (U-06, T-04). OWNER는 전부, MEMBER는 셸 없이 자기 폴더(`users.memberRoot/<이름>` + `users.paths`)만,
      * GUEST는 없음. 역할이 바뀌면 다음 요청부터 반영된다
      */
-    suspend fun toolsFor(user: UserContext): List<dev.vesta.core.tools.Tool> = when (user.role) {
-        UserRole.OWNER -> toolRegistry.all
+    suspend fun toolsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.tools.Tool> = when (user.role) {
+        // CLI 작업 폴더(M17)가 있으면 그 폴더를 첫 허용 폴더로 둔다: 상대 경로·셸 작업 위치가 그 폴더가 된다
+        UserRole.OWNER -> workspace?.let { ws ->
+            workspaceTools.getOrPut(ws.path) { tools(PathSandbox(listOf(ws.path) + sandbox.roots.map { it.toString() }), shell = true) }.all
+        } ?: toolRegistry.all
         UserRole.GUEST -> emptyList()
         UserRole.MEMBER -> {
             val name = userRepository.get(user.userId)?.name ?: return emptyList()
@@ -254,7 +258,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
                 maxToolOutputChars = config.tools.maxOutputChars,
-                toolsFor = { request -> toolsFor(request.user) },
+                toolsFor = { request -> toolsFor(request.user, request.workspace) },
                 judge = judge,
             ),
             AgentType.IMAGE to (imageGenerator?.let { generator ->

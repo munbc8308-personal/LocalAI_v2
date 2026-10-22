@@ -66,7 +66,7 @@ class TaskAgent(
         // 셸을 주지 않은 사용자(역할 정책, U-06)에게는 셸 규칙 대신 "쓸 수 없다"를 알려 준다
         val effectiveRules = if (available.values.any { it is ShellTool } || "run_shell" !in rules) rules
             else rules.lineSequence().filterNot { "run_shell" in it }.joinToString("\n") + "\n- 이 사용자는 셸 명령을 쓸 수 없다. 셸이 꼭 필요한 요청이면 할 수 없다고 짧게 알리고, 있는 도구로 할 수 있는 것만 한다."
-        val system = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + effectiveRules
+        val system = Prompts.system(request, clock, zone) + "\n" + effectiveRules
         if (available.isNotEmpty()) emit(AgentEvent.Status("도구: ${available.keys.joinToString()}"))
         val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, system))
         messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)

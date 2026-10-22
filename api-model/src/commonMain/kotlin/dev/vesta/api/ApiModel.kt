@@ -25,6 +25,9 @@ data class ChatRequestDto(
     val channel: String = "WEB",
     /** 질문에 붙인 이미지 (base64, PNG·JPEG·WebP·GIF). 형식은 서버가 파일 앞부분으로 확인한다 (V-04) */
     val images: List<String> = emptyList(),
+    /** CLI 작업 폴더(절대 경로)와 그 폴더의 VESTA.md 내용 (M17). CLI 요청의 Mac 주인 것만 쓴다 */
+    val workspace: String? = null,
+    val instructions: String? = null,
 )
 
 /** 메시지에 붙인 미디어. 내용은 `GET /api/media/{id}` */

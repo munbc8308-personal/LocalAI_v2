@@ -58,11 +58,18 @@ class CodeAgent(
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
         val repos = knowledge.accessibleCollections(request.user.userId).filter { it.kind == CollectionKind.CODE }
-        val targets = if (request.collections.isEmpty()) repos else repos.filter { it.name in request.collections }
+        // CLI 작업 폴더가 등록한 저장소 안이면 그 저장소만 본다 (M17)
+        val workspaceRepo = request.workspace?.let { ws -> repos.firstOrNull { repo -> repo.rootPath?.let { Path.of(ws.path).normalize().startsWith(Path.of(it)) } == true } }
+        val targets = when {
+            request.collections.isNotEmpty() -> repos.filter { it.name in request.collections }
+            workspaceRepo != null -> listOf(workspaceRepo)
+            else -> repos
+        }
 
-        val attached = attachments(question, targets)
+        val attached = attachments(question, targets, request.workspace?.path)
         val wantsRepo = targets.isNotEmpty() && (
-            request.collections.isNotEmpty() || attached.isNotEmpty() ||
+            // 저장소 폴더에서 실행한 CLI의 코드 질문은 그 저장소를 먼저 본다 (M17: 안 보면 파일 설명을 지어냈다)
+            request.collections.isNotEmpty() || workspaceRepo != null || attached.isNotEmpty() ||
                 (request.routing?.needsLocal ?: 0.0) >= 0.5 || REPO_HINT.containsMatchIn(question)
             )
 
@@ -80,7 +87,7 @@ class CodeAgent(
         }
 
         val spec = models.acquire(ModelRole.CODE)
-        val base = (request.session.systemPrompt ?: Prompts.base(clock, zone)) + "\n" + Prompts.CODE_RULES
+        val base = Prompts.system(request, clock, zone) + "\n" + Prompts.CODE_RULES
         val earlier = HistoryWindow.fit(request.history.dropLast(1), ChatAgent.DEFAULT_CONTEXT_CHARS / 2)
             .let { if (it.lastOrNull()?.role == ChatRole.USER) it.dropLast(1) else it }
         var groundingText = ""
@@ -109,12 +116,17 @@ class CodeAgent(
     }
 
     /** 질문에 적힌 `경로[:시작[-끝]]` 중 등록 저장소 안에 실제로 있는 파일을 붙인다. */
-    private fun attachments(question: String, repos: List<Collection>): List<Evidence> =
+    private fun attachments(question: String, repos: List<Collection>, workspace: String?): List<Evidence> =
         FILE_REF.findAll(question).mapNotNull { match ->
             val (path, from, to) = Triple(match.groupValues[1], match.groupValues[2].toIntOrNull(), match.groupValues[3].toIntOrNull())
+            // 상대 경로는 작업 폴더 기준을 먼저, 그다음 저장소 루트 기준 (작업 폴더가 저장소의 하위 폴더일 수 있다).
+            // 경로 없이 파일 이름만 쓰면("KoreanStyle.kt") 저장소에서 그 이름의 파일이 하나뿐일 때 붙인다
+            val bases = listOfNotNull(workspace) + repos.mapNotNull { it.rootPath }
             val (repo, file) = repos.firstNotNullOfOrNull { repo ->
-                repo.rootPath?.let { root -> Path.of(root).resolve(path).normalize().takeIf { it.startsWith(root) && it.isRegularFile() } }
-                    ?.let { repo to it }
+                repo.rootPath?.let { root ->
+                    bases.asSequence().map { Path.of(it).resolve(path).normalize() }.firstOrNull { it.startsWith(root) && it.isRegularFile() }
+                        ?: if ('/' !in path) uniqueByName(Path.of(root), path) else null
+                }?.let { repo to it }
             } ?: return@mapNotNull null
             val lines = file.readLines()
             val start = (from ?: 1).coerceIn(1, maxOf(1, lines.size))
@@ -122,6 +134,15 @@ class CodeAgent(
             val numbered = (start..end).joinToString("\n") { "%4d  %s".format(it, lines[it - 1]) }
             Evidence(SourceType.CODE, file.toString(), path, "${repo.name} · $path:$start–$end", numbered, 1.0)
         }.distinctBy { it.ref + it.location }.toList()
+
+    /** 저장소에서 이름이 [name]인 파일이 하나뿐이면 그 파일 (빌드 결과·숨김 폴더는 건너뛴다) */
+    private fun uniqueByName(root: Path, name: String): Path? = runCatching {
+        java.nio.file.Files.walk(root, 20).use { paths ->
+            paths.filter { it.fileName?.toString() == name && it.isRegularFile() }
+                .filter { p -> root.relativize(p).none { it.toString().startsWith(".") || it.toString() in SKIP_DIRS } }
+                .limit(2).toList()
+        }.singleOrNull()
+    }.getOrNull()
 
     /** 커밋하지 않은 변경 (작업 트리 + 스테이징) */
     private fun gitDiff(name: String, root: String): Evidence? = runCatching {
@@ -136,6 +157,7 @@ class CodeAgent(
     companion object {
         /** 평가셋(eval/code-vesta.tsv 20문항 + 저장소에 없는 질문 3개): 있는 질문 최저 0.317, 없는 질문 최고 0.096 */
         const val DEFAULT_UNANSWERABLE = 0.2
+        private val SKIP_DIRS = setOf("build", "node_modules", "out", "target", "dist")
         private val DIFF_HINT = Regex("diff|변경 ?(사항|점|내용)|바뀐 (코드|부분)|수정한 (코드|부분)|커밋 전|작업한 (코드|부분)", RegexOption.IGNORE_CASE)
         private val REPO_HINT = Regex("저장소|레포|리포|repo|코드베이스|우리 (코드|프로젝트)|내 프로젝트|이 프로젝트|어디서 (쓰|사용|처리|호출)|어디에 (있|정의)|구현(돼|되어) ?있")
         private val FILE_REF = Regex("([\\w./-]+\\.(?:kt|kts|java|py|js|ts|tsx|go|rs|swift|rb|sql|sh|yaml|yml|toml|gradle|md))(?::(\\d+)(?:[-–](\\d+))?)?")

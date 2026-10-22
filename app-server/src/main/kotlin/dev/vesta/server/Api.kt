@@ -213,7 +213,9 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
-                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images))
+                    // 작업 폴더는 CLI에서만 받는다 (대화 서비스가 Mac 주인·홈 아래 폴더인지 다시 확인한다)
+                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI }?.let { dev.vesta.core.agent.Workspace(it, request.instructions) }
+                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace))
                         .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                 }
             }

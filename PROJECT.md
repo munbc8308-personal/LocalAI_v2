@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M16 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.7, 2026-10-22)
+> 상태: M0~M9·M13~M17 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.8, 2026-10-22)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -43,6 +43,7 @@
 | v3.5 | 2026-10-22 | **M14 모델 학습**: 답변 피드백·담당 정정(C-09, schema v12), `trainer/`(uv·MLX) — Winnow GGUF → HF 변환, 선택지 로짓 LoRA 학습, Q8_0 GGUF에 병합해 Ollaya 등록(`winnow-vesta:rN`), Ollaya 평가 게이트(정답 증가·질문별 하락 없음·판단 재현 95%), 버전·롤백(`vesta train`, 웹 UI 상태 탭). r2가 210문항 582→628로 통과해 결정 모델로 활성화. Laya → ONNX 경로는 winnow 전환(v2.5)으로 쓰지 않음. 13.16 진행 기록 |
 | v3.6 | 2026-10-22 | **M15 멀티 유저**: `identity` 모듈(`RolePolicy` 역할 표, `UserService`, `FairScheduler` 요청 큐, `PasswordHasher` 이동), 사용자 관리(`vesta user`, `/api/users`, 웹 UI 사용자 카드), 이름 로그인·이름별 잠금·본인 비밀번호 변경, 컬렉션 공유(`collection_share`, schema v13), MEMBER 자기 폴더(`users.memberRoot`)·셸 없음, 역할로 막힌 요청은 모델 없이 안내, 학습 데이터는 동의한 사용자만(L-09), 메신저 `pair --user`. 13.17 진행 기록 |
 | v3.7 | 2026-10-22 | **M16 주간 자가 개선**: `evolution` 모듈(ollama.com 모델 목록 읽기·후보 고르기, `Scorecard`·`Gate` 평가 비교, `ThresholdTuner` 임계값 조정, `EvolutionService` 제안·승인·되돌리기), `vesta evolve run/list/approve/reject/rollback`, launchd `dev.vesta.evolve`(일요일 03:00), 기준 답 평가셋(`eval/answers-ko.tsv`)·저장소에 없는 코드 질문(`eval/code-absent-ko.tsv`), 설정 덮어쓰기 `~/.vesta/tuned.properties`, 메인 모델 교체는 메신저·웹 UI 승인 후 반영, 서버가 바뀐 설정을 보고 쉬는 때 다시 시작, D6 임계값 설정화(`decision.thresholds.codeSufficient`), schema v14. 7.13·13.18 |
+| v3.8 | 2026-10-22 | **M17 CLI 작업 폴더**: `vesta`만 치면 대화, `vesta -p "질문"`(한 번만), 실행한 폴더를 작업 폴더로(파일·셸 상대 경로 기준, 허용 폴더 첫 자리), `VESTA.md` 프로젝트 지침(저장소 루트~작업 폴더), 작업 폴더가 등록한 저장소면 그 저장소를 먼저 보고 시작할 때 바뀐 파일 색인, 파일 이름만 써도 붙이기, `/code`·`/task` 명령, 파일 쓰기 자동 승인(`--accept-writes`, `/accept`, 셸은 계속 승인). 7.14·13.19 |
 
 ---
 
@@ -864,6 +865,19 @@ MCP `annotations`는 서버가 주는 **힌트일 뿐**이라 그대로 믿지 �
 | E-09 | 평가셋 키우기 | P2 | 👍 받은 답을 기준 답 평가셋에 더하기, 👎·정정 질문을 회귀 평가셋에 |
 | E-10 | 생성 모델 미세조정 연결 | P2 | M14 QLoRA가 생기면 후보로 같이 평가 |
 
+### 7.14 CLI 작업 폴더 (Workspace)
+**목적**: 터미널에서 프로젝트 폴더에 들어가 `vesta`를 치면, 그 폴더를 기준으로 코드를 묻고 파일을 고치고 명령을 돌린다 (Claude Code처럼).
+
+| ID | 기능 | 우선순위 | 설명 |
+|----|------|----------|------|
+| W-01 | 기본 실행 | P1 | `vesta` = `vesta chat`, `vesta -p "질문"` = 한 번만 묻고 끝냄(터미널이 아니면 답만 출력, 승인 못 받는 작업은 거부, 오류면 종료 코드 1) |
+| W-02 | 작업 폴더 | P1 | 실행한 폴더(홈 아래, 홈 자체 제외)를 파일 도구·셸의 첫 허용 폴더로. 상대 경로·`cwd: "."`가 이 폴더. Mac 주인·CLI 요청만 (`--no-workspace`로 끔) |
+| W-03 | 프로젝트 지침 | P1 | 저장소 루트(.git)부터 작업 폴더까지의 `VESTA.md`를 차례로 시스템 프롬프트에 붙인다 (8,000자) |
+| W-04 | 저장소 연동 | P1 | 작업 폴더가 등록한 저장소 안이면 코드 질문은 그 저장소에서 찾고, 시작할 때 바뀐 파일만 색인(기다리지 않음). 경로 없이 파일 이름만 써도 하나뿐이면 붙인다. 등록 안 된 git 폴더면 `vesta repo add` 안내 |
+| W-05 | 직접 지정 | P1 | `/code 질문`(코드 도우미), `/task 할 일`(작업 에이전트) |
+| W-06 | 쓰기 자동 승인 | P1 | `--accept-writes`·`/accept [on|off]`: 파일 쓰기·수정은 묻지 않고 승인. **셸(EXEC)은 계속 매번 승인** |
+| W-07 | 긴 작업 | P2 | 계획·할 일 목록, 단계 수 늘리기, 대화 요약 압축 |
+
 ---
 
 ## 8. 시스템 아키텍처
@@ -1229,6 +1243,7 @@ app-cli / app-server
 | **M14. 모델 학습** | 피드백 수집(C-09), 데이터셋 내보내기, 결정 모델(winnow:e4b) LoRA 미세조정 → GGUF → Ollaya, 평가 게이트, 버전·롤백, 이후 생성 모델 QLoRA | 미세조정한 결정 모델이 한국어 평가셋에서 기존보다 높은 점수 |
 | **M15. 멀티 유저** | identity 모듈, 사용자·역할, 사용자별 인증·데이터 분리, 공유 컬렉션, 요청 큐, 역할별 도구 정책 | 두 사용자가 서로의 대화·문서를 볼 수 없음, MEMBER는 Orchard·셸 사용 불가 |
 | **M16. 주간 자가 개선** | evolution 모듈, 새 모델 찾기·받기·평가 게이트, 메신저 승인, 임계값 조정, 결정 모델 재학습 연결, launchd 주간 실행, 되돌리기 | 실제 모델로 점검이 끝나고, 더 나쁜 모델은 제안하지 않으며, 승인·되돌리기가 서버 재시작으로 반영됨 |
+| **M17. CLI 작업 폴더** | `vesta`·`vesta -p`, 작업 폴더·VESTA.md, 저장소 자동 연동·색인, `/code`·`/task`, 쓰기 자동 승인 | 프로젝트 폴더에서 상대 경로로 읽기·쓰기, 지침 반영, 저장소 코드를 근거로 답함 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -1934,6 +1949,29 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 평가셋 키우기(E-09): 👍 받은 답을 기준 답으로, 👎·정정 질문을 회귀 평가셋으로. 지금은 피드백이 0건.
 - D6 겹침: 답이 있는 코드 질문 중 D6 0.057이 하나 있다. 검색 개선이나 D6 질문 문구로 다시 볼 것.
 - 결정 모델 재학습 뒤 임계값을 같은 점검에서 다시 맞추기 (지금은 재학습이 서버에서 따로 돌아 다음 주에 반영).
+
+### 13.19 M17 진행 기록 (2026-10-22)
+
+#### 완료
+- `core`: `Workspace(path, instructions)`·`Workspace.usable`(홈 아래 실제 폴더, 홈 자체 제외), `UserInput.workspace`, `AgentRequest.workspace`. 대화 서비스는 Mac 주인일 때만 넘긴다. API(`ChatRequestDto.workspace·instructions`)는 CLI 요청만 받는다.
+- `agents`: `Prompts.system`(세션 프롬프트 + 작업 폴더·VESTA.md)을 5개 에이전트가 쓴다. CodeAgent는 작업 폴더가 저장소 안이면 그 저장소만 대상으로 검색하고, 상대 경로를 작업 폴더 기준으로 먼저 찾고, 파일 이름만 쓰면 하나뿐일 때 붙인다.
+- `AppContainer.toolsFor(user, workspace)`: 작업 폴더를 첫 허용 폴더로 둔 도구 모음(폴더별 캐시).
+- `router`: `/code`, `/task`.
+- `app-cli`: 루트 `vesta`(하위 명령 없으면 대화), `-p/--print`, `--accept-writes`, `--local`, `--no-workspace`. `Workspaces`(VESTA.md 모으기·저장소 색인 갱신), `PrintMode`, 대화 `/accept`. `knowledge.Indexer`는 취소를 실패로 적지 않는다.
+
+#### 확인 (실제 서버·모델)
+- `cd ~/IdeaProjects/LocalAI && vesta -p "/code 웹 로그인 잠금은 어느 파일에…"` → `app-server/src/main/kotlin/dev/vesta/server/WebAuth.kt` 한 줄 (파이프라 답만).
+- 임시 폴더 + `VESTA.md`("마지막 줄에 — 지침 확인"): `/task notes.txt 몇 줄?` → `search_files path "."`가 작업 폴더로 풀림, 셸은 터미널이 아니라 거부하고 "하지 않았다"고 답함, 지침 줄이 붙음. `--accept-writes`로 `done.txt` 만들기 → 자동 승인·파일 생성.
+- `vesta`(대화)를 저장소에서 실행: "작업 폴더 ~/IdeaProjects/LocalAI", `/code KoreanStyle.kt…` → 저장소 검색·출처 `app-cli/…/KoreanStyle.kt:1–14`, 근거 확인 통과.
+
+#### 발견·수정
+- 저장소 폴더에서 `/code KoreanStyle.kt…`가 검색 없이 **파일 설명을 지어냄**("UI 디자인 스타일") → 작업 폴더 저장소면 늘 검색, 파일 이름만으로도 붙인다.
+- 종료할 때 진행 중인 색인 취소가 "색인 실패" 경고로 쏟아짐 → 취소는 다시 던진다. 터미널을 닫은 뒤 색인 결과를 출력하다 예외 → 색인 작업을 끝낸 뒤 닫는다.
+- 색인 갱신을 대화 스레드에서 띄우면 입력 대기(readLine)에 막혀 돌지 않음 → IO 스레드.
+
+#### 남은 일 (W-07, P2)
+- 계획·할 일 목록, 도구 단계 12 → 더 길게, 긴 대화 요약 압축.
+- 훅·사용자 정의 명령, 이미지 붙여넣기(CLI).
 
 ---
 

@@ -53,6 +53,8 @@ class Indexer(
             val files = if (collection.kind == CollectionKind.CODE) codeFiles(target) else files(target)
             for (file in files) {
                 val result = runCatching { indexFile(collection, file) }.getOrElse {
+                    // 취소(CLI 종료 등)는 실패가 아니다: 남은 파일은 다음 색인 때 다시 한다
+                    if (it is kotlin.coroutines.cancellation.CancellationException) throw it
                     log.warn(it) { "색인 실패: $file" }
                     IndexProgress.Skipped(file, it.message ?: it::class.simpleName.orEmpty())
                 }

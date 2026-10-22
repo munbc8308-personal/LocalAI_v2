@@ -36,7 +36,7 @@ class ChatAgent(
                 models.acquire(ModelRole.GENERAL)
             }
         } else models.acquire(ModelRole.GENERAL)
-        val system = request.session.systemPrompt ?: Prompts.base(clock, zone)
+        val system = Prompts.system(request, clock, zone)
         val messages = listOf(ChatMessage(ChatRole.SYSTEM, system)) + history
         emit(AgentEvent.Status("생성 중"))
         emitAll(Generation.stream(inference, spec, messages, type))

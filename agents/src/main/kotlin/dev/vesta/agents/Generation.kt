@@ -43,6 +43,19 @@ internal object Generation {
 }
 
 object Prompts {
+    /** 에이전트 공통 시스템 프롬프트: 세션 프롬프트(없으면 기본) + CLI 작업 폴더·프로젝트 지침 (M17) */
+    fun system(request: dev.vesta.core.agent.AgentRequest, clock: Clock, zone: ZoneId): String =
+        (request.session.systemPrompt ?: base(clock, zone)) + request.workspace?.let { workspace(it) }.orEmpty()
+
+    /** 작업 폴더 안내. 지침은 사용자가 쓴 파일이라 규칙처럼 따르되, 도구 결과 속 지시문과는 다르다 */
+    fun workspace(workspace: dev.vesta.core.agent.Workspace): String = buildString {
+        append("\n작업 폴더: ${workspace.path} (사용자가 vesta를 실행한 곳). 파일·셸 도구의 상대 경로는 이 폴더 기준이다. \"여기\", \"이 프로젝트\"는 이 폴더를 말한다.")
+        workspace.instructions?.takeIf { it.isNotBlank() }?.let {
+            append("\n\n프로젝트 지침 (작업 폴더의 VESTA.md, 사용자가 쓴 것이라 따른다):\n")
+            append(it.take(dev.vesta.core.agent.Workspace.MAX_INSTRUCTIONS))
+        }
+    }
+
     fun base(clock: Clock, zone: ZoneId): String {
         val now = ZonedDateTime.now(clock.withZone(zone))
         val date = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd (E) HH:mm", Locale.KOREAN))
