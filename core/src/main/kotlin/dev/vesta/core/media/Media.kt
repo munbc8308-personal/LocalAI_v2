@@ -80,6 +80,8 @@ interface SpeechStream : AutoCloseable {
 
 interface TextToSpeech {
     suspend fun synthesize(text: String, format: AudioFormat): ByteArray
+    /** [voice] 목소리로 (사용자 설정 U-07). 목소리를 고를 수 없는 구현은 기본 목소리 */
+    suspend fun synthesize(text: String, format: AudioFormat, voice: String?): ByteArray = synthesize(text, format)
 }
 
 enum class AudioFormat(val mime: String) {

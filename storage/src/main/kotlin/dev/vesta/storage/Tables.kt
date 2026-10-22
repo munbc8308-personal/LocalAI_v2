@@ -268,3 +268,13 @@ object EvolutionCandidates : org.jetbrains.exposed.v1.core.Table("evolution_cand
     val checkedAt = timestamp("checked_at")
     override val primaryKey = PrimaryKey(name, digest)
 }
+
+/** 사용자별 설정 (U-07, v15) */
+object UserSettingsTable : org.jetbrains.exposed.v1.core.Table("user_settings") {
+    val userId = reference("user_id", Users.id, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val nickname = varchar("nickname", 40).nullable()
+    val tone = varchar("tone", 16).default("DEFAULT")
+    val voiceReply = bool("voice_reply").nullable()
+    val voice = varchar("voice", 80).nullable()
+    override val primaryKey = PrimaryKey(userId)
+}

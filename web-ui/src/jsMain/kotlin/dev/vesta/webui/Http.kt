@@ -35,6 +35,10 @@ object Http {
         request("POST", path, body).ensureOk()
     }
 
+    suspend fun put(path: String, body: String) {
+        request("PUT", path, body).ensureOk()
+    }
+
     suspend fun delete(path: String) {
         request("DELETE", path, null).ensureOk()
     }

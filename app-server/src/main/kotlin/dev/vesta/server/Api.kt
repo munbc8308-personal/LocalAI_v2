@@ -76,6 +76,7 @@ import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.builtins.ListSerializer
@@ -123,6 +124,9 @@ class ServerDeps(
     val evolution: EvolutionDesk? = null,
     /** 메신저 계정 연결 (M20): 본인 것은 누구나, 다른 사용자 것은 OWNER만 */
     val messengers: MessengerEndpoints? = null,
+    /** 사용자별 설정 (U-07, M20)과 고를 수 있는 목소리 */
+    val userSettings: dev.vesta.core.identity.UserSettingsRepository? = null,
+    val voices: () -> List<String> = { emptyList() },
 )
 
 /** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
@@ -298,12 +302,14 @@ fun Application.vestaApi(deps: ServerDeps) {
             }
             // 읽어 주기 (V-03): audio/mp4
             post("/speech") {
-                call.principal(deps) ?: return@post
+                val user = call.principal(deps) ?: return@post
                 val tts = deps.textToSpeech ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"읽어 주기가 설정돼 있지 않습니다 (models.tts)"}""")
                 val dto = ApiJson.decodeFromString(SpeechRequestDto.serializer(), call.receiveText())
                 if (dto.text.length > 50_000) return@post call.respondJson(HttpStatusCode.PayloadTooLarge, """{"error":"글이 너무 깁니다"}""")
                 try {
-                    call.respondBytes(tts.synthesize(dto.text, AudioFormat.M4A), ContentType.parse(AudioFormat.M4A.mime))
+                    // 내 설정의 목소리로 (U-07)
+                    val voice = deps.userSettings?.get(user.userId)?.voice?.takeIf { it in deps.voices() }
+                    call.respondBytes(tts.synthesize(dto.text, AudioFormat.M4A, voice), ContentType.parse(AudioFormat.M4A.mime))
                 } catch (e: MediaException) {
                     call.respondJson(HttpStatusCode.UnprocessableEntity, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
                 }
@@ -428,6 +434,32 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 본인 비밀번호 바꾸기 (U-02). 지금 비밀번호 확인은 로그인과 같은 잠금을 쓴다. 바꾸면 모든 기기 로그아웃
+            // 내 설정 (U-07, M20): 호칭·말투·음성 답장·목소리
+            route("/me/settings") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val repo = deps.userSettings ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"설정을 쓸 수 없습니다"}""")
+                    val s = repo.get(user.userId)
+                    val dto = dev.vesta.api.SettingsDto(s.nickname, s.tone.name, s.voiceReply, s.voice, deps.voices())
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.SettingsDto.serializer(), dto))
+                }
+                put {
+                    val user = call.principal(deps) ?: return@put
+                    val repo = deps.userSettings ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"설정을 쓸 수 없습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.SettingsDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    val nickname = dto.nickname?.trim()?.ifEmpty { null }
+                    if (nickname != null && !dev.vesta.core.identity.UserSettings.NICKNAME.matches(nickname)) {
+                        return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"부르는 이름은 글자·숫자·공백 20자까지입니다"}""")
+                    }
+                    val tone = runCatching { dev.vesta.core.identity.Tone.valueOf(dto.tone) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"말투는 DEFAULT·FORMAL·CASUAL 중 하나입니다"}""")
+                    val voice = dto.voice?.ifBlank { null }
+                    if (voice != null && voice !in deps.voices()) return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"이 Mac에 없는 목소리입니다"}""")
+                    repo.save(user.userId, dev.vesta.core.identity.UserSettings(nickname, tone, dto.voiceReply, voice))
+                    call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+            }
             // 메신저 연결 (M20): 내 연결 목록, 내 연결 코드 만들기·끊기
             route("/me/messengers") {
                 get {

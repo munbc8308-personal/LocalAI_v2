@@ -13,6 +13,7 @@ import dev.vesta.api.ConsentDto
 import dev.vesta.api.MeDto
 import dev.vesta.api.MessengersDto
 import dev.vesta.api.PairCodeDto
+import dev.vesta.api.SettingsDto
 import dev.vesta.api.NewUserDto
 import dev.vesta.api.PasswordDto
 import dev.vesta.api.RoleDto
@@ -167,6 +168,60 @@ fun UsersCard(me: MeDto) {
             Button({ type(ButtonType.Submit); classes("primary") }) { Text("사용자 추가") }
         }
         P({ classes("muted", "small") }) { Text("MEMBER: 문서·웹·이미지·자기 폴더 파일(승인), 셸은 Mac 주인 승인. Apple 앱 없음. GUEST: 대화·웹 검색만. 로그인한 사람: ${me.name}") }
+    }
+}
+
+/** 내 설정 (U-07, M20): 부르는 이름, 말투, 메신저 음성 답장, 목소리. 누구나 */
+@Composable
+fun SettingsCard() {
+    val scope = rememberCoroutineScope()
+    var settings by remember { mutableStateOf<SettingsDto?>(null) }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { Http.get("/api/me/settings", SettingsDto.serializer()) }.onSuccess { settings = it }
+    }
+    val s = settings ?: return
+    fun save(next: SettingsDto) {
+        settings = next
+        scope.launch {
+            runCatching { Http.put("/api/me/settings", ApiJson.encodeToString(SettingsDto.serializer(), next.copy(voices = emptyList()))) }
+                .onSuccess { message = true to "저장했습니다" }.onFailure { message = false to (it.message ?: "저장 실패") }
+        }
+    }
+    Div({ classes("card") }) {
+        Div({ classes("row") }) { Span { B { Text("내 설정") } } }
+        message?.let { (ok, text) -> P({ classes(if (ok) "good" else "error", "small") }) { Text(text) } }
+        Div({ classes("row", "small") }) {
+            Span { Text("부르는 이름") }
+            Input(InputType.Text) {
+                value(s.nickname.orEmpty())
+                placeholder("예: 민아")
+                attr("maxlength", "20")
+                onChange { e -> save(s.copy(nickname = e.value.trim().ifEmpty { null })) }
+            }
+        }
+        Div({ classes("row", "small") }) {
+            Span { Text("말투") }
+            Select({ onChange { e -> e.value?.let { save(s.copy(tone = it)) } } }) {
+                listOf("DEFAULT" to "기본", "FORMAL" to "존댓말", "CASUAL" to "반말").forEach { (v, label) -> Option(v, { if (v == s.tone) selected() }) { Text(label) } }
+            }
+        }
+        Div({ classes("row", "small") }) {
+            Span { Text("메신저 음성 답장") }
+            Select({ onChange { e -> save(s.copy(voiceReply = when (e.value) { "on" -> true; "off" -> false; else -> null })) } }) {
+                val current = when (s.voiceReply) { true -> "on"; false -> "off"; null -> "default" }
+                listOf("default" to "서버 설정대로", "on" to "음성으로 물으면 음성으로도", "off" to "글로만").forEach { (v, label) ->
+                    Option(v, { if (v == current) selected() }) { Text(label) }
+                }
+            }
+        }
+        if (s.voices.isNotEmpty()) Div({ classes("row", "small") }) {
+            Span { Text("목소리") }
+            Select({ onChange { e -> save(s.copy(voice = e.value?.ifEmpty { null })) } }) {
+                Option("", { if (s.voice == null) selected() }) { Text("기본") }
+                s.voices.forEach { v -> Option(v, { if (v == s.voice) selected() }) { Text(v) } }
+            }
+        }
     }
 }
 

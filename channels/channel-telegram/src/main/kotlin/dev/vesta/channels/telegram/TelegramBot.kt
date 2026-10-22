@@ -44,8 +44,10 @@ class TelegramBot(
     textToSpeech: TextToSpeech? = null,
     mediaLimits: MediaConfig = MediaConfig(),
     actions: dev.vesta.channels.ChannelActions? = null,
+    /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
+    userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
 ) {
-    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions)
+    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions, userSettings = userSettings)
     /** 먼저 보내는 알림 (M16) */
     val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     private val maxImageBytes = mediaLimits.maxImageMegabytes * 1024L * 1024

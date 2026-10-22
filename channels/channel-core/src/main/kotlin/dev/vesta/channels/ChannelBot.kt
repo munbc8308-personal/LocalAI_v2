@@ -65,6 +65,8 @@ class ChannelBot(
     private val publicGuest: (suspend () -> UserContext)? = null,
     /** 공개 대화방에서 한 사람이 한 시간에 부를 수 있는 횟수 */
     private val publicPerHour: Int = 20,
+    /** 사용자별 설정 (U-07, M20): 음성 답장 기본값·목소리 */
+    private val userSettings: suspend (UserId) -> dev.vesta.core.identity.UserSettings? = { null },
 ) : ChannelNotifier {
     override val channel = surface.channel
     override val name: String get() = surface.name
@@ -154,7 +156,7 @@ class ChannelBot(
             "status" -> return send(chat, runCatching { status() }.getOrElse { "상태 확인 실패: ${it.message}" })
             "voice" -> {
                 if (!surface.supportsVoice || textToSpeech == null) return send(chat, "이 메신저에서는 음성 답변을 쓸 수 없습니다.")
-                val on = !(state.voiceReply ?: config.voiceReply)
+                val on = !(state.voiceReply ?: settingsOf(binding.user.userId)?.voiceReply ?: config.voiceReply)
                 state.voiceReply = on
                 return send(chat, if (on) "음성으로 물으면 음성으로도 답합니다." else "음성 답변을 껐습니다.")
             }
@@ -191,6 +193,8 @@ class ChannelBot(
         log.info { "${surface.name} 공개 대화방 질문: ${who(message)} (${chat})" }
         startTurn(ChannelBinding(guest, channel, PUBLIC_PREFIX + chat, chat, publicSessions[chat]), state, chat, UserInput(routed(text)), scope)
     }
+
+    private suspend fun settingsOf(user: UserId) = runCatching { userSettings(user) }.getOrNull()
 
     /** `/new`, `!new`, `/new@봇이름` → "new". 엔진 명령이 아니면 null */
     private fun command(text: String): String? {
@@ -342,11 +346,12 @@ class ChannelBot(
         }
         // 음성으로 물었으면 답도 읽어 준다 (코드·표·출처는 읽지 않음, V-03)
         val tts = textToSpeech
-        if (voice && !cancelled && !withheld && tts != null && surface.supportsVoice && (state.voiceReply ?: config.voiceReply)) {
+        val settings = if (voice) settingsOf(binding.user.userId) else null
+        if (voice && !cancelled && !withheld && tts != null && surface.supportsVoice && (state.voiceReply ?: settings?.voiceReply ?: config.voiceReply)) {
             val answer = earlier.toString() + reply.answer
             if (answer.isNotBlank()) {
                 try {
-                    surface.sendVoice(chat, tts.synthesize(answer, AudioFormat.OGG_OPUS))
+                    surface.sendVoice(chat, tts.synthesize(answer, AudioFormat.OGG_OPUS, settings?.voice))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

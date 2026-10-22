@@ -167,6 +167,22 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
 
     /** 사용자 (M15) */
     val userRepository = dev.vesta.storage.ExposedUserRepository(database.db)
+    /** 사용자별 설정 (U-07, M20) */
+    val userSettings = dev.vesta.storage.ExposedUserSettingsRepository(database.db)
+
+    /** 고를 수 있는 읽어 주기 목소리: 이 Mac의 한국어 `say` 음성 (처음 물을 때 한 번 읽는다) */
+    val voices: List<String> by lazy {
+        if (config.models.tts?.engine != "say") emptyList()
+        else runCatching {
+            val process = ProcessBuilder("/usr/bin/say", "-v", "?").redirectErrorStream(true).start()
+            val lines = process.inputStream.bufferedReader().readLines()
+            process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+            // "Yuna (Premium)      ko_KR    # 안녕하세요…" → 이름. 이름과 언어 사이는 공백 두 칸 이상
+            lines.mapNotNull { line -> Regex("^(.+?)\\s{2,}(ko_KR)\\s").find(line)?.groupValues?.get(1)?.trim() }
+                // "Eddy (한국어(한국))" → "Eddy". "Yuna (Premium)"은 그대로 (say -v로 고를 수 있는 이름)
+                .map { it.replace(Regex("\\s*\\(한국어.*\\)$"), "") }.distinct()
+        }.getOrDefault(emptyList())
+    }
     val users = dev.vesta.identity.UserService(
         userRepository, webAuth,
         deleteMedia = { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
@@ -240,6 +256,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         approvals = approvals,
         media = mediaStore,
         scheduler = scheduler,
+        persona = { id -> userSettings.get(id).persona() },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),

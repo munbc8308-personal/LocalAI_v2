@@ -16,7 +16,11 @@ import kotlin.io.path.writeText
  * 글은 임시 파일로 넘긴다(인자로 넘기면 `-`로 시작하는 글이 옵션으로 읽힐 수 있다).
  */
 class SayTextToSpeech(private val voice: String, private val ffmpeg: Ffmpeg, private val maxChars: Int) : TextToSpeech {
-    override suspend fun synthesize(text: String, format: AudioFormat): ByteArray {
+    override suspend fun synthesize(text: String, format: AudioFormat): ByteArray = synthesize(text, format, null)
+
+    /** [voice]가 없으면 설정의 목소리. 목소리 이름은 서버가 설치된 음성 목록으로 확인한 것만 온다 */
+    override suspend fun synthesize(text: String, format: AudioFormat, voice: String?): ByteArray {
+        val chosen = voice?.takeIf { it.isNotBlank() && !it.startsWith("-") } ?: this.voice
         val speech = SpeechText.prepare(text, maxChars)
         if (speech.isBlank()) throw MediaException("읽어 줄 내용이 없습니다")
         val aiff = withContext(Dispatchers.IO) {
@@ -24,7 +28,7 @@ class SayTextToSpeech(private val voice: String, private val ffmpeg: Ffmpeg, pri
             val output = Files.createTempFile("vesta-say", ".aiff")
             try {
                 input.writeText(speech)
-                val process = ProcessBuilder("/usr/bin/say", "-v", voice, "-f", input.toString(), "-o", output.toString())
+                val process = ProcessBuilder("/usr/bin/say", "-v", chosen, "-f", input.toString(), "-o", output.toString())
                     .redirectErrorStream(true).start()
                 val log = process.inputStream.bufferedReader().readText()
                 if (!process.waitFor(120, TimeUnit.SECONDS)) {

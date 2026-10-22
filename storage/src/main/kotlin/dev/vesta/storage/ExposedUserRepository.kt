@@ -20,6 +20,7 @@ import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
+import org.jetbrains.exposed.v1.jdbc.upsert
 import java.time.Clock
 import java.time.Instant
 
@@ -71,6 +72,7 @@ class ExposedUserRepository(private val db: Database, private val clock: Clock =
         WebSessions.deleteWhere { WebSessions.userId eq id.value }
         ChannelBindings.deleteWhere { ChannelBindings.userId eq id.value }
         ChannelPairings.deleteWhere { ChannelPairings.userId eq id.value }
+        UserSettingsTable.deleteWhere { UserSettingsTable.userId eq id.value }
         Users.deleteWhere { Users.id eq id.value } > 0
     }
 
@@ -89,4 +91,35 @@ class ExposedUserRepository(private val db: Database, private val clock: Clock =
         trainingConsent = this[Users.trainingConsent],
         createdAt = this[Users.createdAt],
     )
+}
+
+/** 사용자별 설정 (U-07, M20). 없으면 기본값 */
+class ExposedUserSettingsRepository(private val db: org.jetbrains.exposed.v1.jdbc.Database) : dev.vesta.core.identity.UserSettingsRepository {
+    override suspend fun get(user: dev.vesta.core.UserId): dev.vesta.core.identity.UserSettings =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            org.jetbrains.exposed.v1.jdbc.transactions.transaction(db) {
+                UserSettingsTable.selectAll().where { UserSettingsTable.userId eq user.value }.firstOrNull()?.let {
+                    dev.vesta.core.identity.UserSettings(
+                        nickname = it[UserSettingsTable.nickname],
+                        tone = runCatching { dev.vesta.core.identity.Tone.valueOf(it[UserSettingsTable.tone]) }.getOrDefault(dev.vesta.core.identity.Tone.DEFAULT),
+                        voiceReply = it[UserSettingsTable.voiceReply],
+                        voice = it[UserSettingsTable.voice],
+                    )
+                } ?: dev.vesta.core.identity.UserSettings()
+            }
+        }
+
+    override suspend fun save(user: dev.vesta.core.UserId, settings: dev.vesta.core.identity.UserSettings) =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            org.jetbrains.exposed.v1.jdbc.transactions.transaction(db) {
+                UserSettingsTable.upsert {
+                    it[userId] = user.value
+                    it[nickname] = settings.nickname
+                    it[tone] = settings.tone.name
+                    it[voiceReply] = settings.voiceReply
+                    it[voice] = settings.voice
+                }
+            }
+            Unit
+        }
 }

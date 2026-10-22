@@ -40,6 +40,10 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
     val channels = app.config.channels
     val files = ServerChannelFiles(app)
     val notifiers = mutableListOf<ChannelNotifier>()
+    // 사용자별 음성 답장 기본값·목소리 (U-07). 목소리는 이 Mac에 있는 것만
+    val settings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { id ->
+        app.userSettings.get(id).let { s -> if (s.voice != null && s.voice !in app.voices) s.copy(voice = null) else s }
+    }
 
     val telegram = channels.telegram
     val telegramToken = BotTokens.read("telegram")
@@ -49,7 +53,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         else -> {
             val bot = TelegramBot(
                 HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status,
-                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media, actions = actions,
+                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media, actions = actions, userSettings = settings,
             )
             notifiers += bot.notifier
             scope.launch { bot.run() }
@@ -80,7 +84,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             voice?.let { v -> Runtime.getRuntime().addShutdownHook(Thread { v.stop() }) }
             val bot = DiscordBot(
                 api, gateway, app.conversation, app.channelBindings, files, discord, status,
-                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, textToSpeech = app.textToSpeech,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings, textToSpeech = app.textToSpeech,
                 publicGuest = if (discord.publicChannels) ({ publicGuest(app, "discord-guest") }) else null,
                 voice = voice,
             )
@@ -99,7 +103,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             val api = HttpSlackApi(slackBot, slackApp, baseUrl = slack.apiUrl)
             val bot = SlackBot(
                 api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status,
-                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings,
             )
             notifiers += bot.notifier
             scope.launch { bot.run() }

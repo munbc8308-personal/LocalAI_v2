@@ -47,6 +47,8 @@ class DiscordBot(
     speechToText: SpeechToText? = null,
     mediaLimits: MediaConfig = MediaConfig(),
     actions: dev.vesta.channels.ChannelActions? = null,
+    /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
+    userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
     /** 음성 답변 (음성 메시지, M18). 음성으로 묻고 `!voice`를 켰을 때만 */
     textToSpeech: dev.vesta.core.media.TextToSpeech? = null,
     /** 서버 채널에서 부르면 쓸 손님 계정 (M18). null이면 서버 채널은 받지 않는다 */
@@ -56,7 +58,7 @@ class DiscordBot(
 ) {
     private val bot = ChannelBot(
         DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions,
-        publicGuest = publicGuest, publicPerHour = config.publicPerHour,
+        publicGuest = publicGuest, publicPerHour = config.publicPerHour, userSettings = userSettings,
     )
     private val publicEnabled = publicGuest != null
     /** 봇이 만든 스레드 (그 안에서 부르면 새 스레드 없이 그 자리에서 답한다) */

@@ -57,6 +57,8 @@ class DefaultConversationService(
     private val media: MediaStore? = null,
     /** 요청 큐 (U-05). null이면 기다리지 않고 바로 실행한다 */
     private val scheduler: FairScheduler? = null,
+    /** 사용자별 호칭·말투 (U-07, M20) */
+    private val persona: suspend (dev.vesta.core.UserId) -> String? = { null },
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -141,7 +143,7 @@ class DefaultConversationService(
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
                 // 작업 폴더는 Mac 주인만 (파일 도구 범위를 넓히므로). 다른 사용자가 보내면 무시한다
                 workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) },
-                spoken = input.spoken))
+                spoken = input.spoken, persona = runCatching { persona(user.userId) }.getOrNull()))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

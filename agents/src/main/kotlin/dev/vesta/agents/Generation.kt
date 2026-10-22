@@ -46,7 +46,7 @@ object Prompts {
     /** 에이전트 공통 시스템 프롬프트: 세션 프롬프트(없으면 기본) + CLI 작업 폴더·프로젝트 지침 (M17) */
     fun system(request: dev.vesta.core.agent.AgentRequest, clock: Clock, zone: ZoneId): String =
         (request.session.systemPrompt ?: base(clock, zone)) + request.workspace?.let { workspace(it) }.orEmpty() +
-            if (request.spoken) SPOKEN_RULES else ""
+            (if (request.spoken) SPOKEN_RULES else "") + request.persona?.let { "\n$it" }.orEmpty()
 
     /** 음성 대화 (M19): 소리로 들으므로 짧고 말하듯이 */
     const val SPOKEN_RULES = "\n이 대화는 소리로 들려준다. 사람에게 말하듯 자연스러운 구어체로 답한다. 간단한 질문은 짧게, 설명이 필요하면 1분 안팎까지 이어서 말해도 된다. 목록·표·코드·이모지·마크다운 기호를 쓰지 않고, 순서가 있으면 \"먼저\", \"그다음\"처럼 말로 잇는다. 숫자와 단위는 읽기 쉽게 풀어 쓴다."

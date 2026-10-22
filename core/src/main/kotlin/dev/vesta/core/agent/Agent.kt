@@ -25,6 +25,8 @@ data class AgentRequest(
     val workspace: Workspace? = null,
     /** 소리로 들려줄 답 (음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,
+    /** 사용자별 설정의 호칭·말투 (U-07, M20) */
+    val persona: String? = null,
 )
 
 /** 사용자 입력. [images]는 이번 질문에 붙인 이미지 (V-04), [workspace]는 CLI 작업 폴더 (M17) */

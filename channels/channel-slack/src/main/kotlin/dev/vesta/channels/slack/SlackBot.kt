@@ -54,9 +54,11 @@ class SlackBot(
     speechToText: SpeechToText? = null,
     mediaLimits: MediaConfig = MediaConfig(),
     actions: dev.vesta.channels.ChannelActions? = null,
+    /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
+    userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
 ) {
     // 음성 답변은 보내지 않는다 (Slack 음성 메시지 형식은 따로 만들어야 함)
-    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions)
+    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions, userSettings = userSettings)
     /** 먼저 보내는 알림 (M16) */
     val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     internal var selfId: String? = null

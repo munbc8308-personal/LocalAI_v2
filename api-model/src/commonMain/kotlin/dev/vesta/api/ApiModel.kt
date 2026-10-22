@@ -297,3 +297,13 @@ data class MessengersDto(
 /** 일회용 연결 코드. [how]는 그 메신저에서 코드를 보내는 방법 */
 @Serializable
 data class PairCodeDto(val channel: String, val code: String, val expiresInSeconds: Long, val how: String)
+
+/** 사용자별 설정 (U-07, M20). [tone]: DEFAULT / FORMAL(존댓말) / CASUAL(반말). [voices]는 고를 수 있는 목소리 (읽기 전용) */
+@Serializable
+data class SettingsDto(
+    val nickname: String? = null,
+    val tone: String = "DEFAULT",
+    val voiceReply: Boolean? = null,
+    val voice: String? = null,
+    val voices: List<String> = emptyList(),
+)

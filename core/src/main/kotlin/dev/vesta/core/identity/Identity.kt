@@ -36,3 +36,37 @@ interface UserRepository {
     /** [since] 이후 사용자별 질문 수·생성 토큰 */
     suspend fun usageSince(since: Instant): Map<UserId, DailyUsage>
 }
+
+/** 말투 (U-07) */
+enum class Tone { DEFAULT, FORMAL, CASUAL }
+
+/**
+ * 사용자별 설정 (PROJECT.md U-07, M20). [nickname]·[tone]은 시스템 프롬프트에, [voiceReply]는 메신저 음성 답장 기본값,
+ * [voice]는 읽어 주기 목소리(이 Mac의 `say` 음성 이름)
+ */
+data class UserSettings(
+    val nickname: String? = null,
+    val tone: Tone = Tone.DEFAULT,
+    val voiceReply: Boolean? = null,
+    val voice: String? = null,
+) {
+    /** 시스템 프롬프트에 붙일 말. 아무것도 정하지 않았으면 null */
+    fun persona(): String? = buildList {
+        nickname?.let { add("사용자를 '$it'(이)라고 부른다.") }
+        when (tone) {
+            Tone.FORMAL -> add("항상 정중한 존댓말로 답한다.")
+            Tone.CASUAL -> add("친구처럼 편한 반말로 답한다.")
+            Tone.DEFAULT -> Unit
+        }
+    }.takeIf { it.isNotEmpty() }?.joinToString(" ")
+
+    companion object {
+        /** 부르는 이름: 글자·숫자·공백 1~20자 (시스템 프롬프트에 들어가므로 지시문을 넣지 못하게 짧고 단순하게) */
+        val NICKNAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N} ]{0,19}$")
+    }
+}
+
+interface UserSettingsRepository {
+    suspend fun get(user: UserId): UserSettings
+    suspend fun save(user: UserId, settings: UserSettings)
+}
