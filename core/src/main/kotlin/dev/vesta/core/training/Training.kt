@@ -20,7 +20,7 @@ interface FeedbackRepository {
     /** 자기 세션의 답변 메시지에만 남길 수 있다. 아니면 false */
     suspend fun save(userId: UserId, feedback: Feedback): Boolean
     suspend fun find(userId: UserId, messageId: Long): Feedback?
-    /** [userId]가 null이면 모든 사용자 (단일 사용자 동안 OWNER, 멀티 유저에서는 동의한 사용자만 넘긴다, L-09) */
+    /** [userId]가 null이면 모든 사용자. 학습에는 동의한 사용자(L-09)별로 불러 쓴다 */
     suspend fun routingCorrections(userId: UserId?): List<RoutingCorrection>
 }
 

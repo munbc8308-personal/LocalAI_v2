@@ -50,7 +50,7 @@ class CodeAgent(
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
-        val repos = knowledge.listCollections(request.user.userId).filter { it.kind == CollectionKind.CODE }
+        val repos = knowledge.accessibleCollections(request.user.userId).filter { it.kind == CollectionKind.CODE }
         val targets = if (request.collections.isEmpty()) repos else repos.filter { it.name in request.collections }
 
         val attached = attachments(question, targets)

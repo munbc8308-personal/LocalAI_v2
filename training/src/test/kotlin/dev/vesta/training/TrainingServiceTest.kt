@@ -94,7 +94,7 @@ private fun setup(passed: Boolean, slowTrain: Boolean = false, corrections: List
     val config = TrainingConfig(trainerDir = trainer.toString(), workDir = home.resolve("work").toString(), uv = fakeUv(home, passed, slowTrain).toString(), ollayaModels = models.toString())
     val runs = MemoryRuns()
     val versions = MemoryVersions()
-    val service = TrainingService(config, runs, versions, Corrections(corrections), UserId(1), "http://ollaya", CoroutineScope(SupervisorJob() + Dispatchers.IO))
+    val service = TrainingService(config, runs, versions, Corrections(corrections), { setOf(UserId(1)) }, "http://ollaya", CoroutineScope(SupervisorJob() + Dispatchers.IO))
     return Triple(service, runs, versions to home)
 }
 

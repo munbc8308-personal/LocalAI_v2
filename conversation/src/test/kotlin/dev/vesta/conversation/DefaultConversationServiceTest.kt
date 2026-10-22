@@ -25,7 +25,9 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -187,6 +189,43 @@ class ExplicitRouteTest : FunSpec({
         service.send(UserContext(UserId(1), UserRole.OWNER), ChannelType.CLI, null, UserInput("@vesta 메모리 예산은?")).toList()
         docs.request!!.collections shouldBe listOf("vesta")
         docs.request!!.history.last().content shouldBe "메모리 예산은?"
+    }
+
+    test("역할이 허용하지 않는 에이전트는 명시 지정·@이름으로도 쓰지 않고 일반 대화로 보낸다 (U-06)") {
+        val docs = RecordingDocsAgent()
+        val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.DOCS to docs))
+        val guest = UserContext(UserId(3), UserRole.GUEST)
+        val routed = service.send(guest, ChannelType.WEB, null, UserInput("@family 비밀번호 어디 적어 놨지?")).toList()
+            .filterIsInstance<AgentEvent.Routed>().single().decision
+        routed.agent shouldBe AgentType.CHAT
+        routed.requested shouldBe AgentType.DOCS
+        docs.request shouldBe null
+        // 일반 대화 모델에 넘기지 않고(지어내지 않게) 정해진 안내로 답한다
+        chat.requests.shouldBeEmpty()
+        val events = service.send(guest, ChannelType.WEB, null, UserInput("/docs 회의록 찾아 줘")).toList()
+        events.filterIsInstance<AgentEvent.Token>().single().text shouldContain "문서·코드를 검색할 수 없습니다"
+        events.filterIsInstance<AgentEvent.Saved>().size shouldBe 1
+    }
+
+    test("요청 큐: 자리가 없으면 대기 상태를 알리고 차례가 되면 답한다") {
+        val scheduler = dev.vesta.identity.FairScheduler(1)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val agent = ScriptedAgent { request ->
+            if (request.history.last().content == "먼저") gate.await()
+            emit(AgentEvent.Token("답"))
+            emit(AgentEvent.Done(AgentType.CHAT, "m", null))
+        }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent), scheduler = scheduler)
+        kotlinx.coroutines.coroutineScope {
+            val first = async { service.send(UserContext(UserId(1), UserRole.OWNER), ChannelType.WEB, null, UserInput("먼저")).toList() }
+            kotlinx.coroutines.delay(50)
+            val second = async { service.send(UserContext(UserId(2), UserRole.MEMBER), ChannelType.WEB, null, UserInput("다음")).toList() }
+            kotlinx.coroutines.delay(50)
+            gate.complete(Unit)
+            first.await()
+            second.await().filterIsInstance<AgentEvent.Status>().map { it.text } shouldBe listOf("다른 요청을 처리하는 중이라 기다립니다 (대기 1번째)")
+        }
     }
 })
 

@@ -103,10 +103,20 @@ fun main() {
             )
         },
         auth = WebAuth(app.webAuth),
+        // 내 컬렉션과 공유받은 컬렉션 (U-04). GUEST는 로컬 문서를 쓰지 않는다
         collections = { user ->
-            app.knowledge.listCollections(user.userId).map { c ->
-                val stats = app.knowledge.stats(c.id)
-                CollectionDto(c.name, c.kind.name, c.description, c.rootPath, c.embeddingModel, stats.documents, stats.chunks)
+            if (!dev.vesta.identity.RolePolicy.usesLocalData(user.role)) emptyList()
+            else {
+                val names = app.users.list().associate { it.id to it.name }
+                app.knowledge.accessibleCollections(user.userId).map { c ->
+                    val stats = app.knowledge.stats(c.id)
+                    val mine = c.ownerUserId == user.userId
+                    CollectionDto(
+                        c.name, c.kind.name, c.description, if (mine) c.rootPath else null, c.embeddingModel, stats.documents, stats.chunks,
+                        owner = if (mine) null else names[c.ownerUserId],
+                        sharedWith = if (mine) c.sharedWith.mapNotNull { names[it] }.sorted() else emptyList(),
+                    )
+                }
             }
         },
         dashboard = dashboard,
@@ -116,6 +126,7 @@ fun main() {
         mediaLimits = app.config.media,
         feedback = app.feedback,
         training = training,
+        users = app.users,
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )
@@ -145,7 +156,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
         runs = app.trainingRuns,
         versions = app.modelVersions,
         feedback = app.feedback,
-        dataOwner = app.owner.userId,
+        dataUsers = { app.users.trainingUsers() },
         ollayaUrl = app.config.decision.baseUrl,
         scope = scope,
         makeRoom = { bytes ->
@@ -161,7 +172,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             dev.vesta.api.TrainingStateDto(
                 decisionModel = app.decisionModel.current(),
                 baseModel = app.config.decision.model,
-                corrections = app.feedback.routingCorrections(app.owner.userId).size,
+                corrections = app.users.trainingUsers().sumOf { app.feedback.routingCorrections(it).size },
                 runs = app.trainingRuns.list(20).map { it.dto() },
                 versions = app.modelVersions.list("decision").map { dev.vesta.api.ModelVersionDto(it.name, it.baseModel, it.active, it.runId, it.createdAt.toString()) },
             )

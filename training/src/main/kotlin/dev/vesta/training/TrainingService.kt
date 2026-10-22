@@ -46,8 +46,8 @@ class TrainingService(
     private val runs: TrainingRepository,
     private val versions: ModelVersionRepository,
     private val feedback: FeedbackRepository,
-    /** 학습 데이터로 쓸 정정을 남긴 사용자 (단일 사용자 동안 OWNER, L-09) */
-    private val dataOwner: UserId?,
+    /** 학습 데이터로 쓸 정정을 남긴 사용자: OWNER와 동의한 사용자만 (L-09) */
+    private val dataUsers: suspend () -> Set<UserId>,
     private val ollayaUrl: String,
     private val scope: CoroutineScope,
     /** 학습 전에 메모리 자리를 비운다 (ModelManager.reserve + 미디어 워커 내리기) */
@@ -142,7 +142,7 @@ class TrainingService(
 
     /** 사용자가 남긴 라우팅 정정 (L-01·L-02). 담당자만 알므로 웹·로컬 칸은 "-". 없으면 null */
     private suspend fun writeCorrections(target: Path): Path? {
-        val rows = feedback.routingCorrections(dataOwner)
+        val rows = dataUsers().flatMap { feedback.routingCorrections(it) }.sortedBy { it.createdAt }
             .map { PrivacyFilter.cell(it.question) to it.agent.name }
             .filter { it.first.isNotBlank() }
             .distinctBy { it.first }

@@ -20,10 +20,12 @@ import dev.vesta.core.tools.ApprovalDetails
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import dev.vesta.app.PasswordHasher
+import io.kotest.matchers.string.shouldNotContain
+import dev.vesta.identity.PasswordHasher
 import dev.vesta.storage.VestaDatabase
 import dev.vesta.storage.WebAuthRepository
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.header
 import io.ktor.client.request.get
 import io.ktor.client.request.post
@@ -157,6 +159,48 @@ class ApiTest : FunSpec({
         results.count { it == LoginResult.Invalid } shouldBe 5
         auth.login(null, "correct horse", null)::class shouldBe LoginResult.Locked::class
     }
+
+    test("멀티 유저: 사용자 추가는 OWNER만, 서로의 대화를 볼 수 없고, 잠금은 사용자별 (M15)") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val repo = WebAuthRepository(db.db)
+        repo.setPasswordHash(owner.userId, PasswordHasher.hash("correct horse"))
+        val sessions = dev.vesta.storage.ExposedSessionRepository(db.db)
+        val messages = dev.vesta.storage.ExposedMessageRepository(db.db)
+        val users = dev.vesta.identity.UserService(dev.vesta.storage.ExposedUserRepository(db.db), repo)
+        val ownerSession = sessions.create(owner.userId, ChannelType.WEB, "주인 대화")
+        messages.append(ownerSession.id, dev.vesta.core.session.NewMessage(dev.vesta.core.inference.ChatRole.USER, "주인 비밀 질문"))
+        val multi = ServerDeps(conversation, sessions, messages, owner, token = "secret", version = "t", auth = WebAuth(repo), users = users)
+        application { vestaApi(multi) }
+
+        // Mac 주인(CLI 토큰)이 사용자를 만든다. 규칙 위반은 400
+        client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"mina","role":"MEMBER","password":"mina-pass-1"}""") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"boss","role":"OWNER","password":"boss-pass-1"}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.get("/api/users") { bearerAuth("secret") }.bodyAsText().let { it shouldContain "\"mina\""; it shouldContain "\"questionsToday\":1" }
+
+        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-1"}""") }
+        login.status shouldBe HttpStatusCode.OK
+        val me = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText())
+        me.role shouldBe "MEMBER"
+        val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        client.get("/api/sessions") { header("Cookie", cookie) }.bodyAsText() shouldBe "[]"
+        client.get("/api/sessions/${ownerSession.id.value}/messages") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.NotFound
+        client.get("/api/users") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Forbidden
+        client.delete("/api/users/owner") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf) }.status shouldBe HttpStatusCode.Forbidden
+
+        // 본인 비밀번호 바꾸기: 지금 비밀번호가 맞아야 하고, 바꾸면 로그인이 풀린다
+        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"nope","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"mina-pass-1","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.OK
+        client.get("/api/sessions") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Unauthorized
+
+        // mina가 여러 번 틀려 잠겨도 Mac 주인은 로그인할 수 있다
+        repeat(5) { client.post("/api/login") { setBody("""{"name":"mina","password":"x"}""") } }
+        client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        client.post("/api/login") { setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.OK
+
+        client.delete("/api/users/mina") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+        client.get("/api/users") { bearerAuth("secret") }.bodyAsText() shouldNotContain "mina"
+    } }
 
     test("모르는 Host는 거부한다 (DNS 리바인딩 방지)") { testApplication {
         application { vestaApi(deps) }

@@ -122,13 +122,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         embeddingModel = config.models.embedding?.name ?: DEFAULT_EMBEDDING,
         maxPages = config.web.maxPages,
     )
-    /** 파일 도구·셸 허용 폴더 = 설정 + 등록한 코드 저장소 루트 (T-04) */
+    /** 파일 도구·셸 허용 폴더 = 설정 + 등록한 코드 저장소 루트 (T-04). OWNER용 */
     val sandbox = PathSandbox(
         config.tools.allowedPaths + kotlinx.coroutines.runBlocking {
             knowledge.listCollections(owner.userId).mapNotNull { it.rootPath }
         },
     )
-    val toolRegistry = ToolRegistry(
+
+    /** 도구 모음. 셸은 [shell]일 때만 (역할 정책 U-06) */
+    private fun tools(sandbox: PathSandbox, shell: Boolean) = ToolRegistry(
         buildList {
             add(CurrentTimeTool())
             add(ListFilesTool(sandbox))
@@ -144,9 +146,35 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             add(MakeDirectoryTool(sandbox))
             add(MoveFileTool(sandbox))
             add(dev.vesta.tools.ApplyPatchTool(sandbox))
-            if (config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars))
+            if (shell && config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars))
         },
     )
+    val toolRegistry = tools(sandbox, shell = true)
+
+    /** 사용자 (M15) */
+    val userRepository = dev.vesta.storage.ExposedUserRepository(database.db)
+    val users = dev.vesta.identity.UserService(
+        userRepository, webAuth,
+        deleteMedia = { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
+    )
+    private val memberTools = java.util.concurrent.ConcurrentHashMap<Long, ToolRegistry>()
+
+    /**
+     * 이 사용자에게 줄 도구 (U-06, T-04). OWNER는 전부, MEMBER는 셸 없이 자기 폴더(`users.memberRoot/<이름>` + `users.paths`)만,
+     * GUEST는 없음. 역할이 바뀌면 다음 요청부터 반영된다
+     */
+    suspend fun toolsFor(user: UserContext): List<dev.vesta.core.tools.Tool> = when (user.role) {
+        UserRole.OWNER -> toolRegistry.all
+        UserRole.GUEST -> emptyList()
+        UserRole.MEMBER -> {
+            val name = userRepository.get(user.userId)?.name ?: return emptyList()
+            memberTools.getOrPut(user.userId.value) {
+                val home = "${config.users.memberRoot.trimEnd('/')}/$name"
+                runCatching { java.nio.file.Files.createDirectories(java.nio.file.Path.of(home.replaceFirst("~", System.getProperty("user.home")))) }
+                tools(PathSandbox(listOf(home) + config.users.paths[name].orEmpty()), shell = false)
+            }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) }
+        }
+    }
     val approvals = InMemoryApprovalBroker()
 
     /** Apple 앱 (Orchard MCP, PROJECT.md 7.7a). 실행 파일이 있을 때만. 서버는 처음 쓸 때 띄운다. */
@@ -177,17 +205,18 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE, AgentType.TASK))
                 // Apple 앱은 Mac 주인 계정의 데이터 → OWNER만 (7.12)
                 if (orchard != null && user.role == UserRole.OWNER) add(AgentType.PERSONAL)
-                if (knowledge.listCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
+                if (dev.vesta.identity.RolePolicy.usesLocalData(user.role) && knowledge.accessibleCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
                 if (imageGenerator != null) add(AgentType.IMAGE)
             }
         },
         // @이름이 모두 코드 저장소면 코드 도우미로
         mentionAgent = { user, names ->
-            val named = knowledge.listCollections(user.userId).filter { it.name in names }
+            val named = if (dev.vesta.identity.RolePolicy.usesLocalData(user.role)) knowledge.accessibleCollections(user.userId).filter { it.name in names } else emptyList()
             if (named.isNotEmpty() && named.all { it.kind == CollectionKind.CODE }) AgentType.CODE else null
         },
         approvals = approvals,
         media = mediaStore,
+        scheduler = dev.vesta.identity.FairScheduler(config.users.maxParallel),
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
@@ -200,6 +229,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 rules = Prompts.PERSONAL_RULES,
                 // D11로 고른 앱 그룹의 Orchard 도구만 준다
                 toolsFor = { request ->
+                    // Apple 앱은 Mac 주인만 (7.12). 라우팅에서 이미 막지만 도구 단계에서도 확인한다
+                    if (request.user.role != UserRole.OWNER) return@TaskAgent emptyList()
                     val all = orchard?.tools().orEmpty()
                     val groups = appGroups.select(request.history.last().content, all.map { it.group }.toSet())
                     all.filter { it.group in groups }
@@ -210,6 +241,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
                 maxToolOutputChars = config.tools.maxOutputChars,
+                toolsFor = { request -> toolsFor(request.user) },
                 judge = judge,
             ),
             AgentType.IMAGE to (imageGenerator?.let { generator ->

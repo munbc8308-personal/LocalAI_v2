@@ -16,6 +16,17 @@ data class VestaConfig(
     val channels: ChannelsConfig = ChannelsConfig(),
     val media: MediaConfig = MediaConfig(),
     val training: TrainingConfig = TrainingConfig(),
+    val users: UsersConfig = UsersConfig(),
+)
+
+/** 멀티 유저 (PROJECT.md 7.12, M15) */
+data class UsersConfig(
+    /** 동시에 생성하는 요청 수. 넘으면 사용자별 차례(라운드 로빈)로 기다린다 (U-05). Ollama `OLLAMA_NUM_PARALLEL`과 맞춘다 */
+    val maxParallel: Int = 2,
+    /** MEMBER의 파일 도구 폴더. 사용자마다 `<memberRoot>/<이름>` (T-04). OWNER는 tools.allowedPaths */
+    val memberRoot: String = "~/Vesta/users",
+    /** 사용자 이름별 추가 허용 폴더 (MEMBER) */
+    val paths: Map<String, List<String>> = emptyMap(),
 )
 
 /** 모델 학습 (PROJECT.md 7.10, M14). Python 학습기(trainer, uv)는 Vesta가 자식 프로세스로 실행한다 */

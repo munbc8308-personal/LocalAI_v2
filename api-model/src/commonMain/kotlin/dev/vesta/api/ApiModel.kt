@@ -170,6 +170,10 @@ data class CollectionDto(
     val embeddingModel: String,
     val documents: Long,
     val chunks: Long,
+    /** 다른 사용자가 공유해 준 컬렉션이면 그 사용자 이름 (U-04) */
+    val owner: String? = null,
+    /** 내 컬렉션을 공유한 사용자 이름 */
+    val sharedWith: List<String> = emptyList(),
 )
 
 @Serializable
@@ -186,6 +190,35 @@ data class DashboardDto(
     val memoryTotalBytes: Long,
     val memoryBudgetBytes: Long,
 )
+
+/** 사용자 (U-01). 오늘 사용량은 이 Mac 시간대 자정부터 (U-05) */
+@Serializable
+data class UserDto(
+    val name: String,
+    val role: String,
+    val hasPassword: Boolean,
+    val trainingConsent: Boolean,
+    val questionsToday: Int,
+    val tokensToday: Long,
+    val createdAt: String,
+)
+
+/** 새 사용자. 비밀번호가 없으면 로그인할 수 없다 (나중에 정한다) */
+@Serializable
+data class NewUserDto(val name: String, val role: String, val password: String? = null)
+
+@Serializable
+data class RoleDto(val role: String)
+
+@Serializable
+data class PasswordDto(val password: String)
+
+@Serializable
+data class ConsentDto(val consent: Boolean)
+
+/** 본인 비밀번호 바꾸기 */
+@Serializable
+data class ChangePasswordDto(val current: String, val new: String)
 
 /** 쿠키 인증 POST 요청에 붙이는 CSRF 헤더 */
 const val CSRF_HEADER = "X-Vesta-CSRF"

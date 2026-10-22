@@ -13,6 +13,8 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.or
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
@@ -75,9 +77,34 @@ class KnowledgeRepository(
             .firstOrNull()?.toCollection()
     }
 
+    /** 내가 소유한 컬렉션 (관리용: 추가·삭제·공유) */
     suspend fun listCollections(owner: UserId): List<Collection> = io {
         Collections.selectAll().where { Collections.ownerUserId eq owner.value }.orderBy(Collections.name).map { it.toCollection() }
     }
+
+    /** 검색할 수 있는 컬렉션 = 내 것 + 나에게 공유된 것 (U-04). 검색·라우팅은 이것만 쓴다 */
+    suspend fun accessibleCollections(user: UserId): List<Collection> = io {
+        val shared = CollectionShares.select(CollectionShares.collectionId).where { CollectionShares.userId eq user.value }.map { it[CollectionShares.collectionId].value }
+        Collections.selectAll().where { (Collections.ownerUserId eq user.value) or (Collections.id inList shared) }
+            .orderBy(Collections.name).map { it.toCollection() }
+    }
+
+    /** 소유자만 공유 대상을 바꿀 수 있다 */
+    suspend fun share(owner: UserId, id: CollectionId, with: UserId): Boolean = io {
+        if (with == owner || !owns(owner, id)) return@io false
+        CollectionShares.insertIgnore {
+            it[collectionId] = EntityID(id.value, Collections)
+            it[userId] = EntityID(with.value, Users)
+        }
+        true
+    }
+
+    suspend fun unshare(owner: UserId, id: CollectionId, with: UserId): Boolean = io {
+        owns(owner, id) && CollectionShares.deleteWhere { (collectionId eq id.value) and (userId eq with.value) } > 0
+    }
+
+    private fun owns(owner: UserId, id: CollectionId) =
+        Collections.selectAll().where { (Collections.id eq id.value) and (Collections.ownerUserId eq owner.value) }.any()
 
     /** 컬렉션과 그 문서·청크·키워드 색인을 지운다. */
     suspend fun deleteCollection(owner: UserId, id: CollectionId): Boolean = io {
@@ -200,7 +227,13 @@ class KnowledgeRepository(
         )
     }
 
-    private fun ResultRow.toCollection() = Collection(
+    private fun ResultRow.toCollection(): Collection {
+        val id = this[Collections.id].value
+        val shared = CollectionShares.select(CollectionShares.userId).where { CollectionShares.collectionId eq id }.map { UserId(it[CollectionShares.userId].value) }.toSet()
+        return toCollection(shared)
+    }
+
+    private fun ResultRow.toCollection(sharedWith: Set<UserId>) = Collection(
         id = CollectionId(this[Collections.id].value),
         ownerUserId = UserId(this[Collections.ownerUserId].value),
         name = this[Collections.name],
@@ -208,6 +241,7 @@ class KnowledgeRepository(
         embeddingModel = this[Collections.embeddingModel],
         kind = CollectionKind.valueOf(this[Collections.kind]),
         rootPath = this[Collections.rootPath],
+        sharedWith = sharedWith,
     )
 
     companion object {

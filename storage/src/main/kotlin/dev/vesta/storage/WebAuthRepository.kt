@@ -25,7 +25,7 @@ data class Credential(val user: UserContext, val name: String, val passwordHash:
 /** 쿠키로 찾은 웹 세션 */
 data class WebSession(val user: UserContext, val name: String, val csrf: String)
 
-/** 웹 UI 비밀번호·로그인 세션 저장 (PROJECT.md 6.3, U-02). 해시 계산은 호출하는 쪽(app-common PasswordHasher)이 한다. */
+/** 웹 UI 비밀번호·로그인 세션 저장 (PROJECT.md 6.3, U-02). 해시 계산은 호출하는 쪽(identity PasswordHasher)이 한다. */
 class WebAuthRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) {
     private suspend fun <T> io(block: JdbcTransaction.() -> T): T = withContext(Dispatchers.IO) { transaction(db) { block() } }
 

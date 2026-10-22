@@ -29,7 +29,7 @@ class LocalRetriever(
     override val source = SourceType.LOCAL_DOCS
 
     override suspend fun retrieve(user: UserId, queries: List<String>, options: RetrieveOptions): List<Evidence> {
-        val owned = repository.listCollections(user).filter { it.id in options.collections }
+        val owned = repository.accessibleCollections(user).filter { it.id in options.collections }
         if (owned.isEmpty() || queries.isEmpty()) return emptyList()
 
         val rankings = mutableListOf<List<Long>>()

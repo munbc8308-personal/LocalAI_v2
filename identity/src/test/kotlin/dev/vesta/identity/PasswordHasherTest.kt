@@ -1,4 +1,4 @@
-package dev.vesta.app
+package dev.vesta.identity
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe

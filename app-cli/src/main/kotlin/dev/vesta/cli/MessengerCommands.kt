@@ -173,13 +173,17 @@ class PairCommand(
     private val key: String,
     private val instructions: suspend CliktCommand.(code: String) -> Unit,
 ) : CliktCommand(name = "pair") {
-    override fun help(context: Context) = "내 계정을 연결할 일회용 코드를 만든다 (10분)"
+    override fun help(context: Context) = "계정을 연결할 일회용 코드를 만든다 (10분). 기본은 Mac 주인, 가족은 --user"
+    private val user by option("--user", help = "이 사용자로 연결 (vesta user list)")
 
     override fun run() = runBlocking {
         val db = VestaDatabase.open(VestaPaths.default().database).also { it.migrate() }
-        val owner = db.ensureOwner(System.getProperty("user.name") ?: "owner")
+        val target = user?.let { name ->
+            dev.vesta.storage.ExposedUserRepository(db.db).find(name)?.id ?: run { echo("없는 사용자입니다: $name", err = true); throw com.github.ajalt.clikt.core.ProgramResult(1) }
+        } ?: db.ensureOwner(System.getProperty("user.name") ?: "owner")
         val code = PairingCode.generate()
-        ExposedChannelBindingStore(db.db).createPairing(owner, channel, PairingCode.hash(code), Duration.ofMinutes(10))
+        ExposedChannelBindingStore(db.db).createPairing(target, channel, PairingCode.hash(code), Duration.ofMinutes(10))
+        user?.let { echo("$it 의 메신저 계정에서 아래 코드를 보내게 하세요.") }
         instructions(code)
         if (BotTokens.read(key) == null) echo("봇 토큰이 없습니다. 먼저 vesta $key token")
         echo("코드는 한 번만 쓸 수 있고, 새로 만들면 이전 코드는 무효입니다.")

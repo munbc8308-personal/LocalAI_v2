@@ -1,4 +1,4 @@
-package dev.vesta.app
+package dev.vesta.identity
 
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.params.Argon2Parameters

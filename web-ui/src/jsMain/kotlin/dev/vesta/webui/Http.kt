@@ -35,6 +35,10 @@ object Http {
         request("POST", path, body).ensureOk()
     }
 
+    suspend fun delete(path: String) {
+        request("DELETE", path, null).ensureOk()
+    }
+
     /**
      * `/api/chat`의 SSE 응답을 이벤트로 읽는다 (POST라 EventSource를 쓸 수 없어 fetch 스트림을 직접 읽는다).
      * 수집을 취소하면 요청을 끊고, 서버는 생성을 멈춘다.

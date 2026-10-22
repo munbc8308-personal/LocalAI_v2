@@ -44,7 +44,7 @@ class DocsAgent(
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
-        val all = knowledge.listCollections(request.user.userId).filter { it.kind == CollectionKind.DOCS }
+        val all = knowledge.accessibleCollections(request.user.userId).filter { it.kind == CollectionKind.DOCS }
         var targets = if (request.collections.isEmpty()) all else all.filter { it.name in request.collections }
         val missing = request.collections - targets.map { it.name }.toSet()
         if (targets.isEmpty()) {

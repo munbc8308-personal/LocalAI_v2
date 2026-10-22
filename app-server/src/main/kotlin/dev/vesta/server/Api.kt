@@ -21,6 +21,12 @@ import dev.vesta.api.MeDto
 import dev.vesta.api.MessageDto
 import dev.vesta.api.OaiChatRequest
 import dev.vesta.api.SessionDto
+import dev.vesta.api.UserDto
+import dev.vesta.api.NewUserDto
+import dev.vesta.api.RoleDto
+import dev.vesta.api.PasswordDto
+import dev.vesta.api.ConsentDto
+import dev.vesta.api.ChangePasswordDto
 import dev.vesta.api.toDto
 import dev.vesta.core.ChannelType
 import dev.vesta.core.SessionId
@@ -67,6 +73,7 @@ import kotlinx.io.readByteArray
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
@@ -110,6 +117,8 @@ class ServerDeps(
     val feedback: dev.vesta.core.training.FeedbackRepository? = null,
     /** 모델 학습 (M14). OWNER만 */
     val training: TrainingEndpoints? = null,
+    /** 사용자 관리 (M15, U-01). 목록·추가·역할·삭제는 OWNER만, 본인 비밀번호 바꾸기는 누구나 */
+    val users: dev.vesta.identity.UserService? = null,
 )
 
 /** 학습 API가 쓰는 동작 (서버가 TrainingService로 채운다) */
@@ -323,6 +332,65 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("activated", ok) }.toString())
                 }
             }
+            // 사용자 관리 (U-01·U-05): OWNER만
+            route("/users") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val users = call.usersFor(user, deps) ?: return@get
+                    val usage = users.usageToday()
+                    val list = users.list().map {
+                        val today = usage[it.id]
+                        UserDto(it.name, it.role.name, it.hasPassword, it.trainingConsent, today?.questions ?: 0, today?.completionTokens ?: 0, it.createdAt.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(UserDto.serializer()), list))
+                }
+                post {
+                    val user = call.principal(deps) ?: return@post
+                    val users = call.usersFor(user, deps) ?: return@post
+                    val dto = ApiJson.decodeFromString(NewUserDto.serializer(), call.receiveText())
+                    call.userAction {
+                        val role = roleOf(dto.role)
+                        val created = users.create(dto.name, role, dto.password?.takeIf { it.isNotEmpty() })
+                        UserDto(created.name, created.role.name, created.hasPassword, created.trainingConsent, 0, 0, created.createdAt.toString())
+                    }
+                }
+                post("/{name}/role") {
+                    val user = call.principal(deps) ?: return@post
+                    val users = call.usersFor(user, deps) ?: return@post
+                    val dto = ApiJson.decodeFromString(RoleDto.serializer(), call.receiveText())
+                    call.userAction { users.setRole(call.parameters["name"].orEmpty(), roleOf(dto.role)); null }
+                }
+                post("/{name}/password") {
+                    val user = call.principal(deps) ?: return@post
+                    val users = call.usersFor(user, deps) ?: return@post
+                    val dto = ApiJson.decodeFromString(PasswordDto.serializer(), call.receiveText())
+                    call.userAction { users.setPassword(call.parameters["name"].orEmpty(), dto.password); null }
+                }
+                post("/{name}/consent") {
+                    val user = call.principal(deps) ?: return@post
+                    val users = call.usersFor(user, deps) ?: return@post
+                    val dto = ApiJson.decodeFromString(ConsentDto.serializer(), call.receiveText())
+                    call.userAction { users.setConsent(call.parameters["name"].orEmpty(), dto.consent); null }
+                }
+                delete("/{name}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val users = call.usersFor(user, deps) ?: return@delete
+                    call.userAction { users.delete(call.parameters["name"].orEmpty()); null }
+                }
+            }
+            // 본인 비밀번호 바꾸기 (U-02). 바꾸면 다른 기기 로그인도 풀린다
+            post("/me/password") {
+                val user = call.principal(deps) ?: return@post
+                val users = deps.users ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}""")
+                val dto = ApiJson.decodeFromString(ChangePasswordDto.serializer(), call.receiveText())
+                val ok = try {
+                    users.changeOwnPassword(user.userId, dto.current, dto.new)
+                } catch (e: dev.vesta.identity.UserException) {
+                    return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
+                }
+                if (ok) call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
+                else call.respondJson(HttpStatusCode.Forbidden, """{"error":"지금 비밀번호가 맞지 않습니다"}""")
+            }
             get("/collections") {
                 val user = call.principal(deps) ?: return@get
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(CollectionDto.serializer()), deps.collections(user)))
@@ -512,10 +580,30 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
     return session.user
 }
 
+/** 사용자 관리는 Mac 주인만 (U-01). 없거나 권한이 없으면 응답을 보내고 null */
+private suspend fun ApplicationCall.usersFor(user: UserContext, deps: ServerDeps): dev.vesta.identity.UserService? {
+    val users = deps.users ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}"""); return null }
+    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"사용자 관리는 Mac 주인만 할 수 있습니다"}"""); return null }
+    return users
+}
+
+private fun roleOf(name: String): dev.vesta.core.UserRole =
+    runCatching { dev.vesta.core.UserRole.valueOf(name.uppercase()) }.getOrNull() ?: throw dev.vesta.identity.UserException("역할은 MEMBER·GUEST 중 하나입니다")
+
+/** 사용자 관리 동작: 규칙 위반(UserException)은 400, 결과가 있으면 그것을, 없으면 ok */
+private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
+    val result = try {
+        block()
+    } catch (e: dev.vesta.identity.UserException) {
+        return respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
+    }
+    respondJson(HttpStatusCode.OK, result?.let { ApiJson.encodeToString(UserDto.serializer(), it) } ?: """{"ok":true}""")
+}
+
 /** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */
 private suspend fun ApplicationCall.trainingFor(user: UserContext, deps: ServerDeps): TrainingEndpoints? {
     val training = deps.training ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"학습이 설정돼 있지 않습니다"}"""); return null }
-    if (user.role != dev.vesta.core.UserRole.OWNER) { respondJson(HttpStatusCode.Forbidden, """{"error":"학습은 Mac 주인만 할 수 있습니다"}"""); return null }
+    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"학습은 Mac 주인만 할 수 있습니다"}"""); return null }
     return training
 }
 

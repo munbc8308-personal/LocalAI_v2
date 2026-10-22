@@ -20,6 +20,8 @@ data class Collection(
     val kind: CollectionKind = CollectionKind.DOCS,
     /** 코드 저장소의 루트 경로 (CODE일 때). 상대 경로 표시·파일 지정 질의에 쓴다. */
     val rootPath: String? = null,
+    /** 공유한 사용자 (U-04). 비어 있으면 PRIVATE */
+    val sharedWith: Set<UserId> = emptySet(),
 )
 
 /** 검색으로 찾은 근거 한 조각 (PROJECT.md 5.1, 11장 Evidence). */

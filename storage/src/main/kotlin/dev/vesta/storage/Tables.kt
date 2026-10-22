@@ -64,6 +64,13 @@ object Collections : LongIdTable("collections") {
     }
 }
 
+/** 컬렉션 공유 대상 (PROJECT.md U-04, v13). 한 줄도 없으면 PRIVATE(소유자만). 색인은 소유자 것 하나를 같이 쓴다 */
+object CollectionShares : org.jetbrains.exposed.v1.core.Table("collection_share") {
+    val collectionId = reference("collection_id", Collections, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    override val primaryKey = PrimaryKey(collectionId, userId)
+}
+
 /** 색인한 파일. contentHash로 변경 여부를 판단한다 (K-10). */
 object Documents : LongIdTable("documents") {
     val collectionId = reference("collection_id", Collections, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)

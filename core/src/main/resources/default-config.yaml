@@ -60,3 +60,10 @@ channels:
     enabled: true              # 봇·앱 토큰이 모두 있을 때만 켜진다 (vesta slack token)
     allowLocalSources: true
     allowExecApproval: true    # 셸 승인을 Slack에서 받음 (v1.0 결정)
+
+# 멀티 유저 (PROJECT.md 7.12). 사용자 추가: vesta user add <이름> (MEMBER·GUEST)
+users:
+  maxParallel: 2               # 동시에 생성하는 요청 수. 넘으면 사용자별로 돌아가며 기다린다
+  memberRoot: ~/Vesta/users    # MEMBER 파일 도구 폴더: <memberRoot>/<이름>
+  # paths:                     # 사용자별 추가 허용 폴더
+  #   mina: [~/Shared/가족사진]

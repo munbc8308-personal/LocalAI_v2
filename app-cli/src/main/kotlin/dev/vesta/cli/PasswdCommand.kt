@@ -5,7 +5,7 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.prompt
-import dev.vesta.app.PasswordHasher
+import dev.vesta.identity.PasswordHasher
 import dev.vesta.core.config.VestaPaths
 import dev.vesta.storage.VestaDatabase
 import dev.vesta.storage.WebAuthRepository

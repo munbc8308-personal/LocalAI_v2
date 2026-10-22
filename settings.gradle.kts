@@ -58,6 +58,7 @@ include(
     "tools",
     "media",
     "training",
+    "identity",
     "mcp",
     "agents",
     "conversation",

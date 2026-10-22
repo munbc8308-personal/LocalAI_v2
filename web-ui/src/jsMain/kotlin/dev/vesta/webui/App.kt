@@ -72,6 +72,7 @@ fun App() {
 @Composable
 private fun LoginView(onLogin: (MeDto) -> Unit) {
     val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
@@ -83,7 +84,7 @@ private fun LoginView(onLogin: (MeDto) -> Unit) {
                 if (sending || password.isEmpty()) return@addEventListener
                 sending = true
                 scope.launch {
-                    runCatching { Http.post("/api/login", ApiJson.encodeToString(LoginDto.serializer(), LoginDto(password)), MeDto.serializer()) }
+                    runCatching { Http.post("/api/login", ApiJson.encodeToString(LoginDto.serializer(), LoginDto(password, name.trim().ifEmpty { null })), MeDto.serializer()) }
                         .onSuccess(onLogin)
                         .onFailure { error = it.message; password = "" }
                     sending = false
@@ -92,6 +93,14 @@ private fun LoginView(onLogin: (MeDto) -> Unit) {
         }) {
             H2 { Text("Vesta") }
             P({ classes("muted") }) { Text("이 Mac의 로컬 AI 어시스턴트") }
+            // 비워 두면 Mac 주인 (가족·팀은 받은 이름으로)
+            Input(InputType.Text) {
+                value(name)
+                onInput { name = it.value }
+                placeholder("이름 (Mac 주인은 비워 두기)")
+                attr("autocomplete", "username")
+                attr("autocapitalize", "off")
+            }
             Input(InputType.Password) {
                 value(password)
                 onInput { password = it.value }
@@ -546,6 +555,8 @@ private fun CollectionsView(onAsk: (String) -> Unit) {
                     }
                     c.description?.let { Div { Text(it) } }
                     Div({ classes("muted", "small") }) { Text("문서 ${c.documents}개 · 조각 ${c.chunks}개 · ${c.embeddingModel}") }
+                    c.owner?.let { Div({ classes("muted", "small") }) { Text("$it 님이 공유함 (읽기 전용)") } }
+                    if (c.sharedWith.isNotEmpty()) Div({ classes("muted", "small") }) { Text("공유: ${c.sharedWith.joinToString()}") }
                     c.rootPath?.let { Div({ classes("muted", "small", "mono") }) { Text(it) } }
                 }
             }
@@ -596,6 +607,8 @@ private fun DashboardView(me: MeDto) {
             d.models.forEach { (role, name) -> Div({ classes("row", "small") }) { Span { Text(role) }; Span({ classes("mono") }) { Text(name) } } }
         }
         if (me.role == "OWNER") TrainingCard()
+        if (me.role == "OWNER") UsersCard(me)
+        PasswordCard()
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
     }
 }

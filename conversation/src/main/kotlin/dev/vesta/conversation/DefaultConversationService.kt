@@ -24,6 +24,8 @@ import dev.vesta.core.media.MediaStore
 import dev.vesta.core.session.MessageRepository
 import dev.vesta.core.session.NewMessage
 import dev.vesta.core.session.SessionRepository
+import dev.vesta.identity.FairScheduler
+import dev.vesta.identity.RolePolicy
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
@@ -53,6 +55,8 @@ class DefaultConversationService(
     private val approvals: ApprovalBroker? = null,
     /** 질문에 붙인 이미지 보관 (M12). null이면 이미지는 이번 질문에만 쓰고 저장하지 않는다 */
     private val media: MediaStore? = null,
+    /** 요청 큐 (U-05). null이면 기다리지 않고 바로 실행한다 */
+    private val scheduler: FairScheduler? = null,
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -84,19 +88,31 @@ class DefaultConversationService(
             ChatMessage(message.role, if (message.attachments.isNotEmpty() && images.isEmpty()) "$text\n[이미지 ${message.attachments.size}장 첨부]".trim() else text, images = images)
         }.let { if (input.images.isNotEmpty() && saved.isEmpty()) it.dropLast(1) + it.last().copy(images = input.images) else it }
 
-        val available = availability(user).filter { it in agents }.toSet()
+        // 역할이 허용하지 않는 에이전트는 어떤 경로(명시 지정·@이름 포함)로도 쓰지 않는다 (U-06)
+        val allowed = RolePolicy.agents(user.role)
+        val available = availability(user).filter { it in agents && it in allowed }.toSet()
         // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
         val routed = if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
-        val decision = if (routed.collections.isEmpty()) routed
+        val mentioned = if (routed.collections.isEmpty()) routed
             else mentionAgent(user, routed.collections)?.let { routed.copy(agent = it, requested = null) }
                 // @이름으로 직접 지정했는데 그 컬렉션이 없으면 일반 대화로 넘기지 말고 DocsAgent가 "없다"고 알린다
                 ?: if (routed.requested == AgentType.DOCS && AgentType.DOCS in agents) routed.copy(agent = AgentType.DOCS, requested = null) else routed
+        val decision = if (mentioned.agent in allowed) mentioned else mentioned.copy(agent = AgentType.CHAT, requested = mentioned.agent)
+        // 역할 때문에 못 쓰는 에이전트가 판정됐으면 일반 대화로 넘기지 않고 바로 알린다.
+        // 일반 대화 모델은 일정·메일·파일을 볼 수 없어 그럴듯하게 지어내기 때문이다 (예: MEMBER의 "내일 일정")
+        val denied = decision.requested?.takeIf { it !in allowed }
         emit(AgentEvent.Routed(decision))
         lastDecision[session.id] = decision
         routingLog?.let { log -> runCatching { log.record(session.id, decision) } }
+        if (denied != null) {
+            val notice = deniedNotice(denied)
+            messages.append(session.id, NewMessage(role = ChatRole.ASSISTANT, content = notice, agent = AgentType.CHAT, model = POLICY_MODEL))
+                .let { emit(AgentEvent.Token(notice)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
+            return@flow
+        }
         val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
         val route = decision
         val answer = StringBuilder()
@@ -121,7 +137,7 @@ class DefaultConversationService(
                 ),
             ).id
         }
-        try {
+        suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
@@ -136,6 +152,9 @@ class DefaultConversationService(
                     }
                     emit(event)
                 }
+        try {
+            if (scheduler == null) runAgent()
+            else scheduler.run(user.userId, onWait = { ahead -> emit(AgentEvent.Status("다른 요청을 처리하는 중이라 기다립니다 (대기 ${ahead}번째)")) }) { runAgent() }
             // 저장한 답변 ID를 알려 준다 (피드백·정정용, C-09)
             save()?.let { emit(AgentEvent.Saved(it)) }
         } finally {
@@ -148,7 +167,19 @@ class DefaultConversationService(
     private fun titleOf(text: String): String =
         text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.let { if (it.length > 40) it.take(40) + "…" else it } ?: "새 대화"
 
+    /** 역할로 막힌 요청의 안내 (U-06) */
+    private fun deniedNotice(agent: AgentType): String = when (agent) {
+        AgentType.PERSONAL -> "Apple 앱(캘린더·미리 알림·메일·메시지·연락처 등)은 Mac 주인만 쓸 수 있어 이 계정에서는 확인하거나 바꿀 수 없습니다."
+        AgentType.TASK -> "이 계정에서는 파일·도구 작업을 할 수 없습니다. 일반 질문이나 웹 검색은 할 수 있습니다."
+        AgentType.DOCS, AgentType.CODE -> "이 계정에서는 이 Mac의 문서·코드를 검색할 수 없습니다. 일반 질문이나 웹 검색은 할 수 있습니다."
+        AgentType.IMAGE -> "이 계정에서는 이미지를 만들 수 없습니다."
+        else -> "이 계정에서는 이 기능을 쓸 수 없습니다."
+    }
+
     private companion object {
+        /** 모델 없이 정책으로 답했을 때 메시지에 남기는 이름 */
+        const val POLICY_MODEL = "policy"
+
         /** 글 없이 이미지만 보냈을 때 */
         const val DEFAULT_IMAGE_QUESTION = "이 이미지를 설명해 줘."
     }

@@ -25,7 +25,7 @@ class SearchDocsTool(private val knowledge: KnowledgeRepository, private val ret
 
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult {
         val query = arguments.string("query") ?: return fail("query가 필요함")
-        val all = knowledge.listCollections(context.user.userId)
+        val all = knowledge.accessibleCollections(context.user.userId)
         val targets = arguments.string("collection")?.let { name -> all.filter { it.name == name } } ?: all
         if (targets.isEmpty()) return fail("컬렉션이 없음 (있는 것: ${all.joinToString { it.name }.ifEmpty { "없음" }})")
         val hits = retriever.retrieve(context.user.userId, listOf(query), RetrieveOptions(targets.map { it.id }, 6))
