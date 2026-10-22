@@ -60,6 +60,24 @@ interface SpeechToText {
 }
 
 /** 음성 합성 (V-03). 돌려주는 형식은 [format] (m4a: 웹, ogg: Telegram 음성 메시지) */
+/**
+ * 이어 말하기 (PROJECT.md V-11, M19): 문장을 넣는 대로 합성해 소리(48kHz 16비트 스테레오 BE)를 흘린다.
+ * 문장마다 파일을 만드는 [TextToSpeech]와 달리 첫 소리가 바로 나오고 문장 사이가 끊기지 않는다
+ */
+interface StreamingSpeech {
+    fun open(onPcm: (ByteArray) -> Unit): SpeechStream
+}
+
+interface SpeechStream : AutoCloseable {
+    /** 읽을 글 (마크다운이면 읽기 좋게 다듬는다) */
+    fun say(text: String)
+    /** 더 넣을 글이 없다. 남은 소리를 다 흘리면 [await]가 끝난다 */
+    fun finish()
+    suspend fun await()
+    /** 바로 멈춘다 */
+    override fun close()
+}
+
 interface TextToSpeech {
     suspend fun synthesize(text: String, format: AudioFormat): ByteArray
 }

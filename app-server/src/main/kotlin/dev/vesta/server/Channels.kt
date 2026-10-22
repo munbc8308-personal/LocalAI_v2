@@ -74,6 +74,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
                     discordToken, app.conversation, { publicGuest(app, "discord-guest") }, stt, tts,
                     dev.vesta.channels.discord.voice.VoiceSettings(discord.wakeWords, discord.voiceEndSilenceMillis, discord.publicPerHour, discord.opusLibrary),
                     scope,
+                    streaming = app.streamingSpeech,
                 ).takeIf { it.start() }
             } else null
             voice?.let { v -> Runtime.getRuntime().addShutdownHook(Thread { v.stop() }) }

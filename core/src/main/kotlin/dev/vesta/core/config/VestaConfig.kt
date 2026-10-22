@@ -107,6 +107,8 @@ data class MediaConfig(
     val imageSteps: Int = 4,
     /** 이미지 모델이 쓰는 메모리 (그리기 전에 이만큼 자리를 비운다, 2.3) */
     val imageMemoryGigabytes: Int = 10,
+    /** 이어 말하기 도우미 (native/vesta-speak, scripts/install-vesta.sh가 만든다). 없으면 문장마다 `say` (M19) */
+    val speakBinary: String = "~/.vesta/bin/vesta-speak",
 )
 
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */

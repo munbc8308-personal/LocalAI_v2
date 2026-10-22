@@ -104,6 +104,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 읽어 주기: macOS say (models.tts, engine: say) */
     val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.takeIf { it.engine == "say" }
         ?.let { dev.vesta.media.SayTextToSpeech(it.name, ffmpeg, config.media.ttsMaxChars) }
+    /** 이어 말하기 (models.tts가 say일 때, 도우미가 있으면, M19) */
+    val streamingSpeech: dev.vesta.core.media.StreamingSpeech? = config.models.tts?.takeIf { it.engine == "say" }?.let { tts ->
+        java.nio.file.Path.of(config.media.speakBinary.replaceFirst(Regex("^~"), System.getProperty("user.home")))
+            .takeIf { dev.vesta.media.AvSpeechStreaming.available(it) }
+            ?.let { dev.vesta.media.AvSpeechStreaming(it, tts.name) }
+    }
     val inference = OpenAiCompatibleClient(config.inference.baseUrl, http)
     val modelManager = ModelManager(
         models = config.models,

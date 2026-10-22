@@ -37,6 +37,12 @@ if [ -x "$UV" ]; then
     echo "학습기: $TRAINER (vesta train decision)"
 fi
 
+# 이어 말하기 도우미 (M19): macOS 음성 합성을 스트리밍으로. Xcode 명령줄 도구(swiftc)가 있을 때만
+if command -v swiftc >/dev/null 2>&1; then
+    mkdir -p "$HOME/.vesta/bin"
+    swiftc -O -suppress-warnings "$ROOT/native/vesta-speak/main.swift" -o "$HOME/.vesta/bin/vesta-speak" && echo "이어 말하기: $HOME/.vesta/bin/vesta-speak"
+fi
+
 mkdir -p "$HOME/.vesta/evalsets"
 rsync -a --delete --include '*.tsv' --exclude '*' "$ROOT/eval/" "$HOME/.vesta/evalsets/"
 echo "평가셋: $HOME/.vesta/evalsets (주간 점검: vesta evolve run, 매주 일요일 03:00)"

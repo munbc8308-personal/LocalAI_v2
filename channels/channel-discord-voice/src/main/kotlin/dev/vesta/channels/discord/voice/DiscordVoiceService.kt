@@ -66,6 +66,8 @@ class DiscordVoiceService(
     private val textToSpeech: TextToSpeech,
     private val settings: VoiceSettings,
     private val scope: CoroutineScope,
+    /** 이어 말하기 (macOS 음성 합성 스트리밍). 있으면 문장을 넣는 대로 소리가 이어지고, 없으면 문장 묶음마다 합성 */
+    private val streaming: dev.vesta.core.media.StreamingSpeech? = null,
 ) : DiscordVoiceControl {
     private var jda: JDA? = null
     private val rooms = ConcurrentHashMap<String, Room>()
@@ -198,8 +200,38 @@ class DiscordVoiceService(
             answering = scope.launch { answer(question) }
         }
 
-        /** 답이 생성되는 대로 문장마다 미리 합성해 순서대로 보낸다 */
-        private suspend fun answer(question: String) = coroutineScope {
+        private suspend fun answer(question: String) {
+            val stream = streaming ?: run { answerByPieces(question); return }
+            // 이어 말하기: 문장이 끝나는 대로 넣고, 나오는 소리를 그대로 보낸다 (첫 소리 0.4초, 문장 사이 끊김 없음)
+            val speech = stream.open(speaker::enqueue)
+            try {
+                val text = StringBuilder()
+                var spoken = 0
+                fun flush(finished: Boolean) {
+                    val end = Sentences.cut(text.toString(), spoken, finished)
+                    if (end > spoken) {
+                        speech.say(text.substring(spoken, end))
+                        spoken = end
+                    }
+                }
+                conversation.send(guest(), ChannelType.DISCORD, session, UserInput(question, spoken = true)).collect { event ->
+                    when (event) {
+                        is AgentEvent.SessionReady -> session = event.sessionId
+                        is AgentEvent.Token -> { text.append(event.text); flush(false) }
+                        is AgentEvent.Error -> text.append("\n오류가 났어요.")
+                        else -> Unit
+                    }
+                }
+                flush(true)
+                speech.finish()
+                speech.await()
+            } finally {
+                speech.close()
+            }
+        }
+
+        /** 이어 말하기가 없을 때: 답이 생성되는 대로 문장 묶음마다 미리 합성해 순서대로 보낸다 */
+        private suspend fun answerByPieces(question: String) = coroutineScope {
             val pieces = Channel<kotlinx.coroutines.Deferred<ByteArray?>>(Channel.UNLIMITED)
             launch {
                 for (pending in pieces) pending.await()?.let(speaker::enqueue)
