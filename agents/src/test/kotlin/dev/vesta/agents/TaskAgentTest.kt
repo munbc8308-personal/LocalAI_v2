@@ -142,6 +142,14 @@ class TaskAgentTest : FunSpec({
         TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "write_file", "{}")))), models, ToolRegistry(listOf(write)), own, escalation = relay).handle(memberRequest).toList()
         own.opened shouldBe 1
         write.calls.size shouldBe 1
+
+        // 손님은 주인에게 넘기지도 않는다
+        val guestShell = RecordingTool("run_shell", RiskLevel.EXEC)
+        asked.clear()
+        TaskAgent(ScriptedModel(turns(listOf(ToolCall("c1", "run_shell", """{"command":"ls"}""")))), models, ToolRegistry(listOf(guestShell)), AutoBroker(ApprovalDecision.Approve), escalation = relay)
+            .handle(request.copy(user = UserContext(UserId(3), UserRole.GUEST))).toList()
+        guestShell.calls.size shouldBe 0
+        asked.size shouldBe 0
     }
 
     test("거부된 작업은 모델 답변과 상관없이 마지막에 시스템이 표시한다") {

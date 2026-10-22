@@ -210,7 +210,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 runCatching { java.nio.file.Files.createDirectories(home) }
                 // 셸은 자기 폴더 안에서만, 실행마다 Mac 주인 승인 (TaskAgent가 주인에게 넘긴다, M20)
                 tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = config.users.memberShell)
-            }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) || (it.risk == dev.vesta.core.RiskLevel.EXEC && config.users.memberShell) }
+            }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) || (config.users.memberShell && it is ShellTool) }
         }
     }
     val approvals = InMemoryApprovalBroker()

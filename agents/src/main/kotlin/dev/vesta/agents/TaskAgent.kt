@@ -184,6 +184,8 @@ class TaskAgent(
         val details = describeForApproval(tool, arguments)
         // 셸은 Mac 주인만 승인할 수 있다: 다른 사용자의 셸은 주인의 메신저로 넘기고 기다린다
         if (tool.risk == dev.vesta.core.RiskLevel.EXEC && request.user.role != dev.vesta.core.UserRole.OWNER) {
+            // 손님은 넘기지도 않는다 (도구를 받지 않지만 한 겹 더)
+            if (request.user.role == dev.vesta.core.UserRole.GUEST) return ApprovalDecision.Deny("손님은 셸을 쓸 수 없습니다")
             val relay = escalation ?: return ApprovalDecision.Deny("Mac 주인만 셸을 승인할 수 있습니다")
             emit(AgentEvent.Status("Mac 주인에게 셸 실행 승인을 요청했습니다. 기다리는 중…"))
             return relay.ask(request.user, tool.spec.name, details, (arguments["reason"] as? kotlinx.serialization.json.JsonPrimitive)?.content, approvalTimeoutSeconds)
