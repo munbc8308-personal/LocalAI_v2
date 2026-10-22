@@ -12,12 +12,15 @@ if args.count > 1 && args[1] == "--list" {
     exit(0)
 }
 let wanted = args.count > 1 ? args[1] : "Yuna"
-// 같은 이름이면 품질이 높은(고급·향상) 음성을 고른다
-guard let voice = voices.filter({ $0.name == wanted || $0.identifier == wanted }).max(by: { $0.quality.rawValue < $1.quality.rawValue })
+// 같은 이름이면 품질이 높은(프리미엄·향상) 음성을 고른다. 내려받은 음성은 이름에 "(Premium)"·"(향상된 음성)"이 붙는다
+guard let voice = voices.filter({ $0.name == wanted || $0.name.hasPrefix(wanted + " (") || $0.identifier == wanted })
+    .max(by: { $0.quality.rawValue < $1.quality.rawValue })
     ?? AVSpeechSynthesisVoice(language: "ko-KR") else {
     FileHandle.standardError.write("음성을 찾지 못했습니다: \(wanted)\n".data(using: .utf8)!)
     exit(2)
 }
+
+FileHandle.standardError.write("음성: \(voice.name) (\(voice.identifier))\n".data(using: .utf8)!)
 
 let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 2, interleaved: true)!
 let synthesizer = AVSpeechSynthesizer()
