@@ -65,6 +65,10 @@ class ChatCommand : CliktCommand(name = "chat") {
             val workspace = if (noWorkspace) null else Workspaces.current()?.let { ws ->
                 if (Workspaces.trusted(ws)) return@let ws
                 // 처음 보거나 바뀐 VESTA.md: 따를지 먼저 묻는다. 입력이 터미널이 아니면 묻지 않고 쓰지 않는다
+                if (Workspaces.hasControlChars(ws.instructions.orEmpty())) {
+                    out.println(red("${Workspaces.FILE}에 터미널 제어 문자가 들어 있어 쓰지 않습니다 (화면을 속일 수 있음). 파일을 확인하세요"))
+                    return@let ws.copy(instructions = null)
+                }
                 if (System.console() == null) {
                     out.println(dim("${Workspaces.FILE}가 처음 보거나 바뀐 내용이라 이번에는 쓰지 않습니다 (터미널에서 vesta를 실행해 승인)"))
                     return@let ws.copy(instructions = null)

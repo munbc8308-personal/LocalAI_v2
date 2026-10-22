@@ -14,7 +14,7 @@ class AutoApproveTest : FunSpec({
 
     test("작업 폴더 안 일반 파일을 내장 도구로 쓸 때만 자동 승인") {
         AutoApprove.allows(event("write_file", "src/Main.kt"), root.toString()) shouldBe true
-        AutoApprove.allows(event("apply_patch", "a.md", "docs/b.md"), root.toString()) shouldBe true
+        AutoApprove.allows(event("make_directory", "docs/new"), root.toString()) shouldBe true
         AutoApprove.allows(event("move_file", "a.txt", "b.txt"), root.toString()) shouldBe true
     }
 
@@ -32,7 +32,13 @@ class AutoApproveTest : FunSpec({
             ".git/hooks/pre-commit", ".github/workflows/ci.yml", "build.gradle.kts", "gradlew", "scripts/deploy.sh",
             "package.json", "Makefile", "VESTA.md", ".envrc", "gradle/libs.versions.toml",
         ).forEach { AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false }
-        // 한 파일이라도 걸리면 패치 전체를 묻는다
-        AutoApprove.allows(event("apply_patch", "README.md", "build.gradle.kts"), root.toString()) shouldBe false
+        // 대소문자를 바꿔도 같은 폴더다 (macOS)
+        listOf(".GIT/hooks/pre-commit.md", ".GitHub/workflows/ci.yml", "Node_Modules/x.js", "WEBPACK.CONFIG.JS").forEach {
+            AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false
+        }
+        // 허용 목록 밖 확장자·확장자 없는 파일, 패치는 늘 묻는다
+        listOf("run.command", "Dockerfile", "hook", "x.plist", "evil.sh.bak").forEach { AutoApprove.allows(event("write_file", it), root.toString()) shouldBe false }
+        AutoApprove.allows(event("apply_patch", "README.md"), root.toString()) shouldBe false
+        AutoApprove.allows(event("move_file", "a.txt", ".git/hooks/post-checkout"), root.toString()) shouldBe false
     }
 })

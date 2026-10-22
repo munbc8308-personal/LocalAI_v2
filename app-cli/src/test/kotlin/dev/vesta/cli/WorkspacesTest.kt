@@ -46,3 +46,12 @@ class WorkspaceTrustTest : FunSpec({
         Workspaces.trusted(ws.copy(instructions = null), store) shouldBe true
     }
 })
+
+class WorkspacePreviewTest : FunSpec({
+    test("제어 문자는 보이게 바꾸고, 들어 있으면 표시한다") {
+        val tricky = "보통 규칙\u001b[8m숨긴 지시\u001b[0m\r덮어쓰기"
+        Workspaces.hasControlChars(tricky) shouldBe true
+        Workspaces.hasControlChars("규칙\n- 둘째\t줄") shouldBe false
+        Workspaces.preview(dev.vesta.core.agent.Workspace("/p", tricky)) shouldBe "보통 규칙\\x1b[8m숨긴 지시\\x1b[0m\\x0d덮어쓰기"
+    }
+})

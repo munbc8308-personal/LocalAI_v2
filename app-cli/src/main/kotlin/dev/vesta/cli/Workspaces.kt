@@ -53,9 +53,15 @@ internal object Workspaces {
         Files.write(store, kept + "${sha256(text)}\t${workspace.path}")
     }
 
+    /** 터미널 제어 문자(ESC·CR 등)가 들어 있는가. 들어 있으면 화면을 속일 수 있어 신뢰하지 않는다 */
+    fun hasControlChars(text: String) = text.any { (it < ' ' && it != '\n' && it != '\t') || it in '\u007f'..'\u009f' }
+
+    /** 제어 문자를 보이는 기호로 */
+    fun visible(text: String) = text.map { c -> if ((c < ' ' && c != '\n' && c != '\t') || c in '\u007f'..'\u009f') "\\x%02x".format(c.code) else c.toString() }.joinToString("")
+
     /** 승인 전에 보여 줄 지침. 모델이 받는 내용 전부를 보여 준다 (뒤쪽에 숨긴 지시를 못 보고 승인하지 않게). 길면 줄 수를 알린다 */
     fun preview(workspace: Workspace, lines: Int = 80): String {
-        val all = workspace.instructions.orEmpty().lines()
+        val all = visible(workspace.instructions.orEmpty()).lines()
         return all.take(lines).joinToString("\n") + if (all.size > lines) "\n… (${all.size}줄 중 ${lines}줄만 표시 — 나머지도 모델에 들어갑니다. 파일을 직접 확인하세요)" else ""
     }
 
