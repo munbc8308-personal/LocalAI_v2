@@ -23,6 +23,7 @@ bouncycastle = "1.86"
 jda = "6.7.0"
 jdave = "0.1.8"
 jna = "5.17.0"
+udpqueue = "0.2.12"
 
 [libraries]
 # build-logic 전용 (convention plugin 의존성)
@@ -41,6 +42,8 @@ jda = { module = "net.dv8tion:JDA", version.ref = "jda" }
 jdave-api = { module = "club.minnced:jdave-api", version.ref = "jdave" }
 jdave-native-darwin = { module = "club.minnced:jdave-native-darwin", version.ref = "jdave" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+udpqueue-api = { module = "club.minnced:udpqueue-api", version.ref = "udpqueue" }
+udpqueue-native-darwin = { module = "club.minnced:udpqueue-native-darwin", version.ref = "udpqueue" }
 ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }

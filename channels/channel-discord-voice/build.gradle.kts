@@ -14,6 +14,9 @@ dependencies {
     runtimeOnly(libs.jdave.native.darwin)
     // opus-java가 끌어오는 JNA 4는 Apple Silicon용이 없어 5로 올린다 (높은 버전이 이긴다)
     implementation(libs.jna)
+    // 소리 보내기를 네이티브 큐로 (JDA 기본 전송은 Java 스레드의 20ms 간격이 흔들려 끊긴다, M19 실사용)
+    implementation(libs.udpqueue.api)
+    runtimeOnly(libs.udpqueue.native.darwin)
     implementation(libs.kotlin.logging)
     testImplementation(project(":media"))
 }

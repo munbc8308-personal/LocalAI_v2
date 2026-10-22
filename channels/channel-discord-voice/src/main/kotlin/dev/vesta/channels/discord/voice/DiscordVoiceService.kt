@@ -87,7 +87,14 @@ class DiscordVoiceService(
             .disableCache(CacheFlag.EMOJI, CacheFlag.STICKER, CacheFlag.SOUNDBOARD_SOUNDS, CacheFlag.SCHEDULED_EVENTS)
             .enableCache(CacheFlag.VOICE_STATE)
             .setMemberCachePolicy(MemberCachePolicy.VOICE)
-            .setAudioModuleConfig(AudioModuleConfig().withDaveSessionFactory(JDaveSessionFactory()))
+            .setAudioModuleConfig(
+                AudioModuleConfig().withDaveSessionFactory(JDaveSessionFactory()).let { config ->
+                    // 네이티브 전송 큐: 소리를 미리 쌓아 두고 정확한 간격으로 보낸다 (JDA 기본 전송은 Java 스레드 간격이 흔들려 끊긴다)
+                    runCatching { config.withAudioSendFactory(com.sedmelluq.discord.lavaplayer.jdaudp.NativeAudioSendFactory()) }
+                        .onFailure { log.warn { "네이티브 소리 전송을 쓸 수 없어 기본 전송: ${it.message}" } }
+                        .getOrDefault(config)
+                },
+            )
             .addEventListeners(object : ListenerAdapter() {
                 override fun onGuildVoiceUpdate(event: GuildVoiceUpdateEvent) = leaveIfAlone(event.guild)
             })
@@ -187,7 +194,7 @@ class DiscordVoiceService(
             val humans = guild.selfMember.voiceState?.channel?.members?.count { !it.user.isBot } ?: 1
             val stripped = WakeWord.strip(text, settings.wakeWords)
             // 말하는 중: 호출어+"그만"이면 멈춘다. 다른 말은 듣지 않는다 (스피커 소리를 다시 듣지 않게)
-            if (answering?.isActive == true || speaker.canProvide()) {
+            if (answering?.isActive == true || speaker.hasAudio()) {
                 if (stripped != null && WakeWord.isStop(stripped)) {
                     answering?.cancel()
                     speaker.clear()
@@ -238,6 +245,8 @@ class DiscordVoiceService(
                 }
                 speech.finish()
                 speech.await()
+                // 다 읽을 때까지 기다렸다가 기록한다 (보낸 소리가 합성한 소리와 같아야 끊김 없이 다 말한 것)
+                while (speaker.hasAudio()) delay(100)
                 log.info {
                     "Discord 음성 답: 글 ${text.length}자 · 문장 $sentences · 합성 %.1f초 · 생성·합성 ${System.currentTimeMillis() - began}ms · 보낸 소리 %.1f초 · 빈 대기열 ${speaker.underruns}번"
                         .format(synthesized / Utterance.BYTES_PER_SECOND.toDouble(), speaker.sentSeconds)
@@ -319,6 +328,10 @@ class DiscordVoiceService(
         val sentSeconds: Double get() = sent * 0.02
 
         fun resetStats() { sent = 0; underruns = 0 }
+
+        /** 남은 소리가 있는가 (진단 없이, 다른 스레드에서 기다릴 때) */
+        @Synchronized
+        fun hasAudio() = current != null || queue.isNotEmpty()
 
         fun enqueue(pcm: ByteArray) { if (pcm.isNotEmpty()) queue.add(pcm) }
 
