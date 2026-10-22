@@ -88,7 +88,7 @@ class DiscordVoiceService(
             .enableCache(CacheFlag.VOICE_STATE)
             .setMemberCachePolicy(MemberCachePolicy.VOICE)
             .setAudioModuleConfig(
-                AudioModuleConfig().withDaveSessionFactory(JDaveSessionFactory()).let { config ->
+                AudioModuleConfig().withDaveSessionFactory(daveFactory()).let { config ->
                     // 네이티브 전송 큐: 소리를 미리 쌓아 두고 정확한 간격으로 보낸다 (JDA 기본 전송은 Java 스레드 간격이 흔들려 끊긴다)
                     runCatching { config.withAudioSendFactory(com.sedmelluq.discord.lavaplayer.jdaudp.NativeAudioSendFactory()) }
                         .onFailure { log.warn { "네이티브 소리 전송을 쓸 수 없어 기본 전송: ${it.message}" } }
@@ -104,6 +104,19 @@ class DiscordVoiceService(
     }.getOrElse {
         log.warn { "Discord 음성 채널을 쓸 수 없습니다: ${it.message}" }
         false
+    }
+
+    /**
+     * DAVE 구현: libdave-jvm(JNI)을 먼저, 못 쓰면 JDAVE(FFM).
+     * JDAVE는 이 Mac에서 소리 조각을 평균 72ms마다 내보내(정상 20ms) 말이 늘어지고 끊겼고, 한 번 말한 뒤 받기가 멈췄다 (M19 실사용)
+     */
+    private fun daveFactory(): net.dv8tion.jda.api.audio.dave.DaveSessionFactory = runCatching {
+        moe.kyokobot.libdave.NativeDaveFactory.ensureAvailable()
+        log.info { "DAVE: libdave-jvm (JNI)" }
+        moe.kyokobot.libdave.jda.LDJDADaveSessionFactory(moe.kyokobot.libdave.NativeDaveFactory())
+    }.getOrElse {
+        log.warn { "libdave-jvm을 쓸 수 없어 JDAVE로: ${it.message}" }
+        JDaveSessionFactory()
     }
 
     fun stop() {
@@ -248,8 +261,8 @@ class DiscordVoiceService(
                 // 다 읽을 때까지 기다렸다가 기록한다 (보낸 소리가 합성한 소리와 같아야 끊김 없이 다 말한 것)
                 while (speaker.hasAudio()) delay(100)
                 log.info {
-                    "Discord 음성 답: 글 ${text.length}자 · 문장 $sentences · 합성 %.1f초 · 생성·합성 ${System.currentTimeMillis() - began}ms · 보낸 소리 %.1f초 · 빈 대기열 ${speaker.underruns}번"
-                        .format(synthesized / Utterance.BYTES_PER_SECOND.toDouble(), speaker.sentSeconds)
+                    "Discord 음성 답: 글 ${text.length}자 · 문장 $sentences · 합성 %.1f초 · 생성·합성 ${System.currentTimeMillis() - began}ms · 보낸 소리 %.1f초 · 빈 대기열 ${speaker.underruns}번 · 조각 간격 평균 %.1fms 최대 %.0fms"
+                        .format(synthesized / Utterance.BYTES_PER_SECOND.toDouble(), speaker.sentSeconds, speaker.gapAverageMillis, speaker.gapMaxMillis)
                 }
             } finally {
                 speech.close()
@@ -327,7 +340,14 @@ class DiscordVoiceService(
         private var wasSpeaking = false
         val sentSeconds: Double get() = sent * 0.02
 
-        fun resetStats() { sent = 0; underruns = 0 }
+        /** 진단: provide 호출 간격 (정상이면 20ms) */
+        @Volatile private var lastProvide = 0L
+        @Volatile private var gapSum = 0L
+        @Volatile private var gapMax = 0L
+        val gapAverageMillis: Double get() = if (sent <= 1) 0.0 else gapSum / 1e6 / (sent - 1)
+        val gapMaxMillis: Double get() = gapMax / 1e6
+
+        fun resetStats() { sent = 0; underruns = 0; lastProvide = 0; gapSum = 0; gapMax = 0 }
 
         /** 남은 소리가 있는가 (진단 없이, 다른 스레드에서 기다릴 때) */
         @Synchronized
@@ -356,7 +376,12 @@ class DiscordVoiceService(
                 position += n
                 if (position >= data.size) current = null
             }
-            if (filled > 0) sent++
+            if (filled > 0) {
+                val now = System.nanoTime()
+                if (lastProvide != 0L) { val gap = now - lastProvide; gapSum += gap; if (gap > gapMax) gapMax = gap }
+                lastProvide = now
+                sent++
+            }
             return if (filled == 0) null else ByteBuffer.wrap(frame)
         }
 

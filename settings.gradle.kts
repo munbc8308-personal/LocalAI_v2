@@ -20,6 +20,11 @@ dependencyResolutionManagement {
             content { includeGroupByRegex("androidx.*") }
         }
         // Kotlin/JS(web-ui) 빌드 도구: Node.js·Yarn 배포본. 프로젝트 저장소를 막아 두었으므로 여기서 선언한다
+        // libdave-jvm (Discord DAVE, JNI): Maven Central에 아직 없어 Lavalink 저장소에서. 이 묶음만 받는다 (M19)
+        exclusiveContent {
+            forRepository { maven("https://maven.lavalink.dev/snapshots") { name = "Lavalink" } }
+            filter { includeGroup("moe.kyokobot.libdave") }
+        }
         exclusiveContent {
             forRepository {
                 ivy("https://nodejs.org/dist") {
