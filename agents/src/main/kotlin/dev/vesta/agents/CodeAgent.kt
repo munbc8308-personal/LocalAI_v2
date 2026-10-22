@@ -26,6 +26,8 @@ import java.time.ZoneId
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.readLines
 
+private val log = io.github.oshai.kotlinlogging.KotlinLogging.logger {}
+
 /**
  * 코드 도우미 (PROJECT.md 4.8 CodeAgent, 7.6).
  * - 저장소 질문(@저장소, 문서 필요 판정, "우리 코드" 등) → 등록한 코드 저장소 검색 후 파일:줄과 함께 답 (D-03)
@@ -77,11 +79,20 @@ class CodeAgent(
         val earlier = HistoryWindow.fit(request.history.dropLast(1), ChatAgent.DEFAULT_CONTEXT_CHARS / 2)
             .let { if (it.lastOrNull()?.role == ChatRole.USER) it.dropLast(1) else it }
         var groundingText = ""
-        val messages = if (evidence.isEmpty()) {
-            if (wantsRepo) emit(AgentEvent.Status("관련 코드를 찾지 못해 일반 지식으로 답합니다"))
+        val context = if (evidence.isEmpty()) null else ContextAssembler.assemble(evidence, contextBudgetChars)
+        // D6: 검색으로만 모은 코드가 질문에 답할 수 없으면(예: 저장소에 없는 기능) 모델에게 맡기지 않고 먼저 밝힌다.
+        // 모델이 "자료에 없다"는 말 없이 일반 지식으로만 답한 적이 있다 (M15 실기기 확인: "@vesta JWT 토큰은 어떻게 동작해?")
+        val searchedOnly = attached.isEmpty() && evidence.none { it.title == "git diff" }
+        val sufficiency = if (wantsRepo && searchedOnly && context != null && judge != null) judge.sufficient(question, context.text) else null
+        sufficiency?.let { log.info { "D6 코드 근거 충분도 %.3f: %s".format(it, question.take(60)) } }
+        val unanswerable = wantsRepo && searchedOnly && (context == null || (sufficiency ?: 1.0) < UNANSWERABLE)
+        val messages = if (context == null || unanswerable) {
+            if (wantsRepo) {
+                emit(AgentEvent.Status("관련 코드를 찾지 못해 일반 지식으로 답합니다"))
+                emit(AgentEvent.Token("${targets.joinToString { it.name }} 코드에서는 이 질문과 관련된 내용을 찾지 못했습니다. 아래는 일반 지식으로 답합니다.\n\n"))
+            }
             listOf(ChatMessage(ChatRole.SYSTEM, base)) + earlier + ChatMessage(ChatRole.USER, question)
         } else {
-            val context = ContextAssembler.assemble(evidence, contextBudgetChars)
             emit(AgentEvent.Sources(context.evidence))
             // 리뷰 문장은 자료를 옮긴 사실이 아니라 분석이라 D7 근거 검증이 잡음만 낸다 (M7 확인: 10문장 중 9개 "미확인")
             groundingText = if (evidence.any { it.title == "git diff" }) "" else context.text
@@ -118,6 +129,11 @@ class CodeAgent(
     }.getOrNull()
 
     private companion object {
+        /**
+         * D6 점수가 이보다 낮으면 "코드에서 찾지 못함". 판정 기준(0.5)보다 낮게 둔다: 코드 조각은 문서보다 D6 점수가 낮게 나온다.
+         * 평가셋(eval/code-vesta.tsv 20문항 + 저장소에 없는 질문 3개): 있는 질문 최저 0.317, 없는 질문 최고 0.096
+         */
+        const val UNANSWERABLE = 0.2
         val DIFF_HINT = Regex("diff|변경 ?(사항|점|내용)|바뀐 (코드|부분)|수정한 (코드|부분)|커밋 전|작업한 (코드|부분)", RegexOption.IGNORE_CASE)
         val REPO_HINT = Regex("저장소|레포|리포|repo|코드베이스|우리 (코드|프로젝트)|내 프로젝트|이 프로젝트|어디서 (쓰|사용|처리|호출)|어디에 (있|정의)|구현(돼|되어) ?있")
         val FILE_REF = Regex("([\\w./-]+\\.(?:kt|kts|java|py|js|ts|tsx|go|rs|swift|rb|sql|sh|yaml|yml|toml|gradle|md))(?::(\\d+)(?:[-–](\\d+))?)?")
