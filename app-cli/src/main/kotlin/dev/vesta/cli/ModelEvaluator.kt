@@ -76,11 +76,11 @@ internal class ModelEvaluator(private val evalDir: Path, private val echo: (Stri
                     judged.associate { (i, fact) -> "f$i" to DecisionQuestion.Noul("Does the answer state or clearly imply the following? $fact") },
                 )
             }.getOrDefault(emptyMap())
-            val compact = stats.text.replace(Regex("\\s+"), " ")
+            val compact = literal(stats.text)
             val probabilities = facts.mapIndexed { i, fact ->
                 when (fact[0]) {
-                    '=' -> if (fact.substring(1).trim() in compact) 1.0 else 0.0
-                    '!' -> if (fact.substring(1).trim() in compact) 0.0 else 1.0
+                    '=' -> if (literal(fact.substring(1)) in compact) 1.0 else 0.0
+                    '!' -> if (literal(fact.substring(1)) in compact) 0.0 else 1.0
                     else -> (answers["f$i"] as? DecisionAnswer.Noul)?.probability ?: 0.0
                 }
             }
@@ -163,6 +163,9 @@ internal class ModelEvaluator(private val evalDir: Path, private val echo: (Stri
         }
         return readTsv(answerableFile).map { it[0] to score(it[0]) } to readTsv(absentFile).map { it[0] to score(it[0]) }
     }
+
+    /** 글자 비교용: 공백을 하나로, 천 단위 쉼표를 뺀다 ("1,024"도 "1024"로 맞게) */
+    private fun literal(text: String) = text.trim().replace(Regex("\\s+"), " ").replace(Regex("(?<=\\d),(?=\\d{3})"), "")
 
     private fun validToolCall(text: String, tool: String): Boolean = runCatching {
         val body = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1)
