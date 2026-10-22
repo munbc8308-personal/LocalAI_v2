@@ -23,6 +23,7 @@ class EvolutionDeskTest : FunSpec({
     val sent = mutableListOf<Sent>()
     val notifier = object : ChannelNotifier {
         override val name = "가짜"
+        override val channel = dev.vesta.core.ChannelType.TELEGRAM
         override suspend fun notify(user: UserId, key: String, text: String, buttons: List<ChannelButton>): Int { sent += Sent(user, key, text, buttons); return 1 }
     }
     val owner = UserId(1)

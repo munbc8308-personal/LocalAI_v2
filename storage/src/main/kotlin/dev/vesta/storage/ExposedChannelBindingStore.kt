@@ -61,7 +61,8 @@ class ExposedChannelBindingStore(private val db: Database, private val clock: Cl
     }
 
     override suspend fun createPairing(user: UserId, channel: ChannelType, codeHash: String, ttl: Duration) = io {
-        ChannelPairings.deleteWhere { ChannelPairings.channel eq channel.name }
+        // 사용자마다 하나씩: 가족이 동시에 코드를 만들어도 서로의 코드를 지우지 않는다 (M20)
+        ChannelPairings.deleteWhere { (ChannelPairings.channel eq channel.name) and (ChannelPairings.userId eq user.value) }
         ChannelPairings.insert {
             it[userId] = user.value
             it[ChannelPairings.channel] = channel.name

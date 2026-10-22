@@ -138,6 +138,10 @@ fun main() {
         training = training,
         users = app.users,
         evolution = evolution,
+        messengers = MessengerEndpoints(
+            app.channelBindings, enabled = { notifiers.map { it.channel }.toSet() },
+            userName = { app.userRepository.get(it)?.name }, findUser = { app.userRepository.find(it) },
+        ),
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
     )

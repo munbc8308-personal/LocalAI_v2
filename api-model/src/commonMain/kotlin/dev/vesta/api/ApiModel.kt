@@ -279,3 +279,21 @@ data class OaiMessage(val role: String, val content: String? = null)
 
 @Serializable
 data class OaiChatRequest(val model: String = "vesta", val messages: List<OaiMessage>, val stream: Boolean = false, val user: String? = null)
+
+// --- 메신저 연결 (M20, U-02) ---
+
+/** 연결된 메신저 계정 하나. [user]는 연결된 Vesta 사용자 이름 */
+@Serializable
+data class MessengerLinkDto(val channel: String, val externalId: String, val user: String)
+
+/** 메신저 연결 화면 (`GET /api/me/messengers`, OWNER는 `GET /api/messengers`) */
+@Serializable
+data class MessengersDto(
+    /** 지금 켜진 메신저 (TELEGRAM / DISCORD / SLACK) */
+    val enabled: List<String>,
+    val links: List<MessengerLinkDto>,
+)
+
+/** 일회용 연결 코드. [how]는 그 메신저에서 코드를 보내는 방법 */
+@Serializable
+data class PairCodeDto(val channel: String, val code: String, val expiresInSeconds: Long, val how: String)

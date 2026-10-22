@@ -650,6 +650,7 @@ private fun DashboardView(me: MeDto) {
         if (me.role == "OWNER") EvolutionCard()
         if (me.role == "OWNER") TrainingCard()
         if (me.role == "OWNER") UsersCard(me)
+        MessengersCard()
         PasswordCard()
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
     }

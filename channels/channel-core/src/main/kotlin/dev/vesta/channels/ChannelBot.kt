@@ -66,7 +66,7 @@ class ChannelBot(
     /** 공개 대화방에서 한 사람이 한 시간에 부를 수 있는 횟수 */
     private val publicPerHour: Int = 20,
 ) : ChannelNotifier {
-    private val channel = surface.channel
+    override val channel = surface.channel
     override val name: String get() = surface.name
     /** 보낸 알림 카드: "대화방|키" → (메시지 ID, 본문). 버튼을 누르면 결과를 덧붙여 고친다. 알림은 다른 작업에서 보내므로 동시 접근용 */
     private val notices = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()

@@ -11,6 +11,8 @@ import dev.vesta.api.ApiJson
 import dev.vesta.api.ChangePasswordDto
 import dev.vesta.api.ConsentDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.MessengersDto
+import dev.vesta.api.PairCodeDto
 import dev.vesta.api.NewUserDto
 import dev.vesta.api.PasswordDto
 import dev.vesta.api.RoleDto
@@ -45,9 +47,20 @@ fun UsersCard(me: MeDto) {
     var newName by remember { mutableStateOf("") }
     var newRole by remember { mutableStateOf("MEMBER") }
     var newPassword by remember { mutableStateOf("") }
+    var messengers by remember { mutableStateOf<MessengersDto?>(null) }
+    /** 방금 추가한 사용자에게 전해 줄 안내 (이름·비밀번호·주소·메신저 코드, M20) */
+    var invite by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var codes by remember { mutableStateOf<Map<String, PairCodeDto>>(emptyMap()) }
     fun load() = scope.launch {
         runCatching { Http.get("/api/users", ListSerializer(UserDto.serializer())) }
             .onSuccess { users = it; error = null }
+            .onFailure { error = it.message }
+        runCatching { Http.get("/api/messengers", MessengersDto.serializer()) }.onSuccess { messengers = it }
+    }
+    /** [name]의 [channel] 연결 코드 (주인이 대신 만든다) */
+    fun pairFor(name: String, channel: String) = scope.launch {
+        runCatching { Http.post("/api/messengers/$channel/pair/" + js("encodeURIComponent")(name) as String, "{}", PairCodeDto.serializer()) }
+            .onSuccess { codes = codes + ("$name/$channel" to it); error = null }
             .onFailure { error = it.message }
     }
     fun act(done: String? = null, block: suspend () -> Unit) = scope.launch {
@@ -68,6 +81,23 @@ fun UsersCard(me: MeDto) {
                         Text(" · ${roleName(u.role)}" + (if (!u.hasPassword) " · 비밀번호 없음" else ""))
                     }
                     Span { Text("${u.questionsToday}개 · ${u.tokensToday}") }
+                }
+                // 메신저 연결 (M20): 연결된 계정·끊기, 연결 코드 만들기
+                messengers?.let { m ->
+                    m.links.filter { it.user == u.name }.forEach { link ->
+                        Div({ classes("row", "small") }) {
+                            Span({ classes("muted") }) { Text("${messengerName(link.channel)} 연결됨 · ${link.externalId}") }
+                            Button({
+                                classes("link", "small")
+                                onClick { if (window.confirm("${u.name} 의 ${messengerName(link.channel)} 연결을 끊을까요?")) act("연결을 끊었습니다") { Http.delete("/api/messengers/${link.channel}/${link.externalId}") } }
+                            }) { Text("끊기") }
+                        }
+                    }
+                    if (m.enabled.isNotEmpty()) Div({ classes("row", "small") }) {
+                        Span({ classes("muted") }) { Text("메신저 연결 코드") }
+                        Span { m.enabled.forEach { ch -> Button({ classes("link", "small"); onClick { pairFor(u.name, ch) } }) { Text(messengerName(ch)) } } }
+                    }
+                    m.enabled.mapNotNull { codes["${u.name}/$it"] }.forEach { CodeView(it) }
                 }
                 if (u.role != "OWNER") Div({ classes("row", "small") }) {
                     Select({
@@ -98,13 +128,31 @@ fun UsersCard(me: MeDto) {
                 }
             }
         }
+        // 초대 안내 (M20): 새 사용자에게 그대로 전해 줄 내용
+        invite?.let { (name, password) ->
+            Div({ classes("run") }) {
+                Div({ classes("row", "small") }) {
+                    Span { B { Text("$name 에게 전해 줄 안내") } }
+                    Button({ classes("link", "small"); onClick { invite = null } }) { Text("닫기") }
+                }
+                Div({ classes("small") }) { Text("웹: ${window.location.origin} · 이름 $name · 비밀번호 ${password ?: "(없음: 비밀번호 단추로 정하기)"}") }
+                Div({ classes("small", "muted") }) { Text("휴대폰은 Tailscale에 같은 계정으로 로그인한 뒤 위 주소로. 메신저로 쓰려면 아래 코드를 만들어 봇에게 보내게 하세요 (10분)") }
+                messengers?.enabled?.let { enabled ->
+                    Div({ classes("row", "small") }) { Span {}; Span { enabled.forEach { ch -> Button({ classes("link", "small"); onClick { pairFor(name, ch) } }) { Text("${messengerName(ch)} 코드") } } } }
+                    enabled.mapNotNull { codes["$name/$it"] }.forEach { CodeView(it) }
+                }
+            }
+        }
         Form(attrs = {
             classes("stack")
             addEventListener("submit") { event ->
                 event.preventDefault()
                 if (newName.isBlank()) return@addEventListener
-                act("${newName.trim()} 을(를) 추가했습니다. 로그인 이름: ${newName.trim()}") {
-                    Http.post("/api/users", ApiJson.encodeToString(NewUserDto.serializer(), NewUserDto(newName.trim(), newRole, newPassword.ifEmpty { null })))
+                val name = newName.trim()
+                val password = newPassword.ifEmpty { null }
+                act("$name 을(를) 추가했습니다. 아래 안내를 전해 주세요") {
+                    Http.post("/api/users", ApiJson.encodeToString(NewUserDto.serializer(), NewUserDto(name, newRole, password)))
+                    invite = name to password
                     newName = ""
                     newPassword = ""
                 }
@@ -118,8 +166,70 @@ fun UsersCard(me: MeDto) {
             }
             Button({ type(ButtonType.Submit); classes("primary") }) { Text("사용자 추가") }
         }
-        P({ classes("muted", "small") }) { Text("MEMBER: 문서·웹·이미지·자기 폴더 파일(승인). Apple 앱·셸 없음. GUEST: 대화·웹 검색만. 로그인한 사람: ${me.name}") }
+        P({ classes("muted", "small") }) { Text("MEMBER: 문서·웹·이미지·자기 폴더 파일(승인), 셸은 Mac 주인 승인. Apple 앱 없음. GUEST: 대화·웹 검색만. 로그인한 사람: ${me.name}") }
     }
+}
+
+/** 일회용 연결 코드와 보내는 방법 */
+@Composable
+private fun CodeView(code: PairCodeDto) {
+    Div({ classes("row", "small") }) {
+        Span { B({ classes("mono") }) { Text(code.code) } }
+        Span({ classes("muted") }) { Text("${messengerName(code.channel)} · ${code.how} · ${code.expiresInSeconds / 60}분 동안") }
+    }
+}
+
+/** 내 메신저 연결 (M20, U-02): 연결 코드 만들기, 연결된 계정·끊기. 누구나 */
+@Composable
+fun MessengersCard() {
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<MessengersDto?>(null) }
+    var codes by remember { mutableStateOf<Map<String, PairCodeDto>>(emptyMap()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    fun load() = scope.launch {
+        runCatching { Http.get("/api/me/messengers", MessengersDto.serializer()) }.onSuccess { state = it; error = null }.onFailure { error = it.message }
+    }
+    LaunchedEffect(Unit) { load() }
+    val s = state ?: return
+    if (s.enabled.isEmpty() && s.links.isEmpty()) return
+    Div({ classes("card") }) {
+        Div({ classes("row") }) { Span { B { Text("내 메신저") } }; Button({ classes("link", "small"); onClick { load() } }) { Text("새로 고침") } }
+        error?.let { P({ classes("error", "small") }) { Text(it) } }
+        s.links.forEach { link ->
+            Div({ classes("row", "small") }) {
+                Span { Text("${messengerName(link.channel)} 연결됨 · ${link.externalId}") }
+                Button({
+                    classes("link", "small")
+                    onClick {
+                        if (!window.confirm("${messengerName(link.channel)} 연결을 끊을까요?")) return@onClick
+                        scope.launch { runCatching { Http.delete("/api/me/messengers/${link.channel}/${link.externalId}") }.onFailure { error = it.message }; load() }
+                    }
+                }) { Text("끊기") }
+            }
+        }
+        s.enabled.forEach { ch ->
+            Div({ classes("row", "small") }) {
+                Span { Text(messengerName(ch) + if (s.links.any { it.channel == ch }) " (다른 계정도 연결 가능)" else "") }
+                Button({
+                    classes("link", "small")
+                    onClick {
+                        scope.launch {
+                            runCatching { Http.post("/api/me/messengers/$ch/pair", "{}", PairCodeDto.serializer()) }
+                                .onSuccess { codes = codes + (ch to it); error = null }.onFailure { error = it.message }
+                        }
+                    }
+                }) { Text("연결 코드 만들기") }
+            }
+            codes[ch]?.let { CodeView(it) }
+        }
+    }
+}
+
+private fun messengerName(channel: String) = when (channel) {
+    "TELEGRAM" -> "Telegram"
+    "DISCORD" -> "Discord"
+    "SLACK" -> "Slack"
+    else -> channel
 }
 
 /** 본인 비밀번호 바꾸기 (U-02). 바꾸면 모든 기기의 로그인이 풀린다 */

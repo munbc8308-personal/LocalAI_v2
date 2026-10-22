@@ -152,6 +152,8 @@ interface ChannelActions {
 /** 사용자에게 먼저 보내는 알림 (주간 점검 결과·승인 요청, M16) */
 interface ChannelNotifier {
     val name: String
+    /** 어느 메신저인지 (웹 UI 연결 화면에 켜진 메신저를 보여 줄 때, M20) */
+    val channel: dev.vesta.core.ChannelType
     /** 보낸 대화방 수 */
     suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>): Int
 }

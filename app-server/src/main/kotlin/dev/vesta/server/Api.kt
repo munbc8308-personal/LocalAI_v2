@@ -121,7 +121,37 @@ class ServerDeps(
     val users: dev.vesta.identity.UserService? = null,
     /** 주간 자가 개선 (M16). OWNER만 */
     val evolution: EvolutionDesk? = null,
+    /** 메신저 계정 연결 (M20): 본인 것은 누구나, 다른 사용자 것은 OWNER만 */
+    val messengers: MessengerEndpoints? = null,
 )
+
+/** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
+class MessengerEndpoints(
+    val bindings: dev.vesta.core.channel.ChannelBindingStore,
+    /** 지금 켜진 메신저 (토큰이 있어 봇이 돈다) */
+    val enabled: () -> Set<ChannelType>,
+    val userName: suspend (dev.vesta.core.UserId) -> String?,
+    val findUser: suspend (String) -> dev.vesta.core.identity.User?,
+) {
+    suspend fun links(filter: (dev.vesta.core.channel.ChannelBinding) -> Boolean): List<dev.vesta.api.MessengerLinkDto> =
+        MESSENGERS.flatMap { bindings.list(it) }.filter(filter).map { dev.vesta.api.MessengerLinkDto(it.channel.name, it.externalUserId, userName(it.user.userId) ?: "?") }
+
+    suspend fun pair(user: dev.vesta.core.UserId, channel: ChannelType): dev.vesta.api.PairCodeDto {
+        val code = dev.vesta.channels.PairingCode.generate()
+        bindings.createPairing(user, channel, dev.vesta.channels.PairingCode.hash(code), PAIR_TTL)
+        val how = when (channel) {
+            ChannelType.TELEGRAM -> "Telegram에서 Vesta 봇을 열고 이 코드를 보내세요"
+            ChannelType.DISCORD -> "Discord에서 Vesta 봇에게 DM(개인 메시지)으로 이 코드를 보내세요"
+            else -> "Slack에서 Vesta 앱의 메시지 탭에 이 코드를 보내세요"
+        }
+        return dev.vesta.api.PairCodeDto(channel.name, code.chunked(4).joinToString("-"), PAIR_TTL.seconds, how)
+    }
+
+    companion object {
+        val MESSENGERS = listOf(ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.SLACK)
+        val PAIR_TTL: java.time.Duration = java.time.Duration.ofMinutes(10)
+    }
+}
 
 /** 학습 API가 쓰는 동작 (서버가 TrainingService로 채운다) */
 class TrainingEndpoints(
@@ -398,6 +428,57 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 본인 비밀번호 바꾸기 (U-02). 지금 비밀번호 확인은 로그인과 같은 잠금을 쓴다. 바꾸면 모든 기기 로그아웃
+            // 메신저 연결 (M20): 내 연결 목록, 내 연결 코드 만들기·끊기
+            route("/me/messengers") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val m = deps.messengers ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"메신저가 설정돼 있지 않습니다"}""")
+                    val dto = dev.vesta.api.MessengersDto(m.enabled().map { it.name }.sorted(), m.links { it.user.userId == user.userId })
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.MessengersDto.serializer(), dto))
+                }
+                post("/{channel}/pair") {
+                    val user = call.principal(deps) ?: return@post
+                    val m = deps.messengers ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"메신저가 설정돼 있지 않습니다"}""")
+                    val channel = call.messengerOf(m) ?: return@post
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.PairCodeDto.serializer(), m.pair(user.userId, channel)))
+                }
+                delete("/{channel}/{externalId}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val m = deps.messengers ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"메신저가 설정돼 있지 않습니다"}""")
+                    val channel = MessengerEndpoints.MESSENGERS.firstOrNull { it.name == call.parameters["channel"] }
+                    val id = call.parameters["externalId"].orEmpty()
+                    // 내 연결만 끊을 수 있다
+                    val mine = channel != null && m.bindings.find(channel, id)?.user?.userId == user.userId
+                    if (!mine) return@delete call.respondJson(HttpStatusCode.NotFound, """{"error":"내 연결이 아닙니다"}""")
+                    m.bindings.remove(channel!!, id)
+                    call.respondJson(HttpStatusCode.OK, """{"removed":true}""")
+                }
+            }
+            // 모든 사용자의 메신저 연결 (OWNER): 목록, 다른 사용자 연결 코드 만들기, 끊기
+            route("/messengers") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val m = call.messengersFor(user, deps) ?: return@get
+                    val dto = dev.vesta.api.MessengersDto(m.enabled().map { it.name }.sorted(), m.links { true })
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.MessengersDto.serializer(), dto))
+                }
+                post("/{channel}/pair/{name}") {
+                    val user = call.principal(deps) ?: return@post
+                    val m = call.messengersFor(user, deps) ?: return@post
+                    val channel = call.messengerOf(m) ?: return@post
+                    val target = m.findUser(call.parameters["name"].orEmpty())
+                        ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 사용자입니다"}""")
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.PairCodeDto.serializer(), m.pair(target.id, channel)))
+                }
+                delete("/{channel}/{externalId}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val m = call.messengersFor(user, deps) ?: return@delete
+                    val channel = MessengerEndpoints.MESSENGERS.firstOrNull { it.name == call.parameters["channel"] }
+                        ?: return@delete call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 메신저입니다"}""")
+                    val removed = m.bindings.remove(channel, call.parameters["externalId"].orEmpty())
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
             post("/me/password") {
                 val user = call.principal(deps) ?: return@post
                 val users = deps.users ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}""")
@@ -623,6 +704,19 @@ private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
 }
 
 /** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */
+private suspend fun ApplicationCall.messengersFor(user: UserContext, deps: ServerDeps): MessengerEndpoints? {
+    val m = deps.messengers ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"메신저가 설정돼 있지 않습니다"}"""); return null }
+    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"다른 사용자의 메신저 연결은 Mac 주인만 관리할 수 있습니다"}"""); return null }
+    return m
+}
+
+/** 경로의 메신저 이름. 켜진 메신저가 아니면 응답하고 null */
+private suspend fun ApplicationCall.messengerOf(m: MessengerEndpoints): ChannelType? {
+    val channel = MessengerEndpoints.MESSENGERS.firstOrNull { it.name == parameters["channel"] }
+    if (channel == null || channel !in m.enabled()) { respondJson(HttpStatusCode.NotFound, """{"error":"켜져 있지 않은 메신저입니다 (봇 토큰을 먼저 저장하세요)"}"""); return null }
+    return channel
+}
+
 private suspend fun ApplicationCall.evolutionFor(user: UserContext, deps: ServerDeps): EvolutionDesk? {
     val desk = deps.evolution ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"자가 개선이 설정돼 있지 않습니다"}"""); return null }
     if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"설정 변경은 Mac 주인만 할 수 있습니다"}"""); return null }

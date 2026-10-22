@@ -27,7 +27,7 @@ interface ChannelBindingStore {
     suspend fun list(channel: ChannelType): List<ChannelBinding>
     suspend fun remove(channel: ChannelType, externalUserId: String): Boolean
 
-    /** 기존 코드는 지우고 새 코드 하나만 남긴다 */
+    /** 이 사용자의 이 메신저 기존 코드는 지우고 새 코드 하나만 남긴다 (다른 사용자 코드는 그대로) */
     suspend fun createPairing(user: UserId, channel: ChannelType, codeHash: String, ttl: Duration)
     /** 맞으면 코드를 지우고 사용자를 돌려준다 (한 번만 쓸 수 있음) */
     suspend fun consumePairing(channel: ChannelType, codeHash: String): UserContext?

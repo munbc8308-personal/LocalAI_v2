@@ -19,6 +19,7 @@ import dev.vesta.core.tools.ApprovalDecision
 import dev.vesta.core.tools.ApprovalDetails
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import dev.vesta.identity.PasswordHasher
@@ -159,6 +160,44 @@ class ApiTest : FunSpec({
         results.count { it == LoginResult.Invalid } shouldBe 5
         auth.login(null, "correct horse", null)::class shouldBe LoginResult.Locked::class
     }
+
+    test("메신저 연결 (M20): 본인 코드는 누구나, 남의 코드·연결은 주인만, 남의 연결은 못 끊는다") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val repo = WebAuthRepository(db.db)
+        val userRepo = dev.vesta.storage.ExposedUserRepository(db.db)
+        val users = dev.vesta.identity.UserService(userRepo, repo)
+        val bindings = dev.vesta.storage.ExposedChannelBindingStore(db.db)
+        val mina = users.create("mina", UserRole.MEMBER, "mina-pass-1")
+        bindings.bind(owner.userId, ChannelType.TELEGRAM, "100", "100")
+        val messengers = MessengerEndpoints(bindings, { setOf(ChannelType.TELEGRAM) }, { userRepo.get(it)?.name }, { userRepo.find(it) })
+        val deps = ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", auth = WebAuth(repo), users = users, messengers = messengers)
+        application { vestaApi(deps) }
+        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-1"}""") }
+        val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText()).csrf
+        fun io.ktor.client.request.HttpRequestBuilder.asMina() { header("Cookie", cookie); header("X-Vesta-CSRF", csrf) }
+
+        // 내 연결 목록에는 주인 연결이 보이지 않는다
+        client.get("/api/me/messengers") { asMina() }.bodyAsText().let { it shouldContain "\"enabled\":[\"TELEGRAM\"]"; it shouldContain "\"links\":[]" }
+        // 내 코드 → 그 코드로 연결하면 mina
+        val code = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.PairCodeDto.serializer(), client.post("/api/me/messengers/TELEGRAM/pair") { asMina() }.bodyAsText())
+        bindings.consumePairing(ChannelType.TELEGRAM, dev.vesta.channels.PairingCode.hash(code.code))?.userId shouldBe mina.id
+        // 꺼진 메신저는 안 됨
+        client.post("/api/me/messengers/SLACK/pair") { asMina() }.status shouldBe HttpStatusCode.NotFound
+        // 남의 것: 목록·코드 만들기·끊기는 주인만
+        client.get("/api/messengers") { asMina() }.status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/messengers/TELEGRAM/pair/owner") { asMina() }.status shouldBe HttpStatusCode.Forbidden
+        client.delete("/api/me/messengers/TELEGRAM/100") { asMina() }.status shouldBe HttpStatusCode.NotFound
+        bindings.find(ChannelType.TELEGRAM, "100") shouldNotBe null
+        // 주인은 mina 대신 코드를 만들고, 동시에 만든 코드가 서로 지우지 않는다
+        val forMina = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.PairCodeDto.serializer(), client.post("/api/messengers/TELEGRAM/pair/mina") { bearerAuth("secret") }.bodyAsText())
+        val forOwner = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.PairCodeDto.serializer(), client.post("/api/me/messengers/TELEGRAM/pair") { bearerAuth("secret") }.bodyAsText())
+        bindings.consumePairing(ChannelType.TELEGRAM, dev.vesta.channels.PairingCode.hash(forMina.code))?.userId shouldBe mina.id
+        bindings.consumePairing(ChannelType.TELEGRAM, dev.vesta.channels.PairingCode.hash(forOwner.code))?.userId shouldBe owner.userId
+        client.get("/api/messengers") { bearerAuth("secret") }.bodyAsText() shouldContain "\"user\":\"owner\""
+        client.delete("/api/messengers/TELEGRAM/100") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+    } }
 
     test("멀티 유저: 사용자 추가는 OWNER만, 서로의 대화를 볼 수 없고, 잠금은 사용자별 (M15)") { testApplication {
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
