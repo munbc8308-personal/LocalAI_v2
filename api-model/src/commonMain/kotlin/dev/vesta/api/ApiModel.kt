@@ -28,6 +28,8 @@ data class ChatRequestDto(
     /** CLI 작업 폴더(절대 경로)와 그 폴더의 VESTA.md 내용 (M17). CLI 요청의 Mac 주인 것만 쓴다 */
     val workspace: String? = null,
     val instructions: String? = null,
+    /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
+    val spoken: Boolean = false,
 )
 
 /** 메시지에 붙인 미디어. 내용은 `GET /api/media/{id}` */

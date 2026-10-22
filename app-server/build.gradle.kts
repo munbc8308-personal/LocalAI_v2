@@ -8,12 +8,16 @@ dependencies {
     implementation(project(":api-model"))
     implementation(project(":channel-telegram"))
     implementation(project(":channel-discord"))
+    implementation(project(":channel-discord-voice"))
     implementation(project(":channel-slack"))
     implementation(libs.bundles.ktor.server)
     implementation(libs.kotlin.logging)
     runtimeOnly(libs.logback.classic)
     testImplementation(libs.ktor.server.test.host)
 }
+
+// channel-discord-voice가 쓰는 JDAVE는 Java 25 클래스다: 실행 JVM(27)이 읽으므로 의존성 버전 확인을 끈다
+java { disableAutoTargetJvm() }
 
 application {
     applicationName = "vesta-server"

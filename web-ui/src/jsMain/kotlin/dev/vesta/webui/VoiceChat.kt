@@ -150,7 +150,7 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
                 val text = MediaApi.transcribe(wav).trim()
                 if (text.isBlank()) { listen(); return@launch }
                 heard = text
-                val turn = chat.send(text) ?: run { listen(); return@launch }
+                val turn = chat.send(text, spoken = true) ?: run { listen(); return@launch }
                 speak(turn)
                 listen()
             } catch (e: kotlinx.coroutines.CancellationException) {

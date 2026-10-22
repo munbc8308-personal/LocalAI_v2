@@ -45,7 +45,11 @@ internal object Generation {
 object Prompts {
     /** 에이전트 공통 시스템 프롬프트: 세션 프롬프트(없으면 기본) + CLI 작업 폴더·프로젝트 지침 (M17) */
     fun system(request: dev.vesta.core.agent.AgentRequest, clock: Clock, zone: ZoneId): String =
-        (request.session.systemPrompt ?: base(clock, zone)) + request.workspace?.let { workspace(it) }.orEmpty()
+        (request.session.systemPrompt ?: base(clock, zone)) + request.workspace?.let { workspace(it) }.orEmpty() +
+            if (request.spoken) SPOKEN_RULES else ""
+
+    /** 음성 대화 (M19): 소리로 들으므로 짧고 말하듯이 */
+    const val SPOKEN_RULES = "\n이 대화는 소리로 들려준다. 사람에게 말하듯 자연스러운 구어체로 2~4문장 안에 답한다. 목록·표·코드·이모지·마크다운 기호를 쓰지 않는다. 숫자와 단위는 읽기 쉽게 풀어 쓴다."
 
     /** 작업 폴더 안내. 지침은 사용자가 쓴 파일이라 규칙처럼 따르되, 도구 결과 속 지시문과는 다르다 */
     fun workspace(workspace: dev.vesta.core.agent.Workspace): String = buildString {

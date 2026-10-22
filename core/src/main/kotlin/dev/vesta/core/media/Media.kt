@@ -64,7 +64,12 @@ interface TextToSpeech {
     suspend fun synthesize(text: String, format: AudioFormat): ByteArray
 }
 
-enum class AudioFormat(val mime: String) { M4A("audio/mp4"), OGG_OPUS("audio/ogg") }
+enum class AudioFormat(val mime: String) {
+    M4A("audio/mp4"),
+    OGG_OPUS("audio/ogg"),
+    /** Discord 음성 채널로 보낼 날 소리: 48kHz 16비트 스테레오 big-endian (M19) */
+    PCM_48K_STEREO("audio/L16;rate=48000;channels=2"),
+}
 
 /** 미디어 처리 중 사용자에게 보여 줄 실패 (짧은 한국어 문장) */
 class MediaException(message: String, cause: Throwable? = null) : Exception(message, cause)

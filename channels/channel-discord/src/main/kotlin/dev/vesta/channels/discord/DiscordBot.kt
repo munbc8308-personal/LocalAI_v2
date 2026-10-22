@@ -51,6 +51,8 @@ class DiscordBot(
     textToSpeech: dev.vesta.core.media.TextToSpeech? = null,
     /** 서버 채널에서 부르면 쓸 손님 계정 (M18). null이면 서버 채널은 받지 않는다 */
     publicGuest: (suspend () -> dev.vesta.core.UserContext)? = null,
+    /** 음성 채널 들어가기·나가기 (`@봇 !join`, M19). null이면 음성 채널은 쓰지 않는다 */
+    private val voice: DiscordVoiceControl? = null,
 ) {
     private val bot = ChannelBot(
         DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions,
@@ -112,6 +114,20 @@ class DiscordBot(
         val me = selfId ?: return
         if (!publicEnabled || message.mentions.none { it.id == me }) return
         val text = message.content.replace(Regex("<@!?$me>"), " ").trim()
+        // 음성 채널: "@봇 !join"(들어와)·"!leave"(나가). 부른 사람이 있는 음성 채널로 간다
+        val guild = message.guildId
+        if (voice != null && guild != null) {
+            val command = when {
+                JOIN.matches(text) -> voice::join
+                LEAVE.matches(text) -> { g: String, _: String -> voice.leave(g) }
+                else -> null
+            }
+            if (command != null) {
+                val result = runCatching { command(guild, author.id) }.getOrElse { "음성 채널 처리에 실패했습니다: ${it.message}" }
+                runCatching { api.createMessage(message.channelId, DiscordMarkdown.escape(result)) }
+                return
+            }
+        }
         val chat = if (message.channelId in threads) message.channelId else {
             runCatching { api.createThread(message.channelId, message.id, text.lineSequence().firstOrNull().orEmpty().take(40).ifBlank { "Vesta" }) }
                 .onFailure { log.info { "Discord 스레드를 만들지 못해 그 자리에서 답합니다: ${it.message}" } }
@@ -217,6 +233,9 @@ class DiscordBot(
     private fun deferredUpdate() = buildJsonObject { put("type", DEFERRED_UPDATE) }
 
     private companion object {
+        /** 음성 채널 명령: 들어와 / 나가 */
+        private val JOIN = Regex("^[!/](join|들어와)$|^(음성\\s*채널로?\\s*)?(들어와|와\\s*줘|들어와\\s*줘)[.!?]*$", RegexOption.IGNORE_CASE)
+        private val LEAVE = Regex("^[!/](leave|나가)$|^(나가|나가\\s*줘|그만\\s*나가)[.!?]*$", RegexOption.IGNORE_CASE)
         const val BUTTON = 3
         const val MODAL_SUBMIT = 5
         const val CHANNEL_MESSAGE = 4
@@ -236,4 +255,11 @@ private fun kindOf(mime: String?) = when {
     mime.startsWith("audio/") -> FileKind.VOICE
     mime.startsWith("image/") -> FileKind.IMAGE
     else -> FileKind.DOCUMENT
+}
+
+/** 음성 채널 들어가기·나가기 (PROJECT.md I-08, M19). 구현은 channel-discord-voice(JDA·JDAVE). 결과는 채널에 보낼 안내 */
+interface DiscordVoiceControl {
+    /** [userId]가 들어가 있는 음성 채널로 들어간다 */
+    suspend fun join(guildId: String, userId: String): String
+    suspend fun leave(guildId: String): String
 }

@@ -67,6 +67,7 @@ include(
     "channel-telegram",
     "channel-discord",
     "channel-slack",
+    "channel-discord-voice",
     "app-common",
     "api-model",
     "web-ui",
@@ -79,3 +80,4 @@ project(":channel-core").projectDir = file("channels/channel-core")
 project(":channel-telegram").projectDir = file("channels/channel-telegram")
 project(":channel-discord").projectDir = file("channels/channel-discord")
 project(":channel-slack").projectDir = file("channels/channel-slack")
+project(":channel-discord-voice").projectDir = file("channels/channel-discord-voice")

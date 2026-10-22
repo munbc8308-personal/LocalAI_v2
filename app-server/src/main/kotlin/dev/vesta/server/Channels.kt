@@ -66,10 +66,22 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             // 서버 채널에서 부르면 받으려면 서버 글 이벤트도 받는다 (M18)
             val intents = DiscordGateway.DIRECT_MESSAGES or (if (discord.publicChannels) DiscordGateway.GUILD_MESSAGES else 0)
             val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() }, intents = intents)
+            // 음성 채널 (M19): JDA·DAVE가 Gateway를 하나 더 연다. 음성 인식·읽어 주기가 있어야 한다
+            val stt = app.speechToText
+            val tts = app.textToSpeech
+            val voice = if (discord.voice && stt != null && tts != null) {
+                dev.vesta.channels.discord.voice.DiscordVoiceService(
+                    discordToken, app.conversation, { publicGuest(app, "discord-guest") }, stt, tts,
+                    dev.vesta.channels.discord.voice.VoiceSettings(discord.wakeWords, discord.voiceEndSilenceMillis, discord.publicPerHour, discord.opusLibrary),
+                    scope,
+                ).takeIf { it.start() }
+            } else null
+            voice?.let { v -> Runtime.getRuntime().addShutdownHook(Thread { v.stop() }) }
             val bot = DiscordBot(
                 api, gateway, app.conversation, app.channelBindings, files, discord, status,
                 speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, textToSpeech = app.textToSpeech,
                 publicGuest = if (discord.publicChannels) ({ publicGuest(app, "discord-guest") }) else null,
+                voice = voice,
             )
             notifiers += bot.notifier
             scope.launch { bot.run() }

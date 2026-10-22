@@ -90,7 +90,7 @@ class ChatController(private val scope: CoroutineScope) {
     }
 
     /** 질문을 보낸다. 보냈으면 그 묶음(음성 대화가 답을 따라 읽는다), 못 보냈으면 null */
-    fun send(text: String): Turn? {
+    fun send(text: String, spoken: Boolean = false): Turn? {
         val images = pendingImages.map { it.dataUrl }
         if (busy || (text.isBlank() && images.isEmpty())) return null
         val turn = Turn(text.trim(), images)
@@ -99,7 +99,7 @@ class ChatController(private val scope: CoroutineScope) {
         busy = true
         job = scope.launch {
             try {
-                Http.chat(ChatRequestDto(turn.question, sessionId, images = images.map { it.substringAfter("base64,") })).collect { apply(turn, it) }
+                Http.chat(ChatRequestDto(turn.question, sessionId, images = images.map { it.substringAfter("base64,") }, spoken = spoken)).collect { apply(turn, it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 turn.error = "중지함"
                 throw e

@@ -29,6 +29,7 @@ class Ffmpeg(private val binary: String, private val timeoutSeconds: Long = 120)
     suspend fun encode(audio: ByteArray, format: AudioFormat): ByteArray = when (format) {
         AudioFormat.M4A -> convert(audio, sniff(audio) ?: "aiff", listOf("-c:a", "aac", "-b:a", "64k", "-f", "mp4"), "m4a")
         AudioFormat.OGG_OPUS -> convert(audio, sniff(audio) ?: "aiff", listOf("-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg"), "ogg")
+        AudioFormat.PCM_48K_STEREO -> convert(audio, sniff(audio) ?: "aiff", listOf("-ar", "48000", "-ac", "2", "-f", "s16be"), "raw")
     }
 
     /** [format]은 ffmpeg 입력 형식(demuxer) 이름. 확장자도 같게 둔다 */

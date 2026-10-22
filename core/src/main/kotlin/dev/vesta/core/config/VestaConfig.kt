@@ -162,6 +162,13 @@ data class DiscordConfig(
     val publicChannels: Boolean = true,
     /** 서버 채널에서 한 사람이 한 시간에 부를 수 있는 횟수 */
     val publicPerHour: Int = 20,
+    /** 음성 채널 대화 (`@봇 !join`, M19). 손님 권한, 여럿이면 호출어로 시작한 말에만 답한다 */
+    val voice: Boolean = true,
+    val wakeWords: List<String> = listOf("베스타", "vesta", "베스터", "베스트아"),
+    /** 이만큼 조용하면 한 번 말한 것으로 본다 */
+    val voiceEndSilenceMillis: Long = 800,
+    /** Apple Silicon용 libopus (`brew install opus`) */
+    val opusLibrary: String = "/opt/homebrew/lib/libopus.dylib",
 ) : MessengerConfig
 
 data class SlackConfig(

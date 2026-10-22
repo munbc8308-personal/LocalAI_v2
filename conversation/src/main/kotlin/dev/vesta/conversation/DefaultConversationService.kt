@@ -140,7 +140,8 @@ class DefaultConversationService(
         suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
                 // 작업 폴더는 Mac 주인만 (파일 도구 범위를 넓히므로). 다른 사용자가 보내면 무시한다
-                workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) }))
+                workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) },
+                spoken = input.spoken))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

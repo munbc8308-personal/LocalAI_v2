@@ -19,6 +19,11 @@ jspecify = "1.0.0"
 compose = "1.12.2"
 bouncycastle = "1.86"
 
+# Discord 음성 채널 (M19): DAVE(종단 간 암호화)는 JDAVE(libdave, Java 25 FFM), Opus는 Homebrew libopus(arm64)를 JNA 5로
+jda = "6.7.0"
+jdave = "0.1.8"
+jna = "5.17.0"
+
 [libraries]
 # build-logic 전용 (convention plugin 의존성)
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -32,6 +37,10 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+jda = { module = "net.dv8tion:JDA", version.ref = "jda" }
+jdave-api = { module = "club.minnced:jdave-api", version.ref = "jdave" }
+jdave-native-darwin = { module = "club.minnced:jdave-native-darwin", version.ref = "jdave" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }

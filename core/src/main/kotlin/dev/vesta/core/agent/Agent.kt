@@ -23,6 +23,8 @@ data class AgentRequest(
     val routing: dev.vesta.core.decision.RoutingDecision? = null,
     /** CLI를 실행한 폴더와 그 프로젝트 지침 (M17). Mac 주인일 때만 들어온다 */
     val workspace: Workspace? = null,
+    /** 소리로 들려줄 답 (음성 대화, M19): 짧게 말하듯이 */
+    val spoken: Boolean = false,
 )
 
 /** 사용자 입력. [images]는 이번 질문에 붙인 이미지 (V-04), [workspace]는 CLI 작업 폴더 (M17) */
@@ -30,6 +32,8 @@ data class UserInput(
     val text: String,
     val images: List<dev.vesta.core.media.ImageInput> = emptyList(),
     val workspace: Workspace? = null,
+    /** 답을 소리로 들려준다 (Discord 음성 채널·웹 음성 대화, M19) */
+    val spoken: Boolean = false,
 )
 
 /**
