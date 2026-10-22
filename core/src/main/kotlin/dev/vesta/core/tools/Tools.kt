@@ -53,6 +53,11 @@ data class ApprovalDetails(
     val body: String,
     /** D8 등 경고 */
     val warning: String? = null,
+    /**
+     * 이 작업이 쓰는 실제 경로들 (허용 폴더 검사를 통과한 절대 경로). 내장 파일 도구만 채운다.
+     * CLI 쓰기 자동 승인(M17)이 "작업 폴더 안의 일반 파일"인지 볼 때 쓴다. 비어 있으면 자동 승인하지 않는다
+     */
+    val targets: List<String> = emptyList(),
 )
 
 sealed interface ApprovalDecision {

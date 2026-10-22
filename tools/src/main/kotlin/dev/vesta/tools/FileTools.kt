@@ -193,6 +193,7 @@ class WriteFileTool(private val sandbox: PathSandbox) : Tool {
             title = "파일 쓰기 ($action): ${target?.let(sandbox::display) ?: path} · ${size(content.toByteArray().size.toLong())}",
             body = content.take(2_000) + if (content.length > 2_000) "\n… (${content.length}자 중 2,000자만 표시)" else "",
             warning = if (exists && mode == "overwrite") "기존 파일을 덮어씁니다" else null,
+            targets = listOfNotNull(target?.toString()),
         )
     }
 
@@ -217,7 +218,10 @@ class WriteFileTool(private val sandbox: PathSandbox) : Tool {
 class MakeDirectoryTool(private val sandbox: PathSandbox) : Tool {
     override val spec = ToolSpec("make_directory", "폴더를 만든다 (중간 폴더 포함). 사용자 승인이 필요하다.", schema("path" to prop("string", "폴더 경로"), required = listOf("path")))
     override val risk = RiskLevel.WRITE
-    override fun describe(arguments: JsonObject) = ApprovalDetails("폴더 만들기: ${arguments.string("path")}", arguments.string("path").orEmpty())
+    override fun describe(arguments: JsonObject) = ApprovalDetails(
+        "폴더 만들기: ${arguments.string("path")}", arguments.string("path").orEmpty(),
+        targets = listOfNotNull((sandbox.check(arguments.string("path").orEmpty()) as? PathSandbox.Check.Ok)?.path?.toString()),
+    )
 
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult = withContext(Dispatchers.IO) {
         val dir = when (val c = sandbox.check(arguments.string("path") ?: return@withContext fail("path가 필요함"))) {
@@ -236,7 +240,11 @@ class MoveFileTool(private val sandbox: PathSandbox) : Tool {
         schema("from" to prop("string", "원래 경로"), "to" to prop("string", "새 경로"), required = listOf("from", "to")),
     )
     override val risk = RiskLevel.WRITE
-    override fun describe(arguments: JsonObject) = ApprovalDetails("옮기기: ${arguments.string("from")} → ${arguments.string("to")}", "")
+    override fun describe(arguments: JsonObject): ApprovalDetails {
+        val paths = listOf("from", "to").map { (sandbox.check(arguments.string(it).orEmpty()) as? PathSandbox.Check.Ok)?.path?.toString() }
+        // 한쪽이라도 허용 폴더 밖이면 대상을 비운다 (자동 승인하지 않게)
+        return ApprovalDetails("옮기기: ${arguments.string("from")} → ${arguments.string("to")}", "", targets = if (null in paths) emptyList() else paths.filterNotNull())
+    }
 
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult = withContext(Dispatchers.IO) {
         val from = when (val c = sandbox.check(arguments.string("from") ?: return@withContext fail("from이 필요함"))) {

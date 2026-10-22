@@ -185,6 +185,8 @@ sealed interface EventDto {
     @Serializable @SerialName("approval") data class Approval(
         val requestId: String, val tool: String, val risk: String, val title: String, val body: String,
         val warning: String?, val reason: String?, val editableField: String?, val editableValue: String?,
+        /** 쓰는 실제 경로들 (내장 파일 도구만, M17) */
+        val targets: List<String> = emptyList(),
     ) : EventDto
     /** 답변을 저장했다 (피드백용 메시지 ID) */
     @Serializable @SerialName("saved") data class Saved(val messageId: Long) : EventDto

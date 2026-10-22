@@ -36,9 +36,13 @@ class ApplyPatchTool(private val sandbox: PathSandbox) : Tool {
         val files = FILE.findAll(patch).map { it.groupValues[1] }.distinct().toList()
         val added = patch.lines().count { it.startsWith("+") && !it.startsWith("+++") }
         val removed = patch.lines().count { it.startsWith("-") && !it.startsWith("---") }
+        val repo = (sandbox.check(arguments.string("repo").orEmpty()) as? PathSandbox.Check.Ok)?.path
+        // 패치가 건드리는 파일 경로 (/dev/null은 새 파일·지운 파일 표시). 하나라도 허용 폴더 밖이면 대상을 비운다
+        val targets = repo?.let { root -> files.filter { it != "/dev/null" }.map { (sandbox.check(root.resolve(it).toString()) as? PathSandbox.Check.Ok)?.path?.toString() } }
         return ApprovalDetails(
             title = "패치 적용: ${arguments.string("repo")} · 파일 ${files.size}개 (+$added/-$removed) ${files.take(3).joinToString()}",
             body = patch.take(4_000) + if (patch.length > 4_000) "\n… (${patch.length}자 중 4,000자만 표시)" else "",
+            targets = if (targets == null || null in targets) emptyList() else targets.filterNotNull(),
         )
     }
 

@@ -62,7 +62,19 @@ class ChatCommand : CliktCommand(name = "chat") {
 
             out.println(dim("Vesta · ${backend.description} · /help 명령 보기 · Ctrl+D 종료"))
             autoWrites = acceptWrites
-            val workspace = if (noWorkspace) null else Workspaces.current()
+            val workspace = if (noWorkspace) null else Workspaces.current()?.let { ws ->
+                if (Workspaces.trusted(ws)) return@let ws
+                // 처음 보거나 바뀐 VESTA.md: 따를지 먼저 묻는다. 입력이 터미널이 아니면 묻지 않고 쓰지 않는다
+                if (System.console() == null) {
+                    out.println(dim("${Workspaces.FILE}가 처음 보거나 바뀐 내용이라 이번에는 쓰지 않습니다 (터미널에서 vesta를 실행해 승인)"))
+                    return@let ws.copy(instructions = null)
+                }
+                out.println(bold("이 폴더의 ${Workspaces.FILE}를 처음 봅니다 (또는 내용이 바뀜). 모델이 이 지침을 따릅니다:"))
+                Workspaces.preview(ws).lines().forEach { out.println(dim("│ $it")) }
+                out.flush()
+                val answer = runCatching { reader.readLine("이 지침을 따를까요? [y/N] ").trim().lowercase() }.getOrDefault("")
+                if (answer == "y" || answer == "yes" || answer == "ㅛ") ws.also(Workspaces::trust) else ws.copy(instructions = null).also { out.println(dim("지침 없이 시작합니다.")) }
+            }
             workspace?.let { ws ->
                 out.println(dim("작업 폴더 ${Workspaces.display(ws.path)}" + (if (ws.instructions != null) " · ${Workspaces.FILE} 읽음" else "") +
                     if (autoWrites) " · 파일 쓰기 자동 승인" else ""))
@@ -172,7 +184,7 @@ class ChatCommand : CliktCommand(name = "chat") {
                     renderer.render(event, start.elapsedNow())
                     if (event is AgentEvent.Media) saveImage(backend, event)?.let { out.println("🖼 이미지: $it"); out.flush() }
                     if (event is AgentEvent.ApprovalRequested) {
-                        val decision = if (autoWrites && event.risk == dev.vesta.core.RiskLevel.WRITE) {
+                        val decision = if (autoWrites && AutoApprove.allows(event, workspace?.path)) {
                             out.println(dim("✓ 자동 승인 (파일 쓰기): ${event.details.title}"))
                             dev.vesta.core.tools.ApprovalDecision.Approve
                         } else Approvals.ask(reader, out, event)

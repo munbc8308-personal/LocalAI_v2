@@ -37,6 +37,32 @@ internal object Workspaces {
         return text.take(Workspace.MAX_INSTRUCTIONS).ifBlank { null }
     }
 
+    /**
+     * VESTA.md 신뢰 (M17 보안 검토): 받은 저장소의 지침 파일이 모델에게 위험한 지시를 할 수 있어,
+     * 처음 보거나 내용이 바뀌면 사용자가 한 번 승인해야 쓴다. 승인한 내용의 SHA-256을 폴더별로 `~/.vesta/trusted-instructions`에 적는다
+     */
+    fun trusted(workspace: Workspace, store: Path = trustFile()): Boolean {
+        val text = workspace.instructions ?: return true
+        return runCatching { Files.readAllLines(store) }.getOrDefault(emptyList()).any { it == "${sha256(text)}\t${workspace.path}" }
+    }
+
+    fun trust(workspace: Workspace, store: Path = trustFile()) {
+        val text = workspace.instructions ?: return
+        val kept = runCatching { Files.readAllLines(store) }.getOrDefault(emptyList()).filterNot { it.endsWith("\t${workspace.path}") }
+        Files.createDirectories(store.parent)
+        Files.write(store, kept + "${sha256(text)}\t${workspace.path}")
+    }
+
+    /** 승인 전에 보여 줄 지침. 모델이 받는 내용 전부를 보여 준다 (뒤쪽에 숨긴 지시를 못 보고 승인하지 않게). 길면 줄 수를 알린다 */
+    fun preview(workspace: Workspace, lines: Int = 80): String {
+        val all = workspace.instructions.orEmpty().lines()
+        return all.take(lines).joinToString("\n") + if (all.size > lines) "\n… (${all.size}줄 중 ${lines}줄만 표시 — 나머지도 모델에 들어갑니다. 파일을 직접 확인하세요)" else ""
+    }
+
+    private fun trustFile(): Path = dev.vesta.core.config.VestaPaths.default().home.resolve("trusted-instructions")
+
+    private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+
     /** 표시용: 홈은 `~` */
     fun display(path: String) = path.replaceFirst(System.getProperty("user.home"), "~")
 

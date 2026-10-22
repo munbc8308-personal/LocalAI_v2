@@ -18,7 +18,12 @@ internal object PrintMode {
         // JDK 21: 입출력이 터미널일 때만 null이 아니다
         val console = System.console()
         val backend = openBackend(local)
-        val workspace = if (useWorkspace) Workspaces.current() else null
+        val err0 = System.err
+        // 승인하지 않은(처음 보거나 바뀐) VESTA.md는 쓰지 않는다. 승인은 대화(vesta)에서
+        val workspace = if (!useWorkspace) null else Workspaces.current()?.let { ws ->
+            if (Workspaces.trusted(ws)) ws
+            else ws.copy(instructions = null).also { err0.println("${Workspaces.FILE}를 아직 승인하지 않아 쓰지 않습니다 (vesta로 대화를 열어 승인)") }
+        }
         val out = PrintWriter(System.out, true)
         val err = PrintWriter(System.err, true)
         val renderer = if (console != null) StreamRenderer(out, false) else null
@@ -35,10 +40,10 @@ internal object PrintMode {
                 if (event is AgentEvent.Error) failed = true
                 if (event is AgentEvent.ApprovalRequested) {
                     val decision = when {
-                        acceptWrites && event.risk == RiskLevel.WRITE -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (파일 쓰기): ${event.details.title}".let { if (console != null) dim(it) else it }) }
+                        acceptWrites && AutoApprove.allows(event, workspace?.path) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (파일 쓰기): ${event.details.title}".let { if (console != null) dim(it) else it }) }
                         console != null -> ask(console, err, event)
                         else -> ApprovalDecision.Deny("터미널이 아니라 승인할 수 없음").also {
-                            err.println("거부: ${event.details.title} (터미널에서 실행하거나 파일 쓰기면 --accept-writes)")
+                            err.println("거부: ${event.details.title} (" + if (acceptWrites) "자동 승인 범위 밖: 셸·실행되는 파일·작업 폴더 밖은 터미널에서 승인)" else "터미널에서 실행하거나, 작업 폴더 안 파일 쓰기면 --accept-writes)")
                         }
                     }
                     backend.resolveApproval(event.requestId, decision)
