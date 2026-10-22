@@ -156,6 +156,8 @@ data class DiscordConfig(
     /** 무료 계정 첨부 한도 10MB */
     override val maxFileMegabytes: Int = 10,
     override val apiUrl: String = "https://discord.com/api/v10",
+    /** 음성으로 물으면 음성 메시지로도 답할지 (`!voice`로 대화방마다 바꿀 수 있다, M18) */
+    override val voiceReply: Boolean = false,
 ) : MessengerConfig
 
 data class SlackConfig(

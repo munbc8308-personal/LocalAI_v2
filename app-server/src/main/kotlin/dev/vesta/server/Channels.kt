@@ -64,7 +64,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         else -> {
             val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
             val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() })
-            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions)
+            val bot = DiscordBot(api, gateway, app.conversation, app.channelBindings, files, discord, status, speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, textToSpeech = app.textToSpeech)
             notifiers += bot.notifier
             scope.launch { bot.run() }
         }

@@ -89,9 +89,10 @@ class ChatController(private val scope: CoroutineScope) {
             .onFailure { loadError = it.message }
     }
 
-    fun send(text: String) {
+    /** 질문을 보낸다. 보냈으면 그 묶음(음성 대화가 답을 따라 읽는다), 못 보냈으면 null */
+    fun send(text: String): Turn? {
         val images = pendingImages.map { it.dataUrl }
-        if (busy || (text.isBlank() && images.isEmpty())) return
+        if (busy || (text.isBlank() && images.isEmpty())) return null
         val turn = Turn(text.trim(), images)
         pendingImages.clear()
         turns += turn
@@ -110,6 +111,7 @@ class ChatController(private val scope: CoroutineScope) {
                 busy = false
             }
         }
+        return turn
     }
 
     /** 👍/👎·담당 정정. 같은 단추를 다시 누르면 평가를 지운다 */

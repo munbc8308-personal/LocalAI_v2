@@ -65,6 +65,14 @@ internal class DiscordSurface(private val api: DiscordApi) : ChatSurface {
         return true
     }
 
+    /** 음성으로 물으면 음성 메시지로 답한다 (`!voice`로 켬, M18) */
+    override val supportsVoice = true
+
+    override suspend fun sendVoice(chat: String, ogg: ByteArray) {
+        val seconds = OggOpus.durationSeconds(ogg).coerceAtLeast(0.1)
+        api.createVoiceMessage(chat, ogg, seconds, OggOpus.waveform(seconds))
+    }
+
     override suspend fun askEdit(chat: String, current: String) {
         api.createMessage(chat, "수정한 명령을 보내 주세요. 지금 명령:\n" + codeBlock(current))
     }

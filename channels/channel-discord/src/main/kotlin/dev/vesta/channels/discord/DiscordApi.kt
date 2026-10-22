@@ -55,6 +55,9 @@ interface DiscordApi {
     suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject)
     /** 파일을 붙인 메시지 (만든 이미지) */
     suspend fun createMessageWithFile(channelId: String, content: String, fileName: String, bytes: ByteArray, contentType: String)
+
+    /** 음성 메시지 (flags IS_VOICE_MESSAGE 8192, M18). 글은 붙일 수 없고, 길이·파형이 있어야 한다 */
+    suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String)
     /** 첨부 파일. Discord CDN 주소만 받는다. [maxBytes]를 넘으면 받지 않는다 */
     suspend fun download(url: String, maxBytes: Long): ByteArray
 }
@@ -170,6 +173,36 @@ class HttpDiscordApi(
         }
     }
 
+    override suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String) {
+        val payload = buildJsonObject {
+            put("flags", VOICE_MESSAGE)
+            put("attachments", buildJsonArray {
+                add(buildJsonObject {
+                    put("id", 0)
+                    put("filename", "voice-message.ogg")
+                    put("duration_secs", durationSeconds)
+                    put("waveform", waveform)
+                })
+            })
+        }
+        guarded {
+            val response = http.submitFormWithBinaryData(
+                "$baseUrl/channels/$channelId/messages",
+                formData {
+                    append("payload_json", payload.toString())
+                    append("files[0]", ogg, Headers.build {
+                        append(HttpHeaders.ContentType, "audio/ogg")
+                        append(HttpHeaders.ContentDisposition, "filename=\"voice-message.ogg\"")
+                    })
+                },
+            ) {
+                header(HttpHeaders.Authorization, "Bot $token")
+                header(HttpHeaders.UserAgent, USER_AGENT)
+            }
+            if (!response.status.isSuccess()) throw DiscordException(response.status.value, response.bodyAsText().take(200))
+        }
+    }
+
     override suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject) {
         call(HttpMethod.Post, "/interactions/$interactionId/$interactionToken/callback", response, auth = false)
     }
@@ -257,6 +290,8 @@ class HttpDiscordApi(
     companion object {
         private const val SUPPRESS_EMBEDS = 1 shl 2
         private val CDN_HOSTS = setOf("cdn.discordapp.com", "media.discordapp.net")
+        /** 메시지 flags: 음성 메시지 */
+        private const val VOICE_MESSAGE = 8192
         private const val USER_AGENT = "DiscordBot (https://github.com/munbc8308-personal/LocalAI_v2, 1.0)"
 
         // REST 호출은 JDK HttpClient 엔진: Ktor CIO는 연결을 다시 쓰지 못해 호출마다 약 1.2초(새 TLS 연결),

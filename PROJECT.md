@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M17 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.8, 2026-10-22)
+> 상태: M0~M9·M13~M18 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v3.9, 2026-10-22)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -44,6 +44,7 @@
 | v3.6 | 2026-10-22 | **M15 멀티 유저**: `identity` 모듈(`RolePolicy` 역할 표, `UserService`, `FairScheduler` 요청 큐, `PasswordHasher` 이동), 사용자 관리(`vesta user`, `/api/users`, 웹 UI 사용자 카드), 이름 로그인·이름별 잠금·본인 비밀번호 변경, 컬렉션 공유(`collection_share`, schema v13), MEMBER 자기 폴더(`users.memberRoot`)·셸 없음, 역할로 막힌 요청은 모델 없이 안내, 학습 데이터는 동의한 사용자만(L-09), 메신저 `pair --user`. 13.17 진행 기록 |
 | v3.7 | 2026-10-22 | **M16 주간 자가 개선**: `evolution` 모듈(ollama.com 모델 목록 읽기·후보 고르기, `Scorecard`·`Gate` 평가 비교, `ThresholdTuner` 임계값 조정, `EvolutionService` 제안·승인·되돌리기), `vesta evolve run/list/approve/reject/rollback`, launchd `dev.vesta.evolve`(일요일 03:00), 기준 답 평가셋(`eval/answers-ko.tsv`)·저장소에 없는 코드 질문(`eval/code-absent-ko.tsv`), 설정 덮어쓰기 `~/.vesta/tuned.properties`, 메인 모델 교체는 메신저·웹 UI 승인 후 반영, 서버가 바뀐 설정을 보고 쉬는 때 다시 시작, D6 임계값 설정화(`decision.thresholds.codeSufficient`), schema v14. 7.13·13.18 |
 | v3.8 | 2026-10-22 | **M17 CLI 작업 폴더**: `vesta`만 치면 대화, `vesta -p "질문"`(한 번만), 실행한 폴더를 작업 폴더로(파일·셸 상대 경로 기준, 허용 폴더 첫 자리), `VESTA.md` 프로젝트 지침(저장소 루트~작업 폴더), 작업 폴더가 등록한 저장소면 그 저장소를 먼저 보고 시작할 때 바뀐 파일 색인, 파일 이름만 써도 붙이기, `/code`·`/task` 명령, 파일 쓰기 자동 승인(`--accept-writes`, `/accept`, 셸은 계속 승인). 7.14·13.19 |
+| v3.9 | 2026-10-22 | **M18 음성 대화**: 웹 UI 음성 대화 모드(V-09, 말 끝 감지·WAV 인식·문장 단위 읽기), Discord 음성 메시지 답장(V-10). Discord 음성 채널은 음성 연결·종단 간 암호화(DAVE) 구현 부담으로 제외. 13.20 |
 
 ---
 
@@ -791,6 +792,8 @@ MCP `annotations`는 서버가 주는 **힌트일 뿐**이라 그대로 믿지 �
 | V-06 | 이미지 생성 | P2 | `ImageAgent`: 메인 모델이 한국어 요청을 영어 프롬프트로 바꾸고 mflux(FLUX.1-schnell)로 생성. `/image` 명령 또는 D1 판정 |
 | V-07 | 이미지 편집 | 보류 | 인페인팅·변형. 모델·메모리 검토 후 결정 |
 | V-08 | 생성물 보관 | P2 | 생성 이미지를 `MediaAsset`으로 저장, 사용자별 갤러리 |
+| V-09 | 음성 대화 모드 | P1 | 웹 UI 🗣: 손 안 대고 말 → 인식 → 답 → 읽어 주기를 되풀이 (M18). 소리 크기로 말 시작·끝 감지(소음에 맞춰 기준 조정, 0.9초 조용하면 끝), 16kHz WAV로 인식, 답은 문장 단위로 미리 만들어 순서대로 읽음, 생각·읽는 동안 마이크 무시(에코 방지), 읽는 중 눌러 끊기. 휴대폰은 Tailscale HTTPS |
+| V-10 | 메신저 음성 답장 | P1 | Telegram 음성 메시지, Discord 음성 메시지(flags 8192, 길이·파형). 음성으로 묻고 `/voice`·`!voice`를 켰을 때 (M18) |
 
 - 미디어 모델(mflux, mlx-whisper, MeloTTS)은 Python 패키지라 **로컬 미디어 워커**(`127.0.0.1` HTTP, uv 환경, launchd 등록) 하나로 묶어 띄운다. 앱은 `media` 모듈의 클라이언트로 호출한다.
 - 생성 이미지에는 메타데이터에 "AI 생성(Vesta, 모델명)"을 기록한다.
@@ -1245,6 +1248,7 @@ app-cli / app-server
 | **M15. 멀티 유저** | identity 모듈, 사용자·역할, 사용자별 인증·데이터 분리, 공유 컬렉션, 요청 큐, 역할별 도구 정책 | 두 사용자가 서로의 대화·문서를 볼 수 없음, MEMBER는 Orchard·셸 사용 불가 |
 | **M16. 주간 자가 개선** | evolution 모듈, 새 모델 찾기·받기·평가 게이트, 메신저 승인, 임계값 조정, 결정 모델 재학습 연결, launchd 주간 실행, 되돌리기 | 실제 모델로 점검이 끝나고, 더 나쁜 모델은 제안하지 않으며, 승인·되돌리기가 서버 재시작으로 반영됨 |
 | **M17. CLI 작업 폴더** | `vesta`·`vesta -p`, 작업 폴더·VESTA.md, 저장소 자동 연동·색인, `/code`·`/task`, 쓰기 자동 승인 | 프로젝트 폴더에서 상대 경로로 읽기·쓰기, 지침 반영, 저장소 코드를 근거로 답함 |
+| **M18. 음성 대화** | 웹 UI 음성 대화 모드, Discord 음성 메시지 답장 | 손 안 대고 묻고 듣기, 문장 단위로 바로 읽기 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -1980,6 +1984,26 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 #### 남은 일 (W-07, P2)
 - 계획·할 일 목록, 도구 단계 12 → 더 길게, 긴 대화 요약 압축.
 - 훅·사용자 정의 명령, 이미지 붙여넣기(CLI).
+
+
+### 13.20 M18 진행 기록 (2026-10-22)
+
+#### 완료
+- 웹 UI `VoiceConversation`(VoiceChat.kt): ScriptProcessor로 마이크를 받아 RMS로 말 시작·끝 감지(소음 바닥 ×3, 최소 0.012, 앞 2프레임 함께, 0.9초 조용하면 끝, 0.3초 미만은 버림, 최대 30초) → 16kHz 16비트 WAV(`Wav.encode`) → `/api/stt` → 질문 전송 → 답이 오는 대로 `SpeechText.cut`(문장 끝, 8자 미만은 붙임, 닫히지 않은 코드 블록 앞까지)·`clean`(코드·표·출처 번호·링크·기호 빼기) → `/api/speech`를 미리(병렬) 만들고 순서대로 재생 → 다시 듣기. 생각·읽는 동안 마이크 무시, 읽는 중 눌러 끊기(생성도 멈춤). 입력란 옆 🗣 단추·상태 줄(단계·마이크 크기·알아들은 말).
+- Discord 음성 답장: `DiscordApi.createVoiceMessage`(flags 8192, `duration_secs`·`waveform`), `OggOpus.durationSeconds`(마지막 granule − OpusHead pre-skip, 48kHz), `DiscordSurface.supportsVoice`, `DiscordBot(textToSpeech)`, `DiscordConfig.voiceReply`.
+- `ChatController.send`가 보낸 묶음(Turn)을 돌려준다.
+
+#### 확인
+- 서버: `say`로 만든 16kHz WAV → `/api/stt` 0.44초 "내일 서울 날씨 어때?" 정확. 문장 하나 `/api/speech` 0.70초.
+- 단위 테스트: 문장 자르기·코드 블록·읽을 글 다듬기(웹 UI jsTest), Discord 음성 답장·OGG 길이.
+
+#### 발견·수정
+- JS 정규식은 유니코드 모드라 `\[(\d+)]`의 짝 없는 `]`가 오류 → 이스케이프.
+
+#### 남은 일
+- 실제 브라우저·휴대폰에서 음성 대화 확인 (마이크 권한, 사파리 ScriptProcessor, 스피커 소리 되먹임 정도).
+- 끼어들기(읽는 중 말하면 끊기): 에코 제거만으로는 스피커 소리를 말로 오인할 수 있어 지금은 단추로만.
+- Discord 음성 채널: 음성 연결(UDP·Opus)과 종단 간 암호화(DAVE) 구현 부담으로 보류.
 
 ---
 

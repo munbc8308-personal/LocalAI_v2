@@ -38,6 +38,11 @@ class FakeDiscord : DiscordApi {
         files += content to bytes
     }
 
+    val voices = mutableListOf<Triple<ByteArray, Double, String>>()
+    override suspend fun createVoiceMessage(channelId: String, ogg: ByteArray, durationSeconds: Double, waveform: String) {
+        voices += Triple(ogg, durationSeconds, waveform)
+    }
+
     override suspend fun respond(interactionId: String, interactionToken: String, response: JsonObject) {
         responses += response
     }

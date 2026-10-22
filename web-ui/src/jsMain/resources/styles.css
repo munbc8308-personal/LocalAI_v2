@@ -138,6 +138,9 @@ a { color: var(--accent); }
 .composer button { flex-shrink: 0; }
 .composer button.icon { min-width: 40px; padding: 8px; font-size: 18px; line-height: 1; }
 .composer button.recording { background: var(--bad); color: #fff; border-color: var(--bad); animation: pulse 1.2s ease-in-out infinite; }
+/* 음성 대화 모드 (M18) */
+.voicebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line); }
+.voicebar .bar.level { flex: 1 1 80px; max-width: 160px; margin: 0; }
 .attachments { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px 0; background: var(--panel); border-top: 1px solid var(--line); }
 .thumb { position: relative; }
 .thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }

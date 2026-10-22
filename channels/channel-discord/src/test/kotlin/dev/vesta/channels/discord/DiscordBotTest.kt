@@ -68,7 +68,8 @@ private class Harness(
     val conversation = FakeConversation(script)
     val files = FakeFiles()
     val stt = dev.vesta.channels.testing.FakeSpeechToText()
-    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt)
+    val tts = dev.vesta.channels.testing.FakeTextToSpeech()
+    val bot = DiscordBot(api, { }, conversation, bindings, files, config, nowMillis = { 0L }, speechToText = stt, textToSpeech = tts)
 
     suspend fun TestScope.send(type: String, data: JsonObject) {
         bot.dispatch(type, data, this)
@@ -269,6 +270,40 @@ class DiscordBotTest : FunSpec({
                 api.messages.last().content shouldContain "색인 완료"
             }
         }
+    }
+
+    test("!voice를 켜면 음성으로 물은 답을 음성 메시지(길이·파형 포함)로도 보낸다. 글로 물으면 글로만 (M18)") {
+        runTest {
+            val h = Harness({ _, _ -> emit(AgentEvent.Token("세 시입니다")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
+            with(h) {
+                send("MESSAGE_CREATE", message("!voice"))
+                api.messages.last().content shouldContain "음성"
+                api.file = "OggS".toByteArray()
+                send("MESSAGE_CREATE", message("", attachment = """{"id":"a1","filename":"voice-message.ogg","size":4,"url":"https://cdn.discordapp.com/v.ogg","content_type":"audio/ogg"}"""))
+                tts.spoken.single() shouldContain "세 시입니다"
+                api.voices.single().let { (_, seconds, waveform) ->
+                    (seconds > 0) shouldBe true
+                    java.util.Base64.getDecoder().decode(waveform).size shouldBe 64
+                }
+                send("MESSAGE_CREATE", message("글로 질문"))
+                api.voices.size shouldBe 1
+            }
+        }
+    }
+
+    test("OGG Opus 길이: 마지막 granule − pre-skip, 48kHz") {
+        fun page(granule: Long, body: ByteArray): ByteArray {
+            val header = ByteArray(27 + 1)
+            "OggS".toByteArray().copyInto(header)
+            for (k in 0 until 8) header[6 + k] = (granule ushr (8 * k)).toByte()
+            header[26] = 1
+            header[27] = body.size.toByte()
+            return header + body
+        }
+        val head = "OpusHead".toByteArray() + byteArrayOf(1, 1, 0x38, 0x01) + ByteArray(8) // pre-skip 312
+        val ogg = page(0, head) + page(0, "OpusTags".toByteArray()) + page(48_000L * 3 + 312, ByteArray(10))
+        OggOpus.durationSeconds(ogg) shouldBe 3.0
+        OggOpus.durationSeconds("not ogg".toByteArray()) shouldBe 0.0
     }
 
     test("음성 메시지(audio/ogg 첨부)는 인식해서 묻고, 이미지 첨부는 비전 질문으로") {

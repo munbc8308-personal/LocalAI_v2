@@ -1,6 +1,7 @@
 package dev.vesta.webui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -198,6 +199,9 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
     val touch = remember { window.matchMedia("(pointer: coarse)").matches }
     val scope = rememberCoroutineScope()
     val recorder = remember { Recorder() }
+    // 음성 대화 모드 (M18): 손을 대지 않고 말 → 답 → 읽어 주기를 되풀이
+    val voice = remember { VoiceConversation(scope, chat) }
+    DisposableEffect(Unit) { onDispose { voice.stop() } }
     var recording by remember { mutableStateOf(false) }
     var transcribing by remember { mutableStateOf(false) }
     var mediaError by remember { mutableStateOf<String?>(null) }
@@ -248,6 +252,7 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
             transcribing = false
         }
     }
+    if (voice.active || voice.error != null) VoiceBar(voice)
     if (chat.pendingImages.isNotEmpty() || mediaError != null) Div({ classes("attachments") }) {
         chat.pendingImages.forEach { image ->
             Div({ classes("thumb") }) {
@@ -291,6 +296,17 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
             if (transcribing) disabled()
             onClick { toggleRecording() }
         }) { Text(if (transcribing) "…" else if (recording) "■" else "🎤") }
+        Button({
+            classes("icon")
+            if (voice.active) classes("recording")
+            attr("title", if (voice.active) "음성 대화 끝내기" else "음성 대화 (손 안 대고 말하고 듣기)")
+            attr("aria-label", if (voice.active) "음성 대화 끝내기" else "음성 대화")
+            if (recording || transcribing) disabled()
+            onClick {
+                if (voice.active) voice.stop()
+                else scope.launch { runCatching { Speaker.stop(); voice.start() }.onFailure { voice.error = "마이크를 열지 못했습니다: ${it.message}" } }
+            }
+        }) { Text("🗣") }
         TextArea(draft) {
             id("composer")
             attr("rows", "1")
@@ -445,6 +461,29 @@ private fun FeedbackButtons(chat: ChatController, turn: Turn) {
         }
     }
     turn.correctAgent?.let { Span({ classes("muted", "small") }) { Text(" 정정을 저장했습니다 (다음 학습에 반영)") } }
+}
+
+/** 음성 대화 상태 줄: 지금 단계, 마이크 크기, 끊기·끝내기 */
+@Composable
+private fun VoiceBar(voice: VoiceConversation) {
+    Div({ classes("voicebar") }) {
+        val label = when (voice.phase) {
+            VoicePhase.LISTENING -> "듣는 중… 말씀하세요"
+            VoicePhase.HEARING -> "말씀 듣는 중…"
+            VoicePhase.THINKING -> "생각 중…"
+            VoicePhase.SPEAKING -> "말하는 중 (눌러서 끊기)"
+            VoicePhase.OFF -> "음성 대화 꺼짐"
+        }
+        Button({
+            classes("link", "small")
+            onClick { voice.interrupt() }
+            if (voice.phase != VoicePhase.SPEAKING && voice.phase != VoicePhase.THINKING) disabled()
+        }) { Text(label) }
+        Div({ classes("bar", "level") }) { Div({ classes("fill"); style { property("width", "${(voice.level * 100).toInt()}%") } }) }
+        voice.heard?.let { Span({ classes("muted", "small") }) { Text("“${it.take(60)}”") } }
+        voice.error?.let { Span({ classes("error", "small") }) { Text(it) } }
+        if (voice.active) Button({ classes("link", "small"); onClick { voice.stop() } }) { Text("끝내기") }
+    }
 }
 
 /** 한 번에 답변 하나만 읽는다 */
