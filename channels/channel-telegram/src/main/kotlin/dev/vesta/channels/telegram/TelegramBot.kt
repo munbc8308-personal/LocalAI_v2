@@ -46,8 +46,10 @@ class TelegramBot(
     actions: dev.vesta.channels.ChannelActions? = null,
     /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
     userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
+    /** 👍·👎 반응 → 피드백 (L-20) */
+    feedback: (suspend (dev.vesta.core.UserContext, Long, Int) -> Boolean)? = null,
 ) {
-    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions, userSettings = userSettings)
+    private val bot = ChannelBot(TelegramSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions, userSettings = userSettings, feedback = feedback)
     /** 먼저 보내는 알림 (M16) */
     val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     private val maxImageBytes = mediaLimits.maxImageMegabytes * 1024L * 1024
@@ -133,6 +135,19 @@ class TelegramBot(
                 override suspend fun ack(notice: String?, minor: Boolean) = api.answerCallback(query.id, notice)
             }
             bot.handle(Inbound.Button(query.from.id.toString(), query.from.username, query.message?.chat?.id?.toString(), query.data.orEmpty(), reply), scope)
+        }
+        // 반응 (L-20): 뗀 것과 새로 단 것을 나눠 넘긴다
+        update.messageReaction?.let { reaction ->
+            val user = reaction.user ?: return@let
+            val before = reaction.oldReaction.mapNotNull { it.emoji }.toSet()
+            val after = reaction.newReaction.mapNotNull { it.emoji }.toSet()
+            // 뗀 것을 먼저: 👍 → 👎로 바꾸면 취소 뒤 새 평가가 남는다
+            (before - after).forEach { emoji ->
+                bot.handle(Inbound.Reaction(user.id.toString(), user.username, reaction.chat.id.toString(), reaction.messageId.toString(), emoji, added = false, direct = reaction.chat.type == "private"), scope)
+            }
+            (after - before).forEach { emoji ->
+                bot.handle(Inbound.Reaction(user.id.toString(), user.username, reaction.chat.id.toString(), reaction.messageId.toString(), emoji, added = true, direct = reaction.chat.type == "private"), scope)
+            }
         }
     }
 

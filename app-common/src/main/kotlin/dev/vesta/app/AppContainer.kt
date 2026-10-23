@@ -87,6 +87,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val messages = ExposedMessageRepository(database.db)
     /** 답변 피드백·학습 기록·모델 버전 (M14) */
     val feedback = dev.vesta.storage.ExposedFeedbackRepository(database.db)
+    /** 학습 재료 (M25 L-25) */
+    val trainingSamples = dev.vesta.storage.ExposedTrainingSampleRepository(database.db)
+    val curatorSource = dev.vesta.storage.ExposedCuratorSource(database.db)
     val trainingRuns = dev.vesta.storage.ExposedTrainingRepository(database.db)
     val modelVersions = dev.vesta.storage.ExposedModelVersionRepository(database.db)
     /** 주간 자가 개선 (M16) */
@@ -411,6 +414,31 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             if (remote.isNotEmpty()) append((if (isNotEmpty()) "\n\n" else "") + remote.joinToString("\n", prefix = "A2A 에이전트 (`/agent 이름 할 일`):\n") { "- ${it.name} — ${it.displayName}: ${it.description.take(100)}" })
             if (teams.isNotEmpty()) append((if (isNotEmpty()) "\n\n" else "") + teams.joinToString("\n", prefix = "팀 (`/team 이름 할 일`):\n") { "- ${it.name} — ${it.description} (리더 ${it.leader}, 멤버 ${it.members.joinToString()})" })
         }
+    }
+
+    /**
+     * 👍·👎·담당 정정 저장 (웹·메신저 공통, C-09·L-20). 동의한 사용자(L-09)면 👍·👎를 바로 학습 재료로 (확실한 신호라 검토 없이).
+     * 0(평가 취소)이면 그 재료를 빼고, 바꾸면 고친다
+     */
+    suspend fun recordFeedback(user: UserContext, value: dev.vesta.core.training.Feedback): Boolean {
+        if (!feedback.save(user.userId, value)) return false
+        if (user.userId !in users.trainingUsers()) return true
+        val turn = curatorSource.turnOfAnswer(value.messageId) ?: return true
+        // 담당 정정만 남긴 경우(평가 없음)는 라우팅 정정으로 이미 학습에 들어간다
+        if (value.rating == 0 && value.correctAgent != null) return true
+        trainingSamples.add(
+            dev.vesta.core.training.TrainingSample(
+                id = 0, userId = user.userId, kind = dev.vesta.core.training.SampleKind.ANSWER, signal = dev.vesta.core.training.SampleSignal.FEEDBACK,
+                messageId = value.messageId,
+                question = dev.vesta.training.PrivacyFilter.clean(turn.question).take(2_000),
+                answer = turn.answer?.let { dev.vesta.training.PrivacyFilter.clean(it).take(4_000) },
+                label = when { value.rating > 0 -> "good"; value.rating < 0 -> "bad"; else -> "none" },
+                confidence = 1.0,
+                status = if (value.rating == 0) dev.vesta.core.training.SampleStatus.REJECTED else dev.vesta.core.training.SampleStatus.ACCEPTED,
+                note = value.comment?.let { dev.vesta.training.PrivacyFilter.clean(it).take(300) },
+            ),
+        )
+        return true
     }
 
     /** A2A 에이전트 (A-15): Mac 주인만. 토큰은 키체인 `dev.vesta.a2a` / 이름 */

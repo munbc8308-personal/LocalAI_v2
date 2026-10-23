@@ -41,6 +41,10 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
     val files = ServerChannelFiles(app)
     val notifiers = mutableListOf<ChannelNotifier>()
     // 사용자별 음성 답장 기본값·목소리 (U-07). 목소리는 이 Mac에 있는 것만
+    // 👍·👎 반응 → 피드백·학습 재료 (L-20). 평가만 바꾸고 남긴 담당 정정은 그대로 둔다
+    val reactions: suspend (dev.vesta.core.UserContext, Long, Int) -> Boolean = { user, message, rating ->
+        app.recordFeedback(user, dev.vesta.core.training.Feedback(message, rating, app.feedback.find(user.userId, message)?.correctAgent))
+    }
     val settings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { id ->
         app.userSettings.get(id).let { s -> if (s.voice != null && s.voice !in app.voices) s.copy(voice = null) else s }
     }
@@ -53,7 +57,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         else -> {
             val bot = TelegramBot(
                 HttpTelegramApi(telegramToken, baseUrl = telegram.apiUrl), app.conversation, app.channelBindings, files, telegram, status,
-                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media, actions = actions, userSettings = settings,
+                speechToText = app.speechToText, textToSpeech = app.textToSpeech, mediaLimits = app.config.media, actions = actions, userSettings = settings, feedback = reactions,
             )
             notifiers += bot.notifier
             scope.launch { bot.run() }
@@ -68,7 +72,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
         else -> {
             val api = HttpDiscordApi(discordToken, baseUrl = discord.apiUrl)
             // 서버 채널에서 부르면 받으려면 서버 글 이벤트도 받는다 (M18)
-            val intents = DiscordGateway.DIRECT_MESSAGES or (if (discord.publicChannels) DiscordGateway.GUILD_MESSAGES else 0)
+            val intents = DiscordGateway.DIRECT_MESSAGES or DiscordGateway.DIRECT_MESSAGE_REACTIONS or (if (discord.publicChannels) DiscordGateway.GUILD_MESSAGES else 0)
             val gateway = DiscordGateway(discordToken, HttpDiscordApi.gatewayClient(), gatewayUrl = { api.gatewayUrl() }, intents = intents)
             // 음성 채널 (M19): JDA·DAVE가 Gateway를 하나 더 연다. 음성 인식·읽어 주기가 있어야 한다
             val stt = app.speechToText
@@ -84,7 +88,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             voice?.let { v -> Runtime.getRuntime().addShutdownHook(Thread { v.stop() }) }
             val bot = DiscordBot(
                 api, gateway, app.conversation, app.channelBindings, files, discord, status,
-                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings, textToSpeech = app.textToSpeech,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings, feedback = reactions, textToSpeech = app.textToSpeech,
                 publicGuest = if (discord.publicChannels) ({ publicGuest(app, "discord-guest") }) else null,
                 voice = voice,
             )
@@ -103,7 +107,7 @@ fun startChannels(app: AppContainer, scope: CoroutineScope, actions: ChannelActi
             val api = HttpSlackApi(slackBot, slackApp, baseUrl = slack.apiUrl)
             val bot = SlackBot(
                 api, SlackSocket(api, HttpSlackApi.socketClient()), app.conversation, app.channelBindings, files, slack, status,
-                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings,
+                speechToText = app.speechToText, mediaLimits = app.config.media, actions = actions, userSettings = settings, feedback = reactions,
             )
             notifiers += bot.notifier
             scope.launch { bot.run() }

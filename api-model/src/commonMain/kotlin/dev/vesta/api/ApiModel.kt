@@ -84,7 +84,29 @@ data class TrainingStateDto(
     val corrections: Int,
     val runs: List<TrainingRunDto>,
     val versions: List<ModelVersionDto>,
+    /** 학습 재료 개수: "ROUTING:PENDING" → 3 (L-25) */
+    val samples: Map<String, Int> = emptyMap(),
 )
+
+/** 학습 재료 하나 (L-25·L-26 검토) */
+@Serializable
+data class TrainingSampleDto(
+    val id: Long,
+    val user: String?,
+    val kind: String,
+    val signal: String,
+    val question: String,
+    val answer: String?,
+    val label: String,
+    val confidence: Double,
+    val status: String,
+    val note: String?,
+    val createdAt: String,
+)
+
+/** 검토: status ACCEPTED·REJECTED, 고치면 [label]도 */
+@Serializable
+data class SampleReviewDto(val status: String, val label: String? = null)
 
 @Serializable
 data class ActivateDto(val name: String)

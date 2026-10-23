@@ -194,6 +194,8 @@ class DiscordGateway(
         const val DIRECT_MESSAGES = 1 shl 12
         /** 서버 채널 글 (봇을 부른 글만 내용이 온다, M18) */
         const val GUILD_MESSAGES = 1 shl 9
+        /** DM 메시지에 단 반응 (👍·👎 → 피드백, L-20). 권한 신청이 필요 없는 일반 의도 */
+        const val DIRECT_MESSAGE_REACTIONS = 1 shl 13
 
         private const val DISPATCH = 0
         private const val HEARTBEAT = 1

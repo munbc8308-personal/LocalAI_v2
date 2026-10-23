@@ -337,6 +337,30 @@ object Skills : LongIdTable("skill") {
     init { uniqueIndex(owner, name) }
 }
 
+/** 학습 재료 (M25 L-25, v21). [dedupe]는 종류·라벨·질문을 정규화한 키 (같은 재료를 두 번 넣지 않게) */
+object TrainingSamples : LongIdTable("training_sample") {
+    val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val kind = varchar("kind", 16)
+    val signal = varchar("signal", 16)
+    val messageId = long("message_id").nullable()
+    val question = text("question")
+    val answer = text("answer").nullable()
+    val label = varchar("label", 80)
+    val confidence = double("confidence")
+    val status = varchar("status", 16).index()
+    val note = text("note").nullable()
+    val dedupe = varchar("dedupe", 200).uniqueIndex()
+    val createdAt = timestamp("created_at")
+    val reviewedAt = timestamp("reviewed_at").nullable()
+}
+
+/** 큐레이터 진행 위치 등 작은 값 (M25, v21) */
+object CuratorState : org.jetbrains.exposed.v1.core.Table("curator_state") {
+    val key = varchar("key", 40)
+    val value = long("value")
+    override val primaryKey = PrimaryKey(key)
+}
+
 /** 실행 (M22, v16) */
 object AgentRuns : LongIdTable("agent_run") {
     val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()

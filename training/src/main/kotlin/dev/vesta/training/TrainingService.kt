@@ -52,12 +52,17 @@ class TrainingService(
     private val scope: CoroutineScope,
     /** 학습 전에 메모리 자리를 비운다 (ModelManager.reserve + 미디어 워커 내리기) */
     private val makeRoom: suspend (Long) -> Unit = {},
+    /** 큐레이터가 모으고 검토를 거친 라우팅 재료 (L-25·L-26). 정정과 함께 학습에 넣는다 */
+    private val samples: dev.vesta.core.training.TrainingSampleRepository? = null,
     private val home: String = System.getProperty("user.home"),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()
     private var job: Job? = null
     private var process: Process? = null
+
+    /** 지금 학습하고 있는가 (큐레이터는 학습 중에 돌지 않는다, L-25) */
+    val running: Boolean get() = job?.isActive == true
 
     private fun path(value: String): Path = Path.of(value.replaceFirst(Regex("^~"), home))
     private val trainer get() = path(config.trainerDir)
@@ -142,7 +147,11 @@ class TrainingService(
 
     /** 사용자가 남긴 라우팅 정정 (L-01·L-02). 담당자만 알므로 웹·로컬 칸은 "-". 없으면 null */
     private suspend fun writeCorrections(target: Path): Path? {
-        val rows = dataUsers().flatMap { feedback.routingCorrections(it) }.sortedBy { it.createdAt }
+        val users = dataUsers()
+        val curated = samples?.accepted(dev.vesta.core.training.SampleKind.ROUTING, users).orEmpty()
+            .mapNotNull { s -> runCatching { dev.vesta.core.AgentType.valueOf(s.label) }.getOrNull()?.let { dev.vesta.core.training.RoutingCorrection(s.question, it, s.createdAt) } }
+        // 직접 고친 정정이 같은 질문의 큐레이터 재료보다 앞선다 (distinctBy는 앞의 것을 남긴다)
+        val rows = (users.flatMap { feedback.routingCorrections(it) }.sortedBy { it.createdAt } + curated)
             .map { PrivacyFilter.cell(it.question) to it.agent.name }
             .filter { it.first.isNotBlank() }
             .distinctBy { it.first }

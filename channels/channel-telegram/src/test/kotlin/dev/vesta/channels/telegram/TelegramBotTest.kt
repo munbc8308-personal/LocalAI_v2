@@ -63,6 +63,40 @@ private class Harness(
 }
 
 class TelegramBotTest : FunSpec({
+    test("반응 (M25 L-20): 답 메시지에 단 👍·👎는 그 답의 피드백, 떼면 취소. 남의 반응·다른 이모지·모르는 메시지는 무시") {
+        runTest {
+            val saved = mutableListOf<Pair<Long, Int>>()
+            val api = FakeTelegram()
+            val bindings = MemoryBindings().apply {
+                users = mapOf(1L to owner)
+                items[ME.toString()] = dev.vesta.core.channel.ChannelBinding(owner, ChannelType.TELEGRAM, ME.toString(), ME.toString(), null)
+            }
+            val conversation = FakeConversation { _, _ ->
+                emit(AgentEvent.Token("답입니다"))
+                emit(AgentEvent.Done(dev.vesta.core.AgentType.CHAT, "m", null))
+                emit(AgentEvent.Saved(77))
+            }
+            val bot = TelegramBot(api, conversation, bindings, FakeFiles(), TelegramConfig(streamIntervalMillis = 0), nowMillis = { 0L },
+                feedback = { user, message, rating -> saved += message to rating; user == owner })
+            bot.handle(text("안녕"), this)
+            advanceUntilIdle()
+            val answer = api.messages.last().id
+            fun reaction(new: List<String>, old: List<String> = emptyList(), from: Long = ME, message: Long = answer) = TgUpdate(
+                3, messageReaction = TgMessageReaction(TgChat(from, "private"), message, TgUser(from), old.map { TgReaction("emoji", it) }, new.map { TgReaction("emoji", it) }),
+            )
+            bot.handle(reaction(listOf("👍")), this)
+            bot.handle(reaction(listOf("👎🏽"), old = listOf("👍")), this)
+            bot.handle(reaction(emptyList(), old = listOf("👎🏽")), this)
+            bot.handle(reaction(listOf("🔥")), this)
+            bot.handle(reaction(listOf("👍"), from = 9), this)
+            bot.handle(reaction(listOf("👍"), message = 9_999), this)
+            advanceUntilIdle()
+            saved shouldBe listOf(77L to 1, 77L to 0, 77L to -1, 77L to 0)
+            dev.vesta.channels.ChannelBot.reactionRating("+1::skin-tone-3") shouldBe 1
+            dev.vesta.channels.ChannelBot.reactionRating("thumbsdown") shouldBe -1
+        }
+    }
+
     test("알림 카드(M16): 연결된 주인 대화방에 버튼과 함께 보내고, 누르면 처리 결과를 덧붙이며 버튼을 없앤다") {
         runTest {
             val pressed = mutableListOf<Pair<UserContext, String>>()

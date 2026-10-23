@@ -105,6 +105,19 @@ sealed interface Inbound {
         val reply: ButtonReply,
     ) : Inbound
 
+    /**
+     * 메시지에 단 반응 (👍·👎 → 피드백, L-20). [emoji]는 이모지 글자 또는 플랫폼 이름(`+1`·`thumbsup`). [added]가 false면 뗐다
+     */
+    data class Reaction(
+        override val userId: String,
+        override val userName: String?,
+        val chat: String,
+        val messageId: String,
+        val emoji: String,
+        val added: Boolean,
+        val direct: Boolean = true,
+    ) : Inbound
+
     /** 플랫폼 입력 창(Discord 모달·Slack 모달)에서 수정한 승인 값 */
     data class EditSubmitted(
         override val userId: String,

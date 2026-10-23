@@ -33,6 +33,8 @@ internal class LiveReply(
     @Volatile private var dirty = false
     private var status: String? = null
     private val messageIds = mutableListOf<String>()
+    /** 이 답에 쓴 메신저 메시지 ID (반응 → 피드백, L-20) */
+    val ids: List<String> get() = messageIds.toList()
     private val shown = mutableListOf<String>()
     private var nextEdit = Long.MIN_VALUE
 

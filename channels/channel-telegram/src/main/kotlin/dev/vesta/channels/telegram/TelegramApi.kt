@@ -120,7 +120,21 @@ data class TgUpdate(
     @SerialName("update_id") val updateId: Long,
     val message: TgMessage? = null,
     @SerialName("callback_query") val callbackQuery: TgCallbackQuery? = null,
+    @SerialName("message_reaction") val messageReaction: TgMessageReaction? = null,
 )
+
+/** 메시지 반응 바뀜 (L-20). 1:1 대화에서는 [user]가 온다 */
+@Serializable
+data class TgMessageReaction(
+    val chat: TgChat,
+    @SerialName("message_id") val messageId: Long,
+    val user: TgUser? = null,
+    @SerialName("old_reaction") val oldReaction: List<TgReaction> = emptyList(),
+    @SerialName("new_reaction") val newReaction: List<TgReaction> = emptyList(),
+)
+
+@Serializable
+data class TgReaction(val type: String, val emoji: String? = null)
 
 @Serializable
 data class TgButton(val text: String, @SerialName("callback_data") val callbackData: String)
@@ -160,7 +174,7 @@ class HttpTelegramApi(
         buildJsonObject {
             offset?.let { put("offset", it) }
             put("timeout", timeoutSeconds)
-            putJsonArray("allowed_updates") { add("message"); add("callback_query") }
+            putJsonArray("allowed_updates") { add("message"); add("callback_query"); add("message_reaction") }
         },
         ListSerializer(TgUpdate.serializer()),
     )

@@ -118,6 +118,8 @@ class ServerDeps(
     val mediaLimits: MediaConfig = MediaConfig(),
     /** 답변 피드백 (C-09) */
     val feedback: dev.vesta.core.training.FeedbackRepository? = null,
+    /** 피드백 저장 + 학습 재료 (L-20). 없으면 [feedback]에만 저장 */
+    val recordFeedback: (suspend (UserContext, dev.vesta.core.training.Feedback) -> Boolean)? = null,
     /** 모델 학습 (M14). OWNER만 */
     val training: TrainingEndpoints? = null,
     /** 사용자 관리 (M15, U-01). 목록·추가·역할·삭제는 OWNER만, 본인 비밀번호 바꾸기는 누구나 */
@@ -167,6 +169,9 @@ class TrainingEndpoints(
     val start: suspend () -> TrainingRunDto,
     val cancel: suspend (Long) -> Boolean,
     val activate: suspend (String) -> Boolean,
+    /** 학습 재료 목록 (상태로 거르기)·검토 (L-26) */
+    val samples: suspend (String?) -> List<dev.vesta.api.TrainingSampleDto> = { emptyList() },
+    val review: suspend (Long, dev.vesta.api.SampleReviewDto) -> Boolean = { _, _ -> false },
 )
 
 /**
@@ -347,7 +352,8 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val messageId = call.parameters["id"]?.toLongOrNull() ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"id"}""")
                 val dto = ApiJson.decodeFromString(FeedbackDto.serializer(), call.receiveText())
                 val agent = dto.correctAgent?.let { name -> runCatching { dev.vesta.core.AgentType.valueOf(name) }.getOrNull() ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"correctAgent"}""") }
-                val ok = repo.save(user.userId, dev.vesta.core.training.Feedback(messageId, dto.rating, agent, dto.comment))
+                val value = dev.vesta.core.training.Feedback(messageId, dto.rating, agent, dto.comment)
+                val ok = deps.recordFeedback?.invoke(user, value) ?: repo.save(user.userId, value)
                 call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("saved", ok) }.toString())
             }
             // 주간 자가 개선 (E-05·E-07): 점검 결과, 제안 승인·거절·되돌리기. Mac 주인만
@@ -385,6 +391,22 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val training = call.trainingFor(user, deps) ?: return@post
                     val ok = training.cancel(call.parameters["id"]?.toLongOrNull() ?: -1)
                     call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("cancelled", ok) }.toString())
+                }
+                // 학습 재료 검토 (L-26): 주인만
+                get("/samples") {
+                    val user = call.principal(deps) ?: return@get
+                    val training = call.trainingFor(user, deps) ?: return@get
+                    val status = call.request.queryParameters["status"]?.takeIf { it in setOf("PENDING", "ACCEPTED", "REJECTED") }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(dev.vesta.api.TrainingSampleDto.serializer()), training.samples(status)))
+                }
+                post("/samples/{id}") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.SampleReviewDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?.takeIf { it.status == "ACCEPTED" || it.status == "REJECTED" }
+                        ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"status는 ACCEPTED 또는 REJECTED"}""")
+                    val ok = training.review(call.parameters["id"]?.toLongOrNull() ?: -1, dto)
+                    call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.BadRequest, buildJsonObject { put("reviewed", ok) }.toString())
                 }
                 post("/activate") {
                     val user = call.principal(deps) ?: return@post

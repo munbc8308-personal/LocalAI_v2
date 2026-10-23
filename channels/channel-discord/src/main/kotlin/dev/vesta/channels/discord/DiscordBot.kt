@@ -49,6 +49,8 @@ class DiscordBot(
     actions: dev.vesta.channels.ChannelActions? = null,
     /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
     userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
+    /** 👍·👎 반응 → 피드백 (L-20) */
+    feedback: (suspend (dev.vesta.core.UserContext, Long, Int) -> Boolean)? = null,
     /** 음성 답변 (음성 메시지, M18). 음성으로 묻고 `!voice`를 켰을 때만 */
     textToSpeech: dev.vesta.core.media.TextToSpeech? = null,
     /** 서버 채널에서 부르면 쓸 손님 계정 (M18). null이면 서버 채널은 받지 않는다 */
@@ -58,7 +60,7 @@ class DiscordBot(
 ) {
     private val bot = ChannelBot(
         DiscordSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, textToSpeech, mediaLimits, actions,
-        publicGuest = publicGuest, publicPerHour = config.publicPerHour, userSettings = userSettings,
+        publicGuest = publicGuest, publicPerHour = config.publicPerHour, userSettings = userSettings, feedback = feedback,
     )
     private val publicEnabled = publicGuest != null
     /** 봇이 만든 스레드 (그 안에서 부르면 새 스레드 없이 그 자리에서 답한다) */
@@ -85,6 +87,14 @@ class DiscordBot(
             }
             "MESSAGE_CREATE" -> onMessage(json.decodeFromJsonElement(DcMessage.serializer(), data), scope)
             "INTERACTION_CREATE" -> onInteraction(json.decodeFromJsonElement(DcInteraction.serializer(), data), scope)
+            // 반응 (L-20): DM만 (서버 채널 반응은 guild_id가 있다)
+            "MESSAGE_REACTION_ADD", "MESSAGE_REACTION_REMOVE" -> {
+                fun str(key: String) = (data[key] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                val user = str("user_id") ?: return
+                if (user == selfId) return
+                val emoji = ((data["emoji"] as? JsonObject)?.get("name") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return
+                bot.handle(Inbound.Reaction(user, null, str("channel_id") ?: return, str("message_id") ?: return, emoji, added = type == "MESSAGE_REACTION_ADD", direct = data["guild_id"] == null), scope)
+            }
         }
     }
 

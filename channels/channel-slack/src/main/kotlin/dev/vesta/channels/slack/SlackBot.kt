@@ -56,9 +56,11 @@ class SlackBot(
     actions: dev.vesta.channels.ChannelActions? = null,
     /** 사용자별 설정 (U-07): 음성 답장 기본값·목소리 */
     userSettings: suspend (dev.vesta.core.UserId) -> dev.vesta.core.identity.UserSettings? = { null },
+    /** 👍·👎 반응 → 피드백 (L-20) */
+    feedback: (suspend (dev.vesta.core.UserContext, Long, Int) -> Boolean)? = null,
 ) {
     // 음성 답변은 보내지 않는다 (Slack 음성 메시지 형식은 따로 만들어야 함)
-    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions, userSettings = userSettings)
+    private val bot = ChannelBot(SlackSurface(api), conversation, bindings, files, config, status, clock, nowMillis, speechToText, null, mediaLimits, actions, userSettings = userSettings, feedback = feedback)
     /** 먼저 보내는 알림 (M16) */
     val notifier: dev.vesta.channels.ChannelNotifier get() = bot
     internal var selfId: String? = null
@@ -103,7 +105,18 @@ class SlackBot(
     }
 
     private suspend fun onEvent(event: JsonObject, scope: CoroutineScope) {
-        if (event.string("type") != "message") return
+        // 반응 (L-20): 앱 설정에 reactions:read 권한과 reaction_added·reaction_removed 이벤트 구독이 있어야 온다
+        val type = event.string("type")
+        if (type == "reaction_added" || type == "reaction_removed") {
+            val item = event["item"] as? JsonObject ?: return
+            if (item.string("type") != "message") return
+            val user = event.string("user") ?: return
+            val channel = item.string("channel") ?: return
+            bot.handle(Inbound.Reaction(user, null, channel, item.string("ts") ?: return, event.string("reaction") ?: return,
+                added = type == "reaction_added", direct = channel.startsWith("D")), scope)
+            return
+        }
+        if (type != "message") return
         // 봇이 보낸 글, 고침·지움 같은 알림은 받지 않는다 (파일 올림만 예외)
         val subtype = event.string("subtype")
         if (event.string("bot_id") != null || (subtype != null && subtype != "file_share")) return

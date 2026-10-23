@@ -137,6 +137,7 @@ fun main() {
         media = app.mediaStore,
         mediaLimits = app.config.media,
         feedback = app.feedback,
+        recordFeedback = { user, value -> app.recordFeedback(user, value) },
         training = training,
         users = app.users,
         evolution = evolution,
@@ -187,7 +188,29 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             app.speechToText?.unloadAll()
             app.modelManager.reserve(bytes)
         },
+        samples = app.trainingSamples,
     )
+    // 학습 재료 큐레이터 (L-25): 쉬는 때만(답하는 중·마지막 대화 뒤 2분 안·학습·주간 점검 중이 아님) 10분마다
+    val curator = dev.vesta.training.Curator(
+        source = app.curatorSource,
+        samples = app.trainingSamples,
+        dataUsers = { app.users.trainingUsers() },
+        idle = {
+            !app.journal.busy && !service.running &&
+                java.time.Duration.between(app.journal.lastActivity, java.time.Instant.now()) > java.time.Duration.ofMinutes(2) &&
+                app.evolutionRepository.runs(1).firstOrNull()?.status != dev.vesta.core.evolution.EvolutionStatus.RUNNING
+        },
+        // 한 일을 에이전트 스튜디오 타임라인에 (L-27)
+        record = { report ->
+            val pending = report.added.count { it.status == dev.vesta.core.training.SampleStatus.PENDING }
+            app.journal.background(app.owner.userId, "CURATOR", "학습 재료 모으기", listOfNotNull(
+                Triple("status", "새 질문 ${report.turns}개를 봤습니다", null),
+                Triple("sources", "재료 ${report.added.size}개 (검토 대기 $pending)", report.added.joinToString("\n") { "· ${it.kind}/${it.signal} ${it.label} (${"%.2f".format(it.confidence)}): ${it.question.take(80)}" }.ifBlank { null }),
+                Triple("status", "누가 써서 멈췄습니다. 다음에 이어 봅니다", null).takeIf { report.stoppedEarly },
+            ))
+        },
+    )
+    curator.start(scope)
     fun dev.vesta.core.training.TrainingRun.dto() = dev.vesta.api.TrainingRunDto(
         id, kind, status.name, stage, step, total, loss, candidate, error, report, startedAt.toString(), finishedAt?.toString(),
     )
@@ -196,10 +219,25 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             dev.vesta.api.TrainingStateDto(
                 decisionModel = app.decisionModel.current(),
                 baseModel = app.config.decision.model,
-                corrections = app.users.trainingUsers().sumOf { app.feedback.routingCorrections(it).size },
+                corrections = app.users.trainingUsers().let { users ->
+                    users.sumOf { app.feedback.routingCorrections(it).size } + app.trainingSamples.accepted(dev.vesta.core.training.SampleKind.ROUTING, users).size
+                },
                 runs = app.trainingRuns.list(20).map { it.dto() },
                 versions = app.modelVersions.list("decision").map { dev.vesta.api.ModelVersionDto(it.name, it.baseModel, it.active, it.runId, it.createdAt.toString()) },
+                samples = app.trainingSamples.counts(),
             )
+        },
+        samples = { status ->
+            val names = app.userRepository.list().associate { it.id to it.name }
+            app.trainingSamples.list(status?.let { dev.vesta.core.training.SampleStatus.valueOf(it) }, 100).map {
+                dev.vesta.api.TrainingSampleDto(it.id, names[it.userId], it.kind.name, it.signal.name, it.question, it.answer, it.label, it.confidence, it.status.name, it.note, it.createdAt.toString())
+            }
+        },
+        review = { id, dto ->
+            // 라우팅 재료를 고칠 때는 있는 담당 이름만
+            val label = dto.label?.takeIf { l -> l in dev.vesta.core.AgentType.entries.map { it.name } || l == "good" || l == "bad" }
+            if (dto.label != null && label == null) false
+            else app.trainingSamples.review(id, dev.vesta.core.training.SampleStatus.valueOf(dto.status), label)
         },
         start = { service.startDecision().dto() },
         cancel = { service.cancel(it) },

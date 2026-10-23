@@ -67,6 +67,8 @@ class ChannelBot(
     private val publicPerHour: Int = 20,
     /** 사용자별 설정 (U-07, M20): 음성 답장 기본값·목소리 */
     private val userSettings: suspend (UserId) -> dev.vesta.core.identity.UserSettings? = { null },
+    /** 👍·👎 반응을 피드백으로 (L-20): (사용자, 답 메시지 ID, 1·-1·0). 없으면 반응은 무시 */
+    private val feedback: (suspend (UserContext, Long, Int) -> Boolean)? = null,
 ) : ChannelNotifier {
     override val channel = surface.channel
     override val name: String get() = surface.name
@@ -78,6 +80,10 @@ class ChannelBot(
     /** 공개 대화방에서 사람마다 부른 시각 (한 시간 창) */
     private val publicCalls = mutableMapOf<String, ArrayDeque<Long>>()
     private var pairingFailures = 0
+    /** 보낸 답 메시지 → 저장한 답 ID ("대화방|메시지 ID"). 최근 것만 (서버를 다시 시작하면 새로) */
+    private val answers = object : LinkedHashMap<String, Long>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?) = size > MAX_ANSWER_LINKS
+    }
 
     private class ApprovalMessage(val card: ApprovalCard, val field: String?, val value: String?) {
         /** 카드를 보내기 전에 등록하므로(보내는 사이 누른 버튼도 받게) 처음에는 null */
@@ -109,7 +115,19 @@ class ChannelBot(
             is Inbound.Message -> onMessage(event, scope)
             is Inbound.Button -> onButton(event, scope)
             is Inbound.EditSubmitted -> onEditSubmitted(event)
+            is Inbound.Reaction -> onReaction(event)
         }
+    }
+
+    /** 👍·👎 반응 → 그 답의 피드백 (L-20). 연결한 본인의 1:1 대화, 이 서버가 보낸 답 메시지만 */
+    private suspend fun onReaction(event: Inbound.Reaction) {
+        val save = feedback ?: return
+        if (!event.direct) return
+        val rating = reactionRating(event.emoji) ?: return
+        val binding = bindings.find(channel, event.userId) ?: return
+        val answer = answers["${event.chat}|${event.messageId}"] ?: return
+        val ok = runCatching { save(binding.user, answer, if (event.added) rating else 0) }.getOrDefault(false)
+        log.info { "${surface.name} 반응 ${event.emoji} ${if (event.added) "달기" else "떼기"} → 답 $answer 피드백 ${if (ok) "저장" else "실패"}" }
     }
 
     private fun who(event: Inbound) = "id=${event.userId} @${event.userName}"
@@ -250,6 +268,9 @@ class ChannelBot(
             it.streaming = config.allowLocalSources
         }
         var reply = newReply()
+        // 이 답에 쓴 메시지들 (반응 → 피드백)
+        val replies = mutableListOf(reply)
+        var saved: Long? = null
         // 승인 요청 앞에서 끝낸 답변 조각들. 승인 뒤 답변은 승인 카드 아래 새 메시지로 이어 간다
         val earlier = StringBuilder()
         var evidence = emptyList<Evidence>()
@@ -287,7 +308,7 @@ class ChannelBot(
                     is AgentEvent.Status -> reply.status(event.text)
                     is AgentEvent.Reasoning -> Unit
                     is AgentEvent.Media -> images += event
-                    is AgentEvent.Saved -> Unit
+                    is AgentEvent.Saved -> saved = event.messageId
                     is AgentEvent.ToolStarted -> reply.status("${event.tool} · ${event.summary}")
                     // 시간 초과 등으로 끝난 승인 요청의 버튼을 닫는다
                     is AgentEvent.ToolFinished -> opened.forEach { expire(state, chat, it) }
@@ -297,6 +318,7 @@ class ChannelBot(
                         earlier.append(segment)
                         apiMillis += reply.apiMillis; apiCalls += reply.apiCalls
                         reply = newReply()
+                        replies += reply
                         opened += event.requestId
                         requestApproval(binding, state, chat, event)
                     }
@@ -332,6 +354,7 @@ class ChannelBot(
                 runCatching { reply.finish(body, if (withheld) null else footer(answer, evidence, done, unsupported)) }
                     .onFailure { log.warn { "${surface.name} 답변 마무리 실패: ${it.message}" } }
                 mark("마무리")
+                saved?.let { id -> replies.flatMap { it.ids }.forEach { answers["$chat|$it"] = id } }
                 log.info {
                     "${surface.name} 답변 ${done?.agent ?: "-"} ${nowMillis() - began}ms (" + marks.entries.joinToString { "${it.key} ${it.value}" } +
                         ") · 메신저 API ${apiCalls + reply.apiCalls}회 ${apiMillis + reply.apiMillis}ms"
@@ -647,6 +670,19 @@ class ChannelBot(
         private val ENGINE_COMMANDS = setOf("start", "help", "new", "cancel", "status", "voice")
         private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif")
         private val AUDIO_EXTENSIONS = setOf("ogg", "oga", "opus", "m4a", "mp3", "wav", "webm")
+        /** 반응으로 이어 둘 최근 답 메시지 수 */
+        private const val MAX_ANSWER_LINKS = 2_000
+
+        /** 👍·👎 (피부색 변형 포함)과 플랫폼 이름 → 1·-1, 그 밖은 null */
+        fun reactionRating(emoji: String): Int? {
+            val base = emoji.trim().trim(':').lowercase().replace(Regex("[\\x{1F3FB}-\\x{1F3FF}]|::skin-tone-\\d|_tone\\d"), "")
+            return when (base) {
+                "👍", "+1", "thumbsup", "thumbs_up", "like" -> 1
+                "👎", "-1", "thumbsdown", "thumbs_down" -> -1
+                else -> null
+            }
+        }
+
         private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "team", "code", "task", "skills", "agents")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */

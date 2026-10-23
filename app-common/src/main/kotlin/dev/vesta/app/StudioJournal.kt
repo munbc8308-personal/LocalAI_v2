@@ -22,10 +22,25 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
     private val flow = MutableSharedFlow<RunUpdate>(extraBufferCapacity = 512)
     val updates: SharedFlow<RunUpdate> = flow
     private val owners = java.util.concurrent.ConcurrentHashMap<Long, UserId>()
+    /** 마지막으로 질문을 받거나 답을 끝낸 때 (큐레이터가 쉬는 때를 고를 때, L-25) */
+    @Volatile var lastActivity: java.time.Instant = java.time.Instant.EPOCH
+        private set
+    /** 지금 답하고 있는 질문이 있는가 */
+    val busy: Boolean get() = owners.isNotEmpty()
+
+    /** 백그라운드 일 한 번을 실행 하나로 남긴다 (큐레이터 등, L-27): 단계 (종류, 제목, 자세히) */
+    suspend fun background(user: UserId, agent: String, input: String, steps: List<Triple<String, String, String?>>) {
+        val run = runs.start(user, null, agent, null, input)
+        runs.setAgent(run.id, agent, null)
+        steps.forEach { (kind, title, detail) -> flow.tryEmit(RunUpdate(run.id, user, runs.add(run.id, kind, title, detail))) }
+        runs.finish(run.id, RunStatus.DONE, null)
+        flow.tryEmit(RunUpdate(run.id, user, finished = runs.get(run.id)))
+    }
 
     override suspend fun start(user: UserId, session: SessionId?, input: String): Long {
         val run = runs.start(user, session, "CHAT", null, input)
         owners[run.id] = user
+        lastActivity = java.time.Instant.now()
         flow.tryEmit(RunUpdate(run.id, user, runs.add(run.id, "input", input.lineSequence().firstOrNull().orEmpty().take(120), input.takeIf { it.length > 120 })))
         return run.id
     }
@@ -41,6 +56,7 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
         answer?.let { runs.add(run, "answer", it.lineSequence().firstOrNull().orEmpty().take(120), it) }
             ?.let { e -> owners[run]?.let { flow.tryEmit(RunUpdate(run, it, e)) } }
         runs.finish(run, status, answer)
+        lastActivity = java.time.Instant.now()
         val user = owners.remove(run) ?: return
         flow.tryEmit(RunUpdate(run, user, finished = runs.get(run)))
     }

@@ -774,7 +774,7 @@ private fun TrainingCard() {
             }) { Text(if (running != null) "학습 중…" else "학습 시작") }
         }
         Div({ classes("row", "small") }) { Span { Text("지금 쓰는 모델") }; Span({ classes("mono") }) { Text(s.decisionModel) } }
-        Div({ classes("row", "small") }) { Span { Text("다음 학습에 쓸 라우팅 정정") }; Span { Text("${s.corrections}개") } }
+        Div({ classes("row", "small") }) { Span { Text("다음 학습에 쓸 라우팅 정정·재료") }; Span { Text("${s.corrections}개") } }
         error?.let { P({ classes("error", "small") }) { Text(it) } }
         s.runs.take(5).forEach { run ->
             Div({ classes("run") }) {
@@ -806,6 +806,7 @@ private fun TrainingCard() {
             }) { Text("기본 모델(${s.baseModel})로 되돌리기") }
         }
     }
+    SamplesCard(s.samples) { load() }
 }
 
 private fun trainingStatus(status: String) = when (status) {

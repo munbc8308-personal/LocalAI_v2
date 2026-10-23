@@ -481,6 +481,7 @@ private fun agentLabel(agent: String) = when (agent) {
     "CODE" -> "코드 도우미"
     "TASK" -> "작업"
     "TEAM" -> "팀"
+    "CURATOR" -> "학습 재료 큐레이터"
     "PERSONAL" -> "개인 비서"
     "IMAGE" -> "이미지"
     else -> agent
