@@ -38,6 +38,21 @@ class RouterTest : FunSpec({
         decision.calls shouldBe 0
     }
 
+    test("영상 만들기 (M24): /video, 확실한 말은 규칙, 그림을 고른 영상 요청은 영상으로. 영상을 다루는 코드·요약은 아님") {
+        val decision = FakeDecision("CHAT", 0.99)
+        val router = Router(DecisionConfig(), decision, null)
+        router.route("/video 제주 여행 30초", emptyList(), all).let { it.agent shouldBe AgentType.VIDEO; it.stage shouldBe RoutingStage.EXPLICIT }
+        listOf("우리 동네 맛집 소개 30초 영상 만들어 줘", "고양이 쇼츠 하나 제작해 줘", "가을 풍경 슬라이드쇼 만들어줘").forEach {
+            router.route(it, emptyList(), all).let { r -> r.agent shouldBe AgentType.VIDEO; r.stage shouldBe RoutingStage.RULE }
+        }
+        decision.calls shouldBe 0
+        listOf("파이썬으로 동영상 편집하는 코드 만들어 줘", "회의 영상 요약 만들어 줘", "영상 편집 어떻게 만들어?").forEach {
+            router.route(it, emptyList(), all).agent shouldBe AgentType.CHAT
+        }
+        Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("여행 브이로그 느낌으로 하나 부탁해", emptyList(), all).agent shouldBe AgentType.VIDEO
+        Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("여행 사진 느낌으로 하나 그려 줘", emptyList(), all).agent shouldBe AgentType.IMAGE
+    }
+
     test("결정 모델 신뢰도가 임계값 이상이면 그대로 쓴다") {
         val result = Router(DecisionConfig(), FakeDecision("WEB", 0.8), null).route("오늘 환율 얼마야?", emptyList(), all)
         result.agent shouldBe AgentType.WEB

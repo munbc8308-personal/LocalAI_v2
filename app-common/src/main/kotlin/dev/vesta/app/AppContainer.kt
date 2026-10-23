@@ -104,6 +104,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 이미지 생성: 미디어 워커의 mflux (models.image, engine: mflux) */
     val imageGenerator: dev.vesta.core.media.ImageGenerator? = config.models.image?.takeIf { it.engine == "mflux" && it.baseUrl != null }
         ?.let { dev.vesta.media.WorkerImageGenerator(it.baseUrl!!, http, it.name) }
+    /** 영상 합성 (M24 G-02): ffmpeg가 있으면 */
+    val videoComposer: dev.vesta.core.media.VideoComposer? = ffmpeg.takeIf { dev.vesta.media.Ffmpeg.available(config.media.ffmpeg) }?.let { dev.vesta.media.FfmpegVideoComposer(it) }
     /** 읽어 주기: macOS say (models.tts, engine: say) */
     val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.takeIf { it.engine == "say" }
         ?.let { dev.vesta.media.SayTextToSpeech(it.name, ffmpeg, config.media.ttsMaxChars) }
@@ -131,6 +133,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val passages = KnowledgePassages(knowledge, vectorIndex, inference)
     val questionWriter by lazy { QuestionWriter(inference, modelManager) }
     val embeddingSwitcher = EmbeddingSwitcher(knowledge, vectorIndex, inference)
+
+    /** 영상 배경 음악 (media.videoMusic): 파일이면 그것, 폴더면 그 안의 소리 파일 하나 (20MB 이하, 형식은 합성할 때 다시 확인) */
+    private fun videoMusic(): ByteArray? {
+        val path = config.media.videoMusic?.let { java.nio.file.Path.of(it.replaceFirst(Regex("^~"), System.getProperty("user.home"))) } ?: return null
+        val file = if (java.nio.file.Files.isDirectory(path)) {
+            java.nio.file.Files.list(path).use { s -> s.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().substringAfterLast('.').lowercase() in MUSIC }.toList() }.randomOrNull()
+        } else path.takeIf { java.nio.file.Files.isRegularFile(it) }
+        return file?.takeIf { java.nio.file.Files.size(it) <= 20L * 1024 * 1024 }?.let { java.nio.file.Files.readAllBytes(it) }
+    }
 
     /** 새 컬렉션에 쓸 임베딩 모델: 학습해 켠 버전(L-23)이 있으면 그것, 아니면 설정 */
     suspend fun embeddingModel(): String = modelVersions.active("embedding")?.name ?: config.models.embedding?.name ?: DEFAULT_EMBEDDING
@@ -269,6 +280,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 if (orchard != null && user.role == UserRole.OWNER) add(AgentType.PERSONAL)
                 if (dev.vesta.identity.RolePolicy.usesLocalData(user.role) && knowledge.accessibleCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
                 if (imageGenerator != null) add(AgentType.IMAGE)
+                // 영상은 그림이 있어야 만든다 (M24). 내레이션(say)은 없어도 자막만으로
+                if (imageGenerator != null && videoComposer != null) add(AgentType.VIDEO)
             }
         },
         // @이름이 모두 코드 저장소면 코드 도우미로
@@ -322,6 +335,16 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 )
             } ?: ChatAgent(inference, modelManager)),
             AgentType.WEB to WebResearchAgent(inference, modelManager, rewriter, webRetriever, { config.web.mode }, judge = judge),
+            AgentType.VIDEO to (imageGenerator?.let { generator ->
+                videoComposer?.let { composer ->
+                    dev.vesta.agents.VideoAgent(
+                        inference, modelManager, generator, composer, mediaStore, textToSpeech,
+                        reserve = { modelManager.reserve(config.media.imageMemoryGigabytes * 1024L * 1024 * 1024) },
+                        music = { videoMusic() },
+                        steps = config.media.imageSteps,
+                    )
+                }
+            } ?: ChatAgent(inference, modelManager)),
         ),
     )
 
@@ -485,6 +508,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         /** 설정에 메인 모델이 없을 때 --model과 함께 쓰는 기본 파라미터 (M0 벤치마크: 생각 양 low). */
         val DEFAULT_GENERAL = ModelSpec(name = "", keepAlive = "forever", reasoningEffort = "none")
         const val DEFAULT_EMBEDDING = "bge-m3:567m"
+        /** 영상 배경 음악으로 읽는 확장자 */
+        private val MUSIC = setOf("mp3", "m4a", "aac", "wav", "aiff", "flac", "ogg")
         /** A2A 에이전트 토큰의 키체인 서비스 (계정 = 에이전트 이름) */
         const val A2A_KEYCHAIN = "dev.vesta.a2a"
         /** 한 곳에서 읽는 스킬 수 */

@@ -48,6 +48,7 @@ interface TelegramApi {
     suspend fun sendVoice(chatId: Long, ogg: ByteArray)
     /** 사진 (만든 이미지, V-06) */
     suspend fun sendPhoto(chatId: Long, png: ByteArray, caption: String?)
+    suspend fun sendVideo(chatId: Long, mp4: ByteArray, caption: String?)
 }
 
 /** Bot API 오류. 429면 [retryAfterSeconds]만큼 기다려야 한다 */
@@ -245,6 +246,9 @@ class HttpTelegramApi(
 
     override suspend fun sendPhoto(chatId: Long, png: ByteArray, caption: String?) =
         upload("sendPhoto", chatId, "photo", png, "image/png", "vesta.png", caption)
+
+    override suspend fun sendVideo(chatId: Long, mp4: ByteArray, caption: String?) =
+        upload("sendVideo", chatId, "video", mp4, "video/mp4", "vesta.mp4", caption)
 
     private suspend fun upload(method: String, chatId: Long, field: String, bytes: ByteArray, type: String, name: String, caption: String?) {
         guarded {

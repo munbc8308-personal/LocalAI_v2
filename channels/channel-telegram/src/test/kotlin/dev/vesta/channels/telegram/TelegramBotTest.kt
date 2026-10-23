@@ -428,4 +428,25 @@ class TelegramBotTest : FunSpec({
             }
         }
     }
+
+    test("만든 영상은 영상으로 보낸다 (M24). 한도를 넘으면 웹 갤러리로 안내") {
+        runTest {
+            val small = ByteArray(1_000)
+            val big = ByteArray(51 * 1024 * 1024)
+            val h = Harness({ input, _ ->
+                val bytes = if ("큰" in input.text) big else small
+                emit(AgentEvent.Media(dev.vesta.core.media.MediaAsset("v1", owner.userId, dev.vesta.core.media.MediaKind.VIDEO, "video/mp4", bytes.size.toLong(), "가을 산책"), bytes, "가을 산책"))
+                emit(AgentEvent.Token("영상을 만들었습니다"))
+                emit(AgentEvent.Done(AgentType.VIDEO, "FLUX.1-schnell", null))
+            })
+            with(h) {
+                send(text("/video 가을 산책"))
+                api.videos.single().second shouldBe "AI 생성 · 가을 산책"
+                api.photos.size shouldBe 0
+                send(text("/video 큰 영상"))
+                api.videos.size shouldBe 1
+                api.messages.last().text shouldContain "웹 UI 갤러리"
+            }
+        }
+    }
 })

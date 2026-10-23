@@ -360,10 +360,14 @@ class ChannelBot(
                         ") · 메신저 API ${apiCalls + reply.apiCalls}회 ${apiMillis + reply.apiMillis}ms"
                 }
                 images.forEach { image ->
-                    val sent = runCatching { surface.sendImage(chat, image.bytes, image.caption) }
-                        .onFailure { log.warn { "${surface.name} 이미지 보내기 실패: ${it.message}" } }
+                    val video = image.asset.mime.startsWith("video/")
+                    val sent = runCatching { if (video) surface.sendVideo(chat, image.bytes, image.caption) else surface.sendImage(chat, image.bytes, image.caption) }
+                        .onFailure { log.warn { "${surface.name} ${if (video) "영상" else "이미지"} 보내기 실패: ${it.message}" } }
                         .getOrDefault(false)
-                    if (!sent) runCatching { send(chat, "이미지를 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다.") }
+                    if (!sent) runCatching {
+                        send(chat, if (video) "영상(${"%.1f".format(image.bytes.size / 1_048_576.0)}MB)을 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다."
+                        else "이미지를 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다.")
+                    }
                 }
             }
         }

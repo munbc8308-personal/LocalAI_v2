@@ -18,7 +18,7 @@ import kotlin.io.path.writeBytes
  * 받은 파일은 믿지 않는다: 파일 앞부분으로 형식을 확인해 그 형식(-f)으로만 읽고, 로컬 파일 외 프로토콜은 막는다
  * (재생 목록 형식이 다른 파일·주소를 읽게 하는 공격 방지). ffmpeg 오류 원문은 로그에만 남긴다.
  */
-class Ffmpeg(private val binary: String, private val timeoutSeconds: Long = 120) {
+class Ffmpeg(internal val binary: String, private val timeoutSeconds: Long = 120) {
     /** 음성 인식용 16kHz 모노 16비트 WAV. [maxSeconds]보다 길면 앞부분만 */
     suspend fun toWav16k(audio: ByteArray, maxSeconds: Int): ByteArray {
         val format = sniff(audio) ?: throw MediaException("읽을 수 없는 소리 파일입니다 (ogg·webm·m4a·mp3·wav·aiff·flac)")
@@ -53,7 +53,10 @@ class Ffmpeg(private val binary: String, private val timeoutSeconds: Long = 120)
     }
 
     /** 출력은 파일로 받는다: 파이프를 읽느라 시간 제한이 듣지 않는 일이 없게 */
-    private fun run(command: List<String>, log: Path) {
+    private fun run(command: List<String>, log: Path) = run(command, log, timeoutSeconds, "소리 변환이 너무 오래 걸립니다", "읽을 수 없는 소리 파일입니다")
+
+    /** 영상 합성(M24)도 같은 방식으로 돌린다 */
+    internal fun run(command: List<String>, log: Path, timeoutSeconds: Long, slow: String, failed: String) {
         val process = try {
             ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start()
         } catch (e: java.io.IOException) {
@@ -61,11 +64,11 @@ class Ffmpeg(private val binary: String, private val timeoutSeconds: Long = 120)
         }
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly()
-            throw MediaException("소리 변환이 너무 오래 걸립니다")
+            throw MediaException(slow)
         }
         if (process.exitValue() != 0) {
             logger.warn { "ffmpeg 실패: ${runCatching { Files.readString(log) }.getOrDefault("").take(500)}" }
-            throw MediaException("읽을 수 없는 소리 파일입니다")
+            throw MediaException(failed)
         }
     }
 

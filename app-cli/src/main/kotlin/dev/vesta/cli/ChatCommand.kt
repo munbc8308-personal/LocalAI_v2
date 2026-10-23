@@ -153,13 +153,6 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     /** 답변 하나를 스트리밍으로 출력한다. 생성 중 Ctrl+C면 중단한다. 이번 턴의 세션을 돌려준다. */
-    /** 만든 이미지를 `~/Pictures/Vesta/`에 저장하고 경로를 돌려준다 */
-    private suspend fun saveImage(backend: ChatBackend, event: AgentEvent.Media): java.nio.file.Path? = runCatching {
-        val bytes = event.bytes.takeIf { it.isNotEmpty() } ?: backend.media(event.asset.id) ?: return null
-        val dir = java.nio.file.Path.of(System.getProperty("user.home"), "Pictures", "Vesta").also { java.nio.file.Files.createDirectories(it) }
-        val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-        dir.resolve("$stamp-${event.asset.id.take(8)}.png").also { java.nio.file.Files.write(it, bytes) }
-    }.getOrNull()
 
     /** 서버가 떠 있으면 원격, 아니면(또는 --local·--model) 임베디드 (PROJECT.md 6.2) */
     private suspend fun openBackend(): ChatBackend {
@@ -189,7 +182,7 @@ class ChatCommand : CliktCommand(name = "chat") {
                         current = backend.find(event.sessionId)
                     }
                     renderer.render(event, start.elapsedNow())
-                    if (event is AgentEvent.Media) saveImage(backend, event)?.let { out.println("🖼 이미지: $it"); out.flush() }
+                    if (event is AgentEvent.Media) saveMedia(backend, event)?.let { out.println(mediaLine(event, it)); out.flush() }
                     if (event is AgentEvent.ApprovalRequested) {
                         val decision = if (autoWrites && AutoApprove.allows(event, workspace?.path)) {
                             out.println(dim("✓ 자동 승인 (파일 쓰기): ${event.details.title}"))
@@ -262,3 +255,14 @@ class ChatCommand : CliktCommand(name = "chat") {
         """.trimIndent()
     }
 }
+
+/** 만든 이미지는 `~/Pictures/Vesta/`, 영상은 `~/Movies/Vesta/`에 저장하고 경로를 돌려준다 */
+internal suspend fun saveMedia(backend: ChatBackend, event: AgentEvent.Media): java.nio.file.Path? = runCatching {
+    val bytes = event.bytes.takeIf { it.isNotEmpty() } ?: backend.media(event.asset.id) ?: return null
+    val video = event.asset.mime == "video/mp4"
+    val dir = java.nio.file.Path.of(System.getProperty("user.home"), if (video) "Movies" else "Pictures", "Vesta").also { java.nio.file.Files.createDirectories(it) }
+    val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+    dir.resolve("$stamp-${event.asset.id.take(8)}.${if (video) "mp4" else "png"}").also { java.nio.file.Files.write(it, bytes) }
+}.getOrNull()
+
+internal fun mediaLine(event: AgentEvent.Media, path: java.nio.file.Path) = if (event.asset.mime == "video/mp4") "🎬 영상: $path" else "🖼 이미지: $path"

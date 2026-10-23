@@ -54,6 +54,9 @@ interface ChatSurface {
 
     /** 만든 이미지(PNG)를 사진으로 보낸다. 보낼 수 없으면 false */
     suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean = false
+
+    /** 만든 영상(mp4)을 보낸다 (M24 G-04). 이 메신저의 첨부 한도를 넘거나 보낼 수 없으면 false (웹 갤러리로 안내한다) */
+    suspend fun sendVideo(chat: String, mp4: ByteArray, caption: String?): Boolean = false
 }
 
 enum class ButtonStyle { NORMAL, PRIMARY, DANGER }

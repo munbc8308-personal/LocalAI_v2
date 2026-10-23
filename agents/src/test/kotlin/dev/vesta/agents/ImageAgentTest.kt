@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import java.time.Instant
 
-private class OneReply(private val text: String) : InferenceClient {
+internal class OneReply(private val text: String) : InferenceClient {
     val requests = mutableListOf<ChatRequest>()
     override suspend fun listModels() = emptyList<ModelInfo>()
     override suspend fun embed(model: String, texts: List<String>) = emptyList<FloatArray>()
@@ -41,7 +41,7 @@ private class OneReply(private val text: String) : InferenceClient {
     }
 }
 
-private class FakeGenerator(private val failure: String? = null) : ImageGenerator {
+internal class FakeGenerator(private val failure: String? = null) : ImageGenerator {
     override val model = "FLUX.1-schnell"
     val calls = mutableListOf<Triple<String, Int, Int>>()
     override suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long?): GeneratedImage {
@@ -51,7 +51,7 @@ private class FakeGenerator(private val failure: String? = null) : ImageGenerato
     }
 }
 
-private class SavedMedia : MediaStore {
+internal class SavedMedia : MediaStore {
     val saved = mutableListOf<MediaAsset>()
     override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray, caption: String?) =
         MediaAsset("g${saved.size}", userId, kind, mime, bytes.size.toLong(), caption).also { saved += it }

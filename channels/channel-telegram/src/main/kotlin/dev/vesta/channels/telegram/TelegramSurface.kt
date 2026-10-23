@@ -56,6 +56,13 @@ internal class TelegramSurface(private val api: TelegramApi) : ChatSurface {
 
     override suspend fun sendVoice(chat: String, ogg: ByteArray) = api.sendVoice(chat.toLong(), ogg)
 
+    /** 봇 API 올리기 한도 50MB */
+    override suspend fun sendVideo(chat: String, mp4: ByteArray, caption: String?): Boolean {
+        if (mp4.size > 50L * 1024 * 1024) return false
+        api.sendVideo(chat.toLong(), mp4, caption?.let { "AI 생성 · $it" } ?: "AI 생성")
+        return true
+    }
+
     override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
         api.sendPhoto(chat.toLong(), png, caption?.let { "AI 생성 · $it" } ?: "AI 생성")
         return true

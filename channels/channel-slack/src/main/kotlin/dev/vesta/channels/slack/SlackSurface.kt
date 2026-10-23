@@ -66,6 +66,12 @@ internal class SlackSurface(private val api: SlackApi) : ChatSurface {
         api.update(chat, messageId, "승인 필요: ${escape(card.tool)} → ${escape(result)}", JsonArray(cardBlocks(card) + resultBlocks))
     }
 
+    override suspend fun sendVideo(chat: String, mp4: ByteArray, caption: String?): Boolean {
+        if (mp4.size > 100L * 1024 * 1024) return false
+        api.uploadFile(chat, "vesta.mp4", mp4, "AI 생성" + (caption?.let { " · $it" } ?: ""))
+        return true
+    }
+
     override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
         api.uploadFile(chat, "vesta.png", png, "AI 생성" + (caption?.let { " · $it" } ?: ""))
         return true

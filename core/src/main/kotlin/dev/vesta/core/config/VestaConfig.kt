@@ -129,6 +129,8 @@ data class MediaConfig(
     val imageMemoryGigabytes: Int = 10,
     /** 이어 말하기 도우미 (native/vesta-speak, scripts/install-vesta.sh가 만든다). 없으면 문장마다 `say` (M19) */
     val speakBinary: String = "~/.vesta/bin/vesta-speak",
+    /** 영상 배경 음악 (M24 G-02): 사용자가 넣은 소리 파일 하나, 또는 그런 파일이 든 폴더(하나를 고른다). 없으면 음악 없이 */
+    val videoMusic: String? = null,
 )
 
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */

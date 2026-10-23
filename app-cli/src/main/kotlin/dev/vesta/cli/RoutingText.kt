@@ -14,6 +14,7 @@ internal object RoutingText {
         AgentType.TASK -> "작업 에이전트"
         AgentType.PERSONAL -> "개인 비서"
         AgentType.IMAGE -> "이미지 생성"
+        AgentType.VIDEO -> "영상 제작"
     }
 
     fun describe(decision: RoutingDecision): String {

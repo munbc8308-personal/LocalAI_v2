@@ -34,6 +34,7 @@ import org.jetbrains.compose.web.attributes.placeholder
 import org.jetbrains.compose.web.attributes.target
 import org.jetbrains.compose.web.attributes.type
 import org.jetbrains.compose.web.dom.A
+import org.jetbrains.compose.web.dom.TagElement
 import org.jetbrains.compose.web.dom.B
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
@@ -364,7 +365,10 @@ private fun TurnView(chat: ChatController, turn: Turn) {
         turn.approvals.forEach { ApprovalCard(chat, it) }
         // 만든 이미지: 누르면 원본을 새 탭에서
         if (turn.generated.isNotEmpty()) Div({ classes("generated") }) {
-            turn.generated.forEach { src -> A(src, { target(ATarget.Blank); attr("rel", "noopener") }) { Img(src, "만든 이미지") } }
+            turn.generated.forEach { item ->
+                if (item.video) VideoPlayer(item.src)
+                else A(item.src, { target(ATarget.Blank); attr("rel", "noopener") }) { Img(item.src, "만든 이미지") }
+            }
         }
         if (turn.answer.isNotEmpty()) Div({ classes("answer") }) { Markdown(turn.answer) }
         if (turn.answer.isEmpty() && turn.error == null && turn.done == null && chat.busy && turn === chat.turns.lastOrNull()) {
@@ -405,13 +409,25 @@ private fun TurnView(chat: ChatController, turn: Turn) {
     }
 }
 
-/** 만든 이미지 모음 (V-08). 최근 것부터 */
+/** 만든 영상 (M24): 브라우저 재생기. 휴대폰에서 전체 화면으로 바뀌지 않게 playsinline */
+@Composable
+private fun VideoPlayer(src: String) {
+    TagElement<org.w3c.dom.HTMLVideoElement>("video", {
+        attr("src", src); attr("controls", ""); attr("playsinline", ""); attr("preload", "metadata")
+        classes("video")
+    }) {}
+}
+
+/** 만든 이미지·영상 모음 (V-08, M24). 최근 것부터 */
 @Composable
 private fun GalleryView() {
     var items by remember { mutableStateOf<List<MediaItemDto>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
-        runCatching { Http.get("/api/media?kind=GENERATED&limit=100", ListSerializer(MediaItemDto.serializer())) }
+        runCatching {
+            val list = ListSerializer(MediaItemDto.serializer())
+            (Http.get("/api/media?kind=GENERATED&limit=100", list) + Http.get("/api/media?kind=VIDEO&limit=50", list)).sortedByDescending { it.createdAt.orEmpty() }
+        }
             .onSuccess { items = it }
             .onFailure { error = it.message }
     }
@@ -421,11 +437,12 @@ private fun GalleryView() {
         val list = items
         when {
             list == null && error == null -> P({ classes("muted") }) { Text("불러오는 중…") }
-            list != null && list.isEmpty() -> P({ classes("muted") }) { Text("아직 만든 이미지가 없습니다. 대화에서 /image 고양이 수채화 처럼 요청해 보세요.") }
+            list != null && list.isEmpty() -> P({ classes("muted") }) { Text("아직 만든 이미지·영상이 없습니다. 대화에서 /image 고양이 수채화, /video 가을 산책 30초 처럼 요청해 보세요.") }
             list != null -> Div({ classes("gallery") }) {
                 list.forEach { item ->
                     Div({ classes("card") }) {
-                        A("/api/media/${item.id}", { target(ATarget.Blank); attr("rel", "noopener") }) { Img("/api/media/${item.id}", item.caption ?: "만든 이미지") }
+                        if (item.mime == "video/mp4") VideoPlayer("/api/media/${item.id}")
+                        else A("/api/media/${item.id}", { target(ATarget.Blank); attr("rel", "noopener") }) { Img("/api/media/${item.id}", item.caption ?: "만든 이미지") }
                         item.caption?.let { P({ classes("muted", "small") }) { Text(it) } }
                         item.createdAt?.let { P({ classes("muted", "small") }) { Text(localTime(it)) } }
                     }
@@ -909,6 +926,7 @@ private fun agentName(agent: String) = when (agent) {
     "TASK" -> "작업 에이전트"
     "PERSONAL" -> "개인 비서"
     "IMAGE" -> "이미지 생성"
+    "VIDEO" -> "영상 제작"
     else -> agent
 }
 

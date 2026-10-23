@@ -171,6 +171,7 @@ a { color: var(--accent); }
 
 .generated { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 10px; }
 .generated img { width: min(420px, 100%); border-radius: 12px; display: block; border: 1px solid var(--line); }
+.generated video, .gallery video { width: min(560px, 100%); max-height: 70vh; border-radius: 12px; display: block; border: 1px solid var(--line); background: #000; }
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .gallery .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
 .gallery .card img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }

@@ -60,6 +60,13 @@ internal class DiscordSurface(private val api: DiscordApi) : ChatSurface {
         api.editMessage(chat, messageId, content.take(MESSAGE_LIMIT))
     }
 
+    /** 부스트 없는 서버·DM의 첨부 한도 10MB */
+    override suspend fun sendVideo(chat: String, mp4: ByteArray, caption: String?): Boolean {
+        if (mp4.size > 10L * 1024 * 1024) return false
+        api.createMessageWithFile(chat, "AI 생성" + (caption?.let { " · " + escape(it.take(1_500)) } ?: ""), "vesta.mp4", mp4, "video/mp4")
+        return true
+    }
+
     override suspend fun sendImage(chat: String, png: ByteArray, caption: String?): Boolean {
         api.createMessageWithFile(chat, "AI 생성" + (caption?.let { " · " + escape(it.take(1_500)) } ?: ""), "vesta.png", png, "image/png")
         return true

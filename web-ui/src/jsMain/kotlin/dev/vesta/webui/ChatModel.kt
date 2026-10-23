@@ -18,6 +18,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 
+/** 답변에서 만든 이미지·영상 (M24) */
+data class Generated(val src: String, val video: Boolean)
+
 /** 질문 하나와 그 답변 (화면의 한 묶음). [images]는 질문에 붙인 이미지 주소 (data: 또는 /api/media/…) */
 class Turn(val question: String, val images: List<String> = emptyList()) {
     var answer by mutableStateOf("")
@@ -34,7 +37,7 @@ class Turn(val question: String, val images: List<String> = emptyList()) {
     var agent by mutableStateOf<String?>(null)
     var interrupted by mutableStateOf(false)
     /** 이 답변에서 만든 이미지 주소 (/api/media/…) */
-    val generated = mutableStateListOf<String>()
+    val generated = mutableStateListOf<Generated>()
     /** 저장된 답변 ID와 남긴 피드백 (C-09) */
     var messageId by mutableStateOf<Long?>(null)
     var rating by mutableStateOf(0)
@@ -157,7 +160,7 @@ class ChatController(private val scope: CoroutineScope) {
             is EventDto.ToolFinished -> turn.tools.lastOrNull { it.callId == event.callId }?.let { it.ok = event.ok; it.result = event.summary }
             is EventDto.Approval -> turn.approvals += ApprovalView(event)
             is EventDto.Grounding -> turn.grounding = event
-            is EventDto.Media -> turn.generated += "/api/media/${event.id}"
+            is EventDto.Media -> turn.generated += Generated("/api/media/${event.id}", event.mime.startsWith("video/"))
             is EventDto.Saved -> turn.messageId = event.messageId
             is EventDto.Token -> {
                 turn.thinking = false
@@ -178,7 +181,7 @@ class ChatController(private val scope: CoroutineScope) {
                 turn.answer = m.content
                 turn.agent = m.agent
                 turn.interrupted = m.interrupted
-                turn.generated.addAll(m.attachments.filter { it.mime.startsWith("image/") }.map { "/api/media/${it.id}" })
+                turn.generated.addAll(m.attachments.filter { it.mime.startsWith("image/") || it.mime == "video/mp4" }.map { Generated("/api/media/${it.id}", it.mime == "video/mp4") })
                 turn.messageId = m.id.takeIf { it > 0 }
                 turn.rating = m.rating ?: 0
                 turn.correctAgent = m.correctAgent

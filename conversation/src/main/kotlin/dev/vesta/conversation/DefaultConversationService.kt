@@ -243,6 +243,7 @@ class DefaultConversationService(
         AgentType.TASK -> "이 계정에서는 파일·도구 작업을 할 수 없습니다. 일반 질문이나 웹 검색은 할 수 있습니다."
         AgentType.DOCS, AgentType.CODE -> "이 계정에서는 이 Mac의 문서·코드를 검색할 수 없습니다. 일반 질문이나 웹 검색은 할 수 있습니다."
         AgentType.IMAGE -> "이 계정에서는 이미지를 만들 수 없습니다."
+        AgentType.VIDEO -> "이 계정에서는 영상을 만들 수 없습니다."
         else -> "이 계정에서는 이 기능을 쓸 수 없습니다."
     }
 

@@ -38,6 +38,7 @@ internal object PrintMode {
                     else -> Unit
                 }
                 if (event is AgentEvent.Error) failed = true
+                if (event is AgentEvent.Media) saveMedia(backend, event)?.let { err.println(mediaLine(event, it)) }
                 if (event is AgentEvent.ApprovalRequested) {
                     val decision = when {
                         acceptWrites && AutoApprove.allows(event, workspace?.path) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (파일 쓰기): ${event.details.title}".let { if (console != null) dim(it) else it }) }

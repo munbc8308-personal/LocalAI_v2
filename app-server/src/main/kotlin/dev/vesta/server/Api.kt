@@ -347,8 +347,17 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val (asset, bytes) = deps.media?.load(user.userId, call.parameters["id"].orEmpty())
                     ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
                 call.response.header(HttpHeaders.CacheControl, "private, max-age=86400")
-                // 저장할 때 확인한 이미지 형식만 그대로 보낸다 (HTML 등으로 해석되지 않게)
-                val type = asset.mime.takeIf { it in IMAGE_TYPES } ?: "application/octet-stream"
+                // 저장할 때 확인한 이미지·Vesta가 만든 영상 형식만 그대로 보낸다 (HTML 등으로 해석되지 않게)
+                val type = asset.mime.takeIf { it in IMAGE_TYPES || it == VIDEO_MP4 } ?: "application/octet-stream"
+                if (type == VIDEO_MP4) {
+                    // 영상은 일부 범위 요청(Range)에 답한다: Safari·iOS는 이것이 없으면 재생하지 않는다
+                    call.response.header(HttpHeaders.AcceptRanges, "bytes")
+                    val range = MediaRange.parse(call.request.headers[HttpHeaders.Range], bytes.size)
+                    if (range != null) {
+                        call.response.header(HttpHeaders.ContentRange, "bytes ${range.first}-${range.last}/${bytes.size}")
+                        return@get call.respondBytes(bytes.copyOfRange(range.first, range.last + 1), ContentType.parse(type), HttpStatusCode.PartialContent)
+                    }
+                }
                 call.respondBytes(bytes, ContentType.parse(type))
             }
             // 답변 피드백·라우팅 정정 (C-09). 정정은 결정 모델 학습 후보가 된다 (L-01)
@@ -793,6 +802,28 @@ fun Application.vestaApi(deps: ServerDeps) {
 
 private const val MODEL_ID = "vesta"
 private val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
+private const val VIDEO_MP4 = "video/mp4"
+
+/** `Range: bytes=a-b` 하나만 (여러 범위는 전체로 답한다). 범위가 틀리면 null → 전체 */
+internal object MediaRange {
+    private val single = Regex("^bytes=(\\d*)-(\\d*)$")
+
+    fun parse(header: String?, size: Int): IntRange? {
+        val m = single.find(header?.trim() ?: return null) ?: return null
+        val (a, b) = m.destructured
+        if (size == 0 || (a.isEmpty() && b.isEmpty())) return null
+        val range = if (a.isEmpty()) {
+            val tail = b.toLongOrNull()?.coerceAtMost(size.toLong())?.toInt() ?: return null
+            (size - tail) until size
+        } else {
+            val start = a.toLongOrNull()?.takeIf { it < size }?.toInt() ?: return null
+            val end = (b.toLongOrNull()?.coerceAtMost(size - 1L)?.toInt() ?: (size - 1))
+            if (end < start) return null
+            start..end
+        }
+        return range.takeIf { !it.isEmpty() }
+    }
+}
 
 internal sealed interface ImagesResult {
     data class Ok(val images: List<ImageInput>) : ImagesResult

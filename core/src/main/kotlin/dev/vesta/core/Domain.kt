@@ -4,7 +4,7 @@ package dev.vesta.core
 enum class ModelRole { GENERAL, CODE, EMBEDDING, RERANKER, VISION, IMAGE, STT, TTS }
 
 /** 결정 모델(D1)이 고르는 에이전트 (PROJECT.md 4.8). */
-enum class AgentType { CHAT, DOCS, WEB, CODE, TASK, PERSONAL, IMAGE }
+enum class AgentType { CHAT, DOCS, WEB, CODE, TASK, PERSONAL, IMAGE, VIDEO }
 
 enum class SourceType { LOCAL_DOCS, CODE, WEB }
 

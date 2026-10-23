@@ -21,8 +21,8 @@ class ImageInput(val mime: String, val bytes: ByteArray) {
     }
 }
 
-/** IMAGE: 질문에 붙인 이미지, GENERATED: Vesta가 만든 이미지 (갤러리, V-08) */
-enum class MediaKind { IMAGE, AUDIO, GENERATED }
+/** IMAGE: 질문에 붙인 이미지, GENERATED: Vesta가 만든 이미지 (갤러리, V-08), VIDEO: Vesta가 만든 영상 (M24, G-04) */
+enum class MediaKind { IMAGE, AUDIO, GENERATED, VIDEO }
 
 /** 저장한 미디어 (PROJECT.md 11장 MediaAsset). 파일은 `~/.vesta/media/<사용자>/`에 둔다. [caption]은 생성 프롬프트 등 */
 data class MediaAsset(
@@ -89,6 +89,24 @@ enum class AudioFormat(val mime: String) {
     OGG_OPUS("audio/ogg"),
     /** Discord 음성 채널로 보낼 날 소리: 48kHz 16비트 스테레오 big-endian (M19) */
     PCM_48K_STEREO("audio/L16;rate=48000;channels=2"),
+}
+
+/** 영상 장면의 카메라 움직임 (Ken Burns, G-02) */
+enum class Motion { ZOOM_IN, ZOOM_OUT, PAN_LEFT, PAN_RIGHT }
+
+/** 영상 장면 하나 (G-02): 그림(PNG) + 내레이션(소리, 형식 상관없음) + 화면 아래 자막 */
+class VideoScene(val image: ByteArray, val narration: ByteArray?, val subtitle: String, val motion: Motion = Motion.ZOOM_IN)
+
+/** 장면을 이어 붙여 mp4를 만든다 (G-02). [onScene]은 장면 하나를 마칠 때마다 (진행률) */
+interface VideoComposer {
+    suspend fun compose(
+        scenes: List<VideoScene>,
+        width: Int,
+        height: Int,
+        title: String,
+        music: ByteArray? = null,
+        onScene: suspend (Int) -> Unit = {},
+    ): ByteArray
 }
 
 /** 미디어 처리 중 사용자에게 보여 줄 실패 (짧은 한국어 문장) */

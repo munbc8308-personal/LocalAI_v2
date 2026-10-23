@@ -43,6 +43,8 @@ class Router(
             return done(RoutingDecision(route.agent, 1.0, stage, collections = route.collections, question = route.question))
         }
         if (CODE_BLOCK.containsMatchIn(text)) return done(RoutingDecision(AgentType.CODE, 1.0, RoutingStage.RULE, question = text))
+        // 영상 만들기 (M24): 결정 모델 선택지에 영상이 없어(학습한 D1을 바꾸지 않으려고) 확실한 말은 규칙으로
+        if (VIDEO_REQUEST.containsMatchIn(text) && !NOT_VIDEO.containsMatchIn(text)) return done(RoutingDecision(AgentType.VIDEO, 1.0, RoutingStage.RULE, question = text))
 
         // 2.5단계: 짧은 후속 질문은 직전 정보원(문서·웹·코드·개인 비서)을 이어간다.
         // M7에서 발견: "그럼 코드 모델은?"을 일반 대화로 보내 근거 없이 지어낸 답이 나왔다
@@ -64,7 +66,9 @@ class Router(
                     val local = (answers[RoutingQuestions.NEEDS_LOCAL] as? DecisionAnswer.Noul)?.probability
                     val type = agent?.value?.let { runCatching { AgentType.valueOf(it) }.getOrNull() }
                     if (type != null && agent.confidence >= config.thresholds.agent) {
-                        return done(RoutingDecision(type, agent.confidence, RoutingStage.DECISION_MODEL, web, local, question = text))
+                        // 그림을 고른 영상 요청 ("여행 영상 하나 뽑아 줘")
+                        val chosen = if (type == AgentType.IMAGE && VIDEO_WORD.containsMatchIn(text)) AgentType.VIDEO else type
+                        return done(RoutingDecision(chosen, agent.confidence, RoutingStage.DECISION_MODEL, web, local, question = text))
                     }
                 }
         }
@@ -105,6 +109,11 @@ class Router(
 
     private companion object {
         val CODE_BLOCK = Regex("```")
+        private val VIDEO_WORD = Regex("영상|동영상|비디오|쇼츠|릴스|숏폼|브이로그|슬라이드쇼|\\bvideo\\b", RegexOption.IGNORE_CASE)
+        /** "영상 만들어 줘", "30초 쇼츠 제작해 줘": 영상 낱말 바로 뒤(10자 안)에 만들기 */
+        val VIDEO_REQUEST = Regex("(영상|동영상|비디오|쇼츠|릴스|숏폼|슬라이드쇼|\\bvideo\\b)\\s*(을|를|으로|로|하나|한 편|좀)?\\s*.{0,6}(만들어|만들자|제작해|생성해|뽑아|make|create)", RegexOption.IGNORE_CASE)
+        /** 영상을 다루는 코드·영상 내용 요약·방법 질문은 영상 만들기가 아니다 */
+        val NOT_VIDEO = Regex("코드|스크립트|프로그램|함수|파이썬|python|ffmpeg|요약|자막 추출|분석|방법|어떻게|앱 추천|프로그램 추천", RegexOption.IGNORE_CASE)
         /** 이보다 짧은 후속 질문은 결정 모델 대신 문맥을 보는 메인 모델이 판정 */
         const val FOLLOW_UP_CHARS = 20
         /** 이미지: "더 밝게", "그럼 고양이로" 같은 수정 요청은 이어서 다시 그린다 */

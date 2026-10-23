@@ -80,7 +80,7 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
         is AgentEvent.Grounding -> Triple("grounding", "근거 확인: ${event.checked}문장 중 미확인 ${event.unsupported.size}", event.unsupported.joinToString("\n").ifBlank { null })
         is AgentEvent.Done -> Triple("done", "끝 · ${event.model}" + (event.usage?.completionTokens?.let { " · $it 토큰" } ?: ""), null)
         is AgentEvent.Error -> Triple("error", "오류", event.message)
-        is AgentEvent.Media -> Triple("media", "이미지 만듦", event.caption)
+        is AgentEvent.Media -> Triple("media", if (event.asset.mime.startsWith("video/")) "영상 만듦" else "이미지 만듦", event.caption)
         else -> null
     }
 
