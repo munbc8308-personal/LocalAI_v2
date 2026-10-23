@@ -190,4 +190,39 @@ class TaskAgentTest : FunSpec({
         model.requests.size shouldBe 3
         events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "3단계"
     }
+
+    test("팀 (M22): 리더가 delegate로 맡기면 멤버는 할 일만 받아 일하고, 단계·승인은 흘러나오되 멤버의 답 글자는 결과로만 간다") {
+        val write = RecordingTool("write_file", RiskLevel.WRITE)
+        val memberModel = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("저장하겠습니다"), ChatChunk.ToolCalls(listOf(ToolCall("m1", "write_file", "{}"))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("보고서를 저장했습니다"), ChatChunk.Done("stop", null)),
+        ))
+        val broker = AutoBroker(ApprovalDecision.Approve)
+        val member = TaskAgent(memberModel, models, ToolRegistry(listOf(write)), broker)
+        val delegate = DelegateTool(listOf(TeamMember("writer", "문서를 쓴다") { member }, TeamMember("ghost", "지워진 멤버") { null }))
+        val leaderModel = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("나눠 맡깁니다"), ChatChunk.ToolCalls(listOf(
+                ToolCall("c1", "delegate", """{"agent":"writer","task":"회의록 요약을 report.md로 저장"}"""),
+                ToolCall("c2", "delegate", """{"agent":"ghost","task":"x"}"""),
+            )), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("writer가 저장했습니다"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(leaderModel, models, ToolRegistry(listOf(delegate)), broker).handle(request).toList()
+
+        memberModel.requests.first().messages.filter { it.role != ChatRole.SYSTEM }.map { it.content } shouldBe listOf("회의록 요약을 report.md로 저장")
+        write.calls.size shouldBe 1
+        events.filterIsInstance<AgentEvent.ToolStarted>().map { it.tool } shouldBe listOf("delegate", "writer/write_file", "delegate")
+        events.filterIsInstance<AgentEvent.ApprovalRequested>().single().tool shouldBe "write_file"
+        events.filterIsInstance<AgentEvent.Status>().map { it.text } shouldContain "[writer] 계획 중"
+        val tokens = events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }
+        tokens shouldContain "writer가 저장했습니다"
+        (tokens.contains("보고서를 저장했습니다")) shouldBe false
+        leaderModel.requests[1].messages.filter { it.role == ChatRole.TOOL }.map { it.content }.let {
+            it[0] shouldContain "멤버 'writer'의 결과:"
+            it[0] shouldContain "보고서를 저장했습니다"
+            it[1] shouldContain "지워졌다"
+        }
+        events.filterIsInstance<AgentEvent.ToolFinished>().first { it.tool == "delegate" }.summary shouldBe "writer: 보고서를 저장했습니다"
+        events.filterIsInstance<AgentEvent.Done>().size shouldBe 1
+    }
 })

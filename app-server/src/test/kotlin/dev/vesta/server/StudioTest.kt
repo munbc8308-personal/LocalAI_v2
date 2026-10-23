@@ -114,4 +114,35 @@ class StudioTest : FunSpec({
         client.delete("/api/agents/reviewer") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
         agents.list(owner.userId) shouldBe emptyList()
     } }
+
+    test("팀 API: 리더·멤버는 내 에이전트, 리더는 멤버가 아니다. 나눠 맡긴 단계는 delegate 종류로 남는다") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val agents = ExposedCustomAgentRepository(db.db)
+        val teams = dev.vesta.storage.ExposedTeamRepository(db.db)
+        val runs = ExposedRunRepository(db.db)
+        listOf("planner", "coder").forEach { agents.save(dev.vesta.core.studio.CustomAgentDef(owner.userId, it, "$it 역할", "")) }
+        val studio = StudioEndpoints(agents, runs, emptyFlow(), { emptyList() }, teams)
+        application { vestaApi(ServerDeps(SilentConversation, EmptySessions, EmptyMessages, owner, token = "secret", version = "t", studio = studio)) }
+
+        client.put("/api/teams/dev") { bearerAuth("secret"); setBody("""{"name":"","description":"기획 → 개발","leader":"planner","members":["coder"]}""") }.status shouldBe HttpStatusCode.OK
+        client.put("/api/teams/self") { bearerAuth("secret"); setBody("""{"name":"","description":"x","leader":"planner","members":["planner"]}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.put("/api/teams/ghost") { bearerAuth("secret"); setBody("""{"name":"","description":"x","leader":"planner","members":["nobody"]}""") }.bodyAsText() shouldContain "nobody"
+        client.put("/api/teams/empty") { bearerAuth("secret"); setBody("""{"name":"","description":"x","leader":"planner","members":[]}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.get("/api/agents") { bearerAuth("secret") }.bodyAsText().let { it shouldContain "\"leader\":\"planner\""; it shouldNotContain "ghost" }
+
+        val journal = StudioJournal(runs)
+        val id = journal.start(owner.userId, null, "/team dev 해 줘")
+        journal.event(id, AgentEvent.Routed(RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = "해 줘", customAgent = "dev", team = true)))
+        journal.event(id, AgentEvent.ToolStarted("c1", "delegate", RiskLevel.READ, "coder에게: 고쳐"))
+        journal.event(id, AgentEvent.ToolStarted("coder:m1", "coder/read_file", RiskLevel.READ, "a.kt"))
+        journal.event(id, AgentEvent.ToolFinished("c1", "delegate", true, "coder: 고쳤음"))
+        journal.finish(id, RunStatus.DONE, "끝")
+        runs.get(id)!!.agent shouldBe "TEAM"
+        runs.events(id).map { it.kind } shouldBe listOf("input", "routed", "delegate_started", "tool_started", "delegate_finished", "answer")
+        runs.events(id)[1].title shouldContain "dev (팀)"
+
+        client.delete("/api/teams/dev") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+        teams.list(owner.userId) shouldBe emptyList()
+    } }
 })

@@ -32,7 +32,7 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
 
     override suspend fun event(run: Long, event: AgentEvent) {
         val (kind, title, detail) = describe(event) ?: return
-        if (event is AgentEvent.Routed) runs.setAgent(run, event.decision.agent.name, event.decision.customAgent)
+        if (event is AgentEvent.Routed) runs.setAgent(run, if (event.decision.team) TEAM else event.decision.agent.name, event.decision.customAgent)
         val saved = runs.add(run, kind, title, detail)
         flow.tryEmit(RunUpdate(run, owners[run] ?: return, saved))
     }
@@ -48,13 +48,16 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
     private fun describe(event: AgentEvent): Triple<String, String, String?>? = when (event) {
         is AgentEvent.Routed -> Triple(
             "routed",
-            "담당: " + (event.decision.customAgent?.let { "$it (사용자 정의 에이전트)" } ?: event.decision.agent.name) +
+            "담당: " + (event.decision.customAgent?.let { if (event.decision.team) "$it (팀)" else "$it (사용자 정의 에이전트)" } ?: event.decision.agent.name) +
                 " · ${event.decision.stage.name.lowercase()} ${"%.2f".format(event.decision.confidence)}",
             event.decision.collections.takeIf { it.isNotEmpty() }?.joinToString(prefix = "컬렉션: "),
         )
         is AgentEvent.Status -> Triple("status", event.text, null)
-        is AgentEvent.ToolStarted -> Triple("tool_started", "도구 ${event.tool} 시작", event.summary)
-        is AgentEvent.ToolFinished -> Triple("tool_finished", "도구 ${event.tool} " + if (event.ok) "끝" else "실패", event.summary)
+        // 나눠 맡기기(팀): 그 사이의 단계는 멤버가 한 일 (타임라인에서 들여 쓴다)
+        is AgentEvent.ToolStarted -> if (event.tool == DELEGATE) Triple("delegate_started", "나눠 맡김: ${event.summary}".take(300), null)
+            else Triple("tool_started", "도구 ${event.tool} 시작", event.summary)
+        is AgentEvent.ToolFinished -> if (event.tool == DELEGATE) Triple("delegate_finished", (if (event.ok) "받음: " else "실패: ") + event.summary, null)
+            else Triple("tool_finished", "도구 ${event.tool} " + if (event.ok) "끝" else "실패", event.summary)
         is AgentEvent.ApprovalRequested -> Triple("approval", "승인 요청: ${event.details.title}", listOfNotNull(event.details.warning?.let { "⚠ $it" }, event.details.body, event.reason?.let { "이유: $it" }).joinToString("\n"))
         is AgentEvent.Sources -> Triple("sources", "자료 ${event.evidence.size}개", event.evidence.take(10).joinToString("\n") { "· ${it.title} ${it.location.orEmpty()}" })
         is AgentEvent.Grounding -> Triple("grounding", "근거 확인: ${event.checked}문장 중 미확인 ${event.unsupported.size}", event.unsupported.joinToString("\n").ifBlank { null })
@@ -62,5 +65,10 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
         is AgentEvent.Error -> Triple("error", "오류", event.message)
         is AgentEvent.Media -> Triple("media", "이미지 만듦", event.caption)
         else -> null
+    }
+
+    private companion object {
+        const val TEAM = "TEAM"
+        const val DELEGATE = "delegate"
     }
 }

@@ -293,6 +293,18 @@ object CustomAgents : LongIdTable("custom_agent") {
     init { uniqueIndex(owner, name) }
 }
 
+/** 팀 (M22, v17): 리더·멤버는 같은 사용자의 사용자 정의 에이전트 이름 */
+object AgentTeams : LongIdTable("agent_team") {
+    val owner = reference("owner_user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val name = varchar("name", 40)
+    val description = varchar("description", 400)
+    val leader = varchar("leader", 40)
+    val members = text("members")
+    val updatedAt = timestamp("updated_at")
+
+    init { uniqueIndex(owner, name) }
+}
+
 /** 실행 (M22, v16) */
 object AgentRuns : LongIdTable("agent_run") {
     val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()

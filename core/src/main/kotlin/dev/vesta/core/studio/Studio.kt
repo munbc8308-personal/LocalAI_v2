@@ -35,6 +35,31 @@ interface CustomAgentRepository {
     suspend fun delete(owner: UserId, name: String): Boolean
 }
 
+/**
+ * 팀 (A-14, M22): 리더 하나 + 멤버들. 모두 같은 사용자의 사용자 정의 에이전트.
+ * 리더가 `delegate` 도구로 멤버에게 일을 주고, 멤버는 따로 맥락에서 일한 뒤 답만 돌려준다. 멤버는 다시 나눠 맡기지 않는다 (한 단계)
+ */
+data class TeamDef(
+    val owner: UserId,
+    val name: String,
+    val description: String,
+    val leader: String,
+    val members: List<String>,
+    val updatedAt: Instant = Instant.EPOCH,
+) {
+    companion object {
+        const val MAX_MEMBERS = 6
+    }
+}
+
+interface TeamRepository {
+    suspend fun list(owner: UserId): List<TeamDef>
+    suspend fun find(owner: UserId, name: String): TeamDef?
+    /** 이름이 같으면 고친다 */
+    suspend fun save(def: TeamDef): TeamDef
+    suspend fun delete(owner: UserId, name: String): Boolean
+}
+
 enum class RunStatus { RUNNING, DONE, FAILED, CANCELLED }
 
 /** 실행 한 번 (A-12): 질문 하나에 에이전트가 답할 때까지. [customAgent]는 사용자 정의 에이전트 이름 */
@@ -77,10 +102,10 @@ interface RunJournal {
     suspend fun finish(run: Long, status: RunStatus, answer: String?)
 }
 
-/** `/agent 이름 할 일` (A-16) */
-data class CustomCall(val name: String, val task: String) {
+/** `/agent 이름 할 일`, 팀은 `/team 이름 할 일` (A-16) */
+data class CustomCall(val name: String, val task: String, val team: Boolean = false) {
     companion object {
-        private val PATTERN = Regex("^[/!]agent\\s+(\\S+)\\s*(.*)$", RegexOption.DOT_MATCHES_ALL)
-        fun parse(text: String): CustomCall? = PATTERN.find(text.trim())?.let { CustomCall(it.groupValues[1], it.groupValues[2].trim()) }
+        private val PATTERN = Regex("^[/!](agent|team)\\s+(\\S+)\\s*(.*)$", RegexOption.DOT_MATCHES_ALL)
+        fun parse(text: String): CustomCall? = PATTERN.find(text.trim())?.let { CustomCall(it.groupValues[2], it.groupValues[3].trim(), it.groupValues[1] == "team") }
     }
 }

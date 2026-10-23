@@ -17,6 +17,7 @@ import dev.vesta.api.RunDetailDto
 import dev.vesta.api.RunDto
 import dev.vesta.api.RunEventDto
 import dev.vesta.api.RunUpdateDto
+import dev.vesta.api.TeamDto
 import kotlinx.browser.window
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
@@ -50,6 +51,7 @@ fun StudioView() {
     var detail by remember { mutableStateOf<RunDetailDto?>(null) }
     val liveEvents = remember { mutableStateListOf<RunEventDto>() }
     var editing by remember { mutableStateOf<CustomAgentDto?>(null) }
+    var editingTeam by remember { mutableStateOf<TeamDto?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf("") }
     var task by remember { mutableStateOf("") }
@@ -89,21 +91,22 @@ fun StudioView() {
     Div({ classes("page") }) {
         error?.let { P({ classes("error", "small") }) { Text(it) } }
         val a = agents
-        // 일 맡기기: 사용자 정의 에이전트에게 (기본 에이전트는 대화 탭에서 /web·/code·/task)
+        // 일 맡기기: 사용자 정의 에이전트·팀에게 (기본 에이전트는 대화 탭에서 /web·/code·/task). target은 "agent 이름" 또는 "team 이름"
         if (a != null) Div({ classes("card") }) {
-            Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일") } }
+            Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일, /team 이름 할 일") } }
             if (a.custom.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
             else {
                 Select({ onChange { e -> target = e.value.orEmpty() } }) {
-                    Option("", { if (target.isEmpty()) selected() }) { Text("에이전트 고르기") }
-                    a.custom.forEach { c -> Option(c.name, { if (c.name == target) selected() }) { Text("${c.name} — ${c.description.take(40)}") } }
+                    Option("", { if (target.isEmpty()) selected() }) { Text("에이전트·팀 고르기") }
+                    a.custom.forEach { c -> Option("agent ${c.name}", { if ("agent ${c.name}" == target) selected() }) { Text("${c.name} — ${c.description.take(40)}") } }
+                    a.teams.forEach { t -> Option("team ${t.name}", { if ("team ${t.name}" == target) selected() }) { Text("팀 ${t.name} — ${t.description.take(40)}") } }
                 }
                 TextArea(task) { placeholder("할 일"); attr("rows", "3"); onInput { task = it.value } }
                 Button({
                     classes("primary")
                     if (target.isEmpty() || task.isBlank()) disabled()
                     onClick {
-                        val text = "/agent $target $task"
+                        val text = "/$target $task"
                         task = ""
                         // 새 대화로 보낸다. 진행은 아래 실행 목록·타임라인에서 실시간으로 본다
                         scope.launch { runCatching { Http.chat(ChatRequestDto(text)).collect { } }.onFailure { error = it.message } }
@@ -118,7 +121,7 @@ fun StudioView() {
             runs.take(30).forEach { r ->
                 Div({ classes("run"); if (r.id == selected) classes("selected"); onClick { open(r.id) } }) {
                     Div({ classes("row", "small") }) {
-                        Span { B { Text(r.customAgent ?: agentLabel(r.agent)) }; Text(" · ${r.input.take(60)}") }
+                        Span { B { Text(if (r.agent == "TEAM") "팀 ${r.customAgent}" else r.customAgent ?: agentLabel(r.agent)) }; Text(" · ${r.input.take(60)}") }
                         Span({ classes(statusClass(r.status)) }) { Text(statusLabel(r.status)) }
                     }
                 }
@@ -130,7 +133,13 @@ fun StudioView() {
                     Span { B { Text("타임라인 #${d.run.id}") } }
                     Span({ classes(statusClass(d.run.status), "small") }) { Text(statusLabel(d.run.status)) }
                 }
-                (d.events + liveEvents).distinctBy { it.seq }.sortedBy { it.seq }.forEach { e -> EventRow(e) }
+                // 나눠 맡긴 사이의 단계(멤버가 한 일)는 들여 쓴다
+                var depth = 0
+                (d.events + liveEvents).distinctBy { it.seq }.sortedBy { it.seq }.forEach { e ->
+                    if (e.kind == "delegate_finished") depth = maxOf(0, depth - 1)
+                    EventRow(e, depth)
+                    if (e.kind == "delegate_started") depth++
+                }
             }
         }
         // 에이전트 목록·만들기
@@ -159,6 +168,46 @@ fun StudioView() {
             }
             a.builtin.forEach { b -> Div({ classes("row", "small") }) { Span({ classes("muted") }) { Text("기본 · ${b.label}") }; Span({ classes("muted") }) { Text(b.description) } } }
         }
+        // 팀: 리더가 delegate 도구로 멤버에게 맡긴다
+        if (a != null) Div({ classes("card") }) {
+            Div({ classes("row") }) {
+                Span { B { Text("팀") } }
+                Button({
+                    classes("link", "small")
+                    if (a.custom.size < 2) disabled()
+                    onClick { editingTeam = TeamDto("", "", "", emptyList()) }
+                }) { Text("새 팀") }
+            }
+            if (a.teams.isEmpty()) P({ classes("muted", "small") }) { Text("에이전트를 둘 이상 만든 뒤 리더와 멤버를 골라 팀을 만듭니다. 리더가 일을 나눠 멤버에게 맡깁니다.") }
+            a.teams.forEach { t ->
+                Div({ classes("run") }) {
+                    Div({ classes("row", "small") }) {
+                        Span { B { Text(t.name) }; Text(" · ${t.description}") }
+                        Span {
+                            Button({ classes("link", "small"); onClick { editingTeam = t } }) { Text("고치기") }
+                            Button({
+                                classes("link", "small", "bad")
+                                onClick {
+                                    if (!window.confirm("${t.name} 팀을 지울까요? (에이전트는 남습니다)")) return@onClick
+                                    scope.launch { runCatching { Http.delete("/api/teams/${t.name}") }.onFailure { error = it.message }; loadAgents() }
+                                }
+                            }) { Text("지우기") }
+                        }
+                    }
+                    val names = a.custom.map { it.name }.toSet()
+                    val missing = (listOf(t.leader) + t.members).filter { it !in names }
+                    Div({ classes("muted", "small") }) { Text("리더 ${t.leader} · 멤버 ${t.members.joinToString()}") }
+                    if (missing.isNotEmpty()) Div({ classes("bad", "small") }) { Text("지워진 에이전트: ${missing.joinToString()}") }
+                }
+            }
+        }
+        editingTeam?.let { t -> TeamEditor(t, a?.custom.orEmpty(), onCancel = { editingTeam = null }) { saved ->
+            scope.launch {
+                runCatching { Http.put("/api/teams/${saved.name}", ApiJson.encodeToString(TeamDto.serializer(), saved)) }
+                    .onSuccess { editingTeam = null; error = null; loadAgents() }
+                    .onFailure { error = it.message }
+            }
+        } }
         editing?.let { e -> AgentEditor(e, a?.tools.orEmpty(), onCancel = { editing = null }) { saved ->
             scope.launch {
                 runCatching { Http.put("/api/agents/${saved.name}", ApiJson.encodeToString(CustomAgentDto.serializer(), saved)) }
@@ -203,9 +252,45 @@ private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolI
 }
 
 @Composable
-private fun EventRow(e: RunEventDto) {
+private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
+    var name by remember(initial) { mutableStateOf(initial.name) }
+    var description by remember(initial) { mutableStateOf(initial.description) }
+    var leader by remember(initial) { mutableStateOf(initial.leader) }
+    var members by remember(initial) { mutableStateOf(initial.members.toSet()) }
+    Div({ classes("card", "stack") }) {
+        Div({ classes("row") }) { Span { B { Text(if (initial.name.isEmpty()) "새 팀" else "${initial.name} 고치기") } }; Button({ classes("link", "small"); onClick { onCancel() } }) { Text("닫기") } }
+        Input(InputType.Text) { value(name); placeholder("팀 이름 (공백 없이, /team 이름)"); if (initial.name.isNotEmpty()) disabled(); onInput { name = it.value } }
+        Input(InputType.Text) { value(description); placeholder("무엇을 하는 팀인지 (예: 기획 → 개발 → 리뷰)"); onInput { description = it.value } }
+        Div({ classes("small") }) { B { Text("리더") }; Span({ classes("muted") }) { Text(" (일을 나누고 결과를 모아 답한다)") } }
+        Select({ onChange { e -> leader = e.value.orEmpty(); members = members - leader } }) {
+            Option("", { if (leader.isEmpty()) selected() }) { Text("리더 고르기") }
+            agents.forEach { a -> Option(a.name, { if (a.name == leader) selected() }) { Text("${a.name} — ${a.description.take(40)}") } }
+        }
+        Div({ classes("small") }) { B { Text("멤버") }; Span({ classes("muted") }) { Text(" (리더가 맡기는 에이전트, 최대 6)") } }
+        agents.filter { it.name != leader }.forEach { a ->
+            Label(attrs = { classes("row", "small") }) {
+                Span {
+                    Input(InputType.Checkbox) {
+                        checked(a.name in members)
+                        onChange { members = if (a.name in members) members - a.name else members + a.name }
+                    }
+                    Text(" ${a.name}")
+                }
+                Span({ classes("muted") }) { Text(a.description.take(40)) }
+            }
+        }
+        Button({
+            classes("primary")
+            if (leader.isEmpty() || members.isEmpty()) disabled()
+            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, agents.map { it.name }.filter { it in members })) }
+        }) { Text("저장") }
+    }
+}
+
+@Composable
+private fun EventRow(e: RunEventDto, depth: Int = 0) {
     var open by remember(e.run, e.seq) { mutableStateOf(e.kind == "answer" || e.kind == "approval" || e.kind == "error") }
-    Div({ classes("tool") }) {
+    Div({ classes("tool"); if (depth > 0) style { property("margin-left", "${depth * 18}px"); property("border-left", "2px solid var(--line)"); property("padding-left", "8px") } }) {
         Div({ classes("row", "small"); onClick { open = !open } }) {
             Span { Text("${eventIcon(e.kind)} ${e.title}") }
             Span({ classes("muted") }) { Text(e.at.substringAfter('T').take(8)) }
@@ -217,6 +302,8 @@ private fun EventRow(e: RunEventDto) {
 private fun eventIcon(kind: String) = when (kind) {
     "input" -> "💬"
     "routed" -> "🧭"
+    "delegate_started" -> "👉"
+    "delegate_finished" -> "📥"
     "status" -> "·"
     "tool_started" -> "🔧"
     "tool_finished" -> "✓"
@@ -236,6 +323,7 @@ private fun agentLabel(agent: String) = when (agent) {
     "WEB" -> "웹 리서치"
     "CODE" -> "코드 도우미"
     "TASK" -> "작업"
+    "TEAM" -> "팀"
     "PERSONAL" -> "개인 비서"
     "IMAGE" -> "이미지"
     else -> agent

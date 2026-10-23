@@ -45,6 +45,20 @@ interface Tool {
 
 data class ToolContext(val user: UserContext)
 
+/**
+ * 다른 에이전트에게 일을 맡기는 도구 (팀, A-14, M22). 맡은 에이전트가 일하는 단계·승인 요청을 [delegate]의 emit으로 흘린다:
+ * 승인은 실행을 시작한 사람에게 그대로 가고, 스튜디오 타임라인에는 나눠 맡긴 단계 아래에 보인다. 결과는 맡은 에이전트의 답
+ */
+interface DelegatingTool : Tool {
+    suspend fun delegate(
+        arguments: JsonObject,
+        request: dev.vesta.core.agent.AgentRequest,
+        emit: suspend (dev.vesta.core.agent.AgentEvent) -> Unit,
+    ): ToolResult
+
+    override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("오류: 나눠 맡기기는 에이전트 안에서만 쓸 수 있다", isError = true)
+}
+
 /** 승인 화면 내용 */
 data class ApprovalDetails(
     /** 한 줄 요약. 예: "파일 쓰기: ~/Documents/summary.md (1.2KB, 새 파일)" */

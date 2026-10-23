@@ -9,6 +9,8 @@ import dev.vesta.core.studio.CustomAgentRepository
 import dev.vesta.core.studio.RunEvent
 import dev.vesta.core.studio.RunRepository
 import dev.vesta.core.studio.RunStatus
+import dev.vesta.core.studio.TeamDef
+import dev.vesta.core.studio.TeamRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
@@ -76,6 +78,49 @@ class ExposedCustomAgentRepository(private val db: Database, private val clock: 
         tools = this[CustomAgents.tools].lines().filter { it.isNotBlank() },
         collections = this[CustomAgents.collections].lines().filter { it.isNotBlank() },
         updatedAt = this[CustomAgents.updatedAt],
+    )
+}
+
+/** 팀 (M22) */
+class ExposedTeamRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : TeamRepository {
+    override suspend fun list(owner: UserId): List<TeamDef> = db.tx {
+        AgentTeams.selectAll().where { AgentTeams.owner eq owner.value }.orderBy(AgentTeams.name).map { it.toDef() }
+    }
+
+    override suspend fun find(owner: UserId, name: String): TeamDef? = db.tx {
+        AgentTeams.selectAll().where { (AgentTeams.owner eq owner.value) and (AgentTeams.name eq name) }.firstOrNull()?.toDef()
+    }
+
+    override suspend fun save(def: TeamDef): TeamDef = db.tx {
+        val now = clock.instant()
+        val updated = AgentTeams.update({ (AgentTeams.owner eq def.owner.value) and (AgentTeams.name eq def.name) }) {
+            it[description] = def.description
+            it[leader] = def.leader
+            it[members] = def.members.joinToString("\n")
+            it[updatedAt] = now
+        }
+        if (updated == 0) AgentTeams.insert {
+            it[owner] = def.owner.value
+            it[name] = def.name
+            it[description] = def.description
+            it[leader] = def.leader
+            it[members] = def.members.joinToString("\n")
+            it[updatedAt] = now
+        }
+        def.copy(updatedAt = now)
+    }
+
+    override suspend fun delete(owner: UserId, name: String): Boolean = db.tx {
+        AgentTeams.deleteWhere { (AgentTeams.owner eq owner.value) and (AgentTeams.name eq name) } > 0
+    }
+
+    private fun ResultRow.toDef() = TeamDef(
+        owner = UserId(this[AgentTeams.owner].value),
+        name = this[AgentTeams.name],
+        description = this[AgentTeams.description],
+        leader = this[AgentTeams.leader],
+        members = this[AgentTeams.members].lines().filter { it.isNotBlank() },
+        updatedAt = this[AgentTeams.updatedAt],
     )
 }
 

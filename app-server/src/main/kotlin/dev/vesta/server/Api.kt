@@ -461,6 +461,25 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
                 }
             }
+            // 팀 (A-14): 리더·멤버는 내 사용자 정의 에이전트
+            route("/teams") {
+                put("/{name}") {
+                    val user = call.principal(deps) ?: return@put
+                    val studio = deps.studio ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.TeamDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    studio.saveTeam(user, dto.copy(name = call.parameters["name"].orEmpty()))?.let { error ->
+                        return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+                delete("/{name}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val teams = deps.studio?.teamRepo ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val removed = teams.delete(user.userId, call.parameters["name"].orEmpty())
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
             route("/runs") {
                 get {
                     val user = call.principal(deps) ?: return@get
@@ -842,13 +861,32 @@ class StudioEndpoints(
     val updates: kotlinx.coroutines.flow.Flow<dev.vesta.app.RunUpdate>,
     /** 이 사용자가 쓸 수 있는 도구 */
     val toolCatalog: suspend (UserContext) -> List<dev.vesta.core.tools.Tool>,
+    val teamRepo: dev.vesta.core.studio.TeamRepository? = null,
 ) {
     suspend fun agents(user: UserContext): dev.vesta.api.AgentsDto {
         val builtin = BUILTIN.filter { (type, _, _) -> type in dev.vesta.identity.RolePolicy.agents(user.role) }
             .map { (type, label, description) -> dev.vesta.api.BuiltinAgentDto(type.name, label, description) }
         val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString()) }
         val tools = toolCatalog(user).map { dev.vesta.api.ToolInfoDto(it.spec.name, it.risk.name, it.spec.description) }
-        return dev.vesta.api.AgentsDto(builtin, custom, tools)
+        val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString()) }
+        return dev.vesta.api.AgentsDto(builtin, custom, tools, teams)
+    }
+
+    /** 팀 저장. 리더·멤버는 이 사용자의 사용자 정의 에이전트, 리더는 멤버가 아니다. 문제가 있으면 그 이유 */
+    suspend fun saveTeam(user: UserContext, dto: dev.vesta.api.TeamDto): String? {
+        val repo = teamRepo ?: return "팀을 쓸 수 없습니다"
+        val d = dev.vesta.core.studio.CustomAgentDef
+        if (!d.NAME.matches(dto.name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/team 이름 으로 부릅니다)"
+        if (!dev.vesta.identity.RolePolicy.agents(user.role).contains(dev.vesta.core.AgentType.TASK)) return "이 계정은 팀을 쓸 수 없습니다"
+        if (dto.description.isBlank() || dto.description.length > d.MAX_DESCRIPTION) return "팀 설명은 1~${d.MAX_DESCRIPTION}자입니다"
+        val members = dto.members.distinct()
+        if (members.isEmpty() || members.size > dev.vesta.core.studio.TeamDef.MAX_MEMBERS) return "멤버는 1~${dev.vesta.core.studio.TeamDef.MAX_MEMBERS}명입니다"
+        if (dto.leader in members) return "리더는 멤버가 될 수 없습니다"
+        val mine = agentRepo.list(user.userId).map { it.name }.toSet()
+        val unknown = (listOf(dto.leader) + members).filter { it !in mine }
+        if (unknown.isNotEmpty()) return "없는 에이전트: ${unknown.joinToString()}"
+        repo.save(dev.vesta.core.studio.TeamDef(user.userId, dto.name, dto.description.trim(), dto.leader, members))
+        return null
     }
 
     /** 저장. 문제가 있으면 그 이유 */

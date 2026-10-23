@@ -34,7 +34,7 @@ fun AgentEvent.toDto(): EventDto = when (this) {
 
 fun Evidence.toDto() = EvidenceDto(citation, source.name, ref, title, location)
 
-fun RoutingDecision.toDto() = RoutingDto(agent.name, requested?.name, stage.name, confidence, collections, latencyMs, customAgent)
+fun RoutingDecision.toDto() = RoutingDto(agent.name, requested?.name, stage.name, confidence, collections, latencyMs, customAgent, team)
 
 /** 클라이언트(CLI 원격 모드)가 받은 이벤트를 다시 AgentEvent로 */
 fun EventDto.toEvent(): AgentEvent = when (this) {
@@ -49,6 +49,7 @@ fun EventDto.toEvent(): AgentEvent = when (this) {
             latencyMs = routing.latencyMs,
             requested = routing.requested?.let { AgentType.valueOf(it) },
             customAgent = routing.customAgent,
+            team = routing.team,
         ),
     )
     is EventDto.Status -> AgentEvent.Status(text)

@@ -218,6 +218,23 @@ class DefaultConversationServiceTest : FunSpec({
         missing.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "'nobody' 에이전트가 없습니다"
         chat.requests.shouldBeEmpty()
     }
+
+    test("/team 이름 할 일: 팀 리더가 맡고, 담당에 팀으로 표시된다. 없는 팀은 안내 (M22)") {
+        val chat = ScriptedAgent { error("chat이 불리면 안 됨") }
+        val leader = ScriptedAgent { emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.TASK to chat),
+            customAgents = { _, _ -> chat }, teams = { _, name -> leader.takeIf { name == "dev" } },
+        )
+        val routed = service.send(user, ChannelType.WEB, null, UserInput("!team dev 로그인 버그 고쳐 줘")).toList()
+            .filterIsInstance<AgentEvent.Routed>().single().decision
+        routed.team shouldBe true
+        routed.customAgent shouldBe "dev"
+        leader.requests.single().history.last().content shouldBe "로그인 버그 고쳐 줘"
+        service.send(user, ChannelType.WEB, null, UserInput("/team nobody 해 줘")).toList()
+            .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "'nobody' 팀이 없거나"
+        chat.requests.shouldBeEmpty()
+    }
 })
 
 class ExplicitRouteTest : FunSpec({

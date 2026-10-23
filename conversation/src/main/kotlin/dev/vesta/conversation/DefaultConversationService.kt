@@ -61,6 +61,8 @@ class DefaultConversationService(
     private val persona: suspend (dev.vesta.core.UserId) -> String? = { null },
     /** 사용자 정의 에이전트 (`/agent 이름 할 일`, M22). 없는 이름이면 null */
     private val customAgents: suspend (UserContext, String) -> Agent? = { _, _ -> null },
+    /** 팀 (`/team 이름 할 일`, M22): 리더 에이전트. 없거나 리더가 지워졌으면 null */
+    private val teams: suspend (UserContext, String) -> Agent? = { _, _ -> null },
     /** 실행 기록·실시간 보기 (M22) */
     private val journal: dev.vesta.core.studio.RunJournal? = null,
 ) : ConversationService {
@@ -128,14 +130,15 @@ class DefaultConversationService(
         // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
         // 사용자 정의 에이전트 (`/agent 이름 할 일`, M22): 라우터를 거치지 않고 그 에이전트로. 작업 에이전트 권한 안에서만
         val call = dev.vesta.core.studio.CustomCall.parse(input.text)
-        val custom = call?.let { customAgents(user, it.name) }
+        val custom = call?.let { if (it.team) teams(user, it.name) else customAgents(user, it.name) }
         if (call != null && custom == null) {
-            val notice = "'${call.name}' 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
+            val notice = if (call.team) "'${call.name}' 팀이 없거나 리더 에이전트가 지워졌습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
+                else "'${call.name}' 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
             messages.append(session.id, NewMessage(role = ChatRole.ASSISTANT, content = notice, agent = AgentType.CHAT, model = POLICY_MODEL))
                 .let { emit(AgentEvent.Token(notice)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
             return@flow
         }
-        val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name)
+        val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name, team = call.team)
             else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }

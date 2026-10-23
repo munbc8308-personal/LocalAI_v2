@@ -162,7 +162,11 @@ class TaskAgent(
         }
         emit(AgentEvent.ToolStarted(call.id, tool.spec.name, tool.risk, tool.describe(arguments).title))
         val start = TimeSource.Monotonic.markNow()
-        val result = runCatching { tool.execute(arguments, context) }.getOrElse {
+        val result = runCatching {
+            // 나눠 맡기기(팀, M22): 맡은 에이전트의 단계·승인 요청을 이 흐름으로 그대로 흘린다
+            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request) { emit(it) } else tool.execute(arguments, context)
+        }.getOrElse {
+            if (it is kotlinx.coroutines.CancellationException) throw it
             log.warn(it) { "도구 실패: ${tool.spec.name}" }
             ToolResult("오류: ${it.message ?: it::class.simpleName}", isError = true)
         }

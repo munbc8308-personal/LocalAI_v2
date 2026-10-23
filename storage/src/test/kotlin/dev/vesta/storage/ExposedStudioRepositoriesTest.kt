@@ -55,4 +55,15 @@ class ExposedStudioRepositoriesTest : FunSpec({
         runs.abandonRunning() shouldBe 1
         runs.get(b.id)!!.status shouldBe RunStatus.FAILED
     }
+
+    test("팀: 같은 이름이면 고치고, 멤버 순서를 지킨다") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val teams = ExposedTeamRepository(db.db)
+        teams.save(dev.vesta.core.studio.TeamDef(owner, "dev", "기획 → 개발", "planner", listOf("coder")))
+        teams.save(dev.vesta.core.studio.TeamDef(owner, "dev", "기획 → 개발 → 리뷰", "planner", listOf("coder", "reviewer")))
+        teams.list(owner).single().let { it.description shouldBe "기획 → 개발 → 리뷰"; it.members shouldBe listOf("coder", "reviewer") }
+        teams.delete(owner, "dev") shouldBe true
+        teams.find(owner, "dev") shouldBe null
+    }
 })

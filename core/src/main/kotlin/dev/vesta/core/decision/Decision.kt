@@ -43,6 +43,8 @@ data class RoutingDecision(
     val requested: AgentType? = null,
     /** 사용자 정의 에이전트로 맡긴 경우 그 이름 (`/agent 이름`, M22). [agent]는 TASK */
     val customAgent: String? = null,
+    /** [customAgent]가 팀 이름인 경우 (`/team 이름`, M22) */
+    val team: Boolean = false,
 )
 
 /** 라우팅 기록 (PROJECT.md 11장 RoutingLog). 평가·보정(4.7)과 학습 데이터(L-01)에 쓴다. */

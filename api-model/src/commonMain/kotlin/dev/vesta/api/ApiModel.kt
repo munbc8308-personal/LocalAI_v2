@@ -174,6 +174,8 @@ data class RoutingDto(
     val latencyMs: Long,
     /** 사용자 정의 에이전트 이름 (M22) */
     val customAgent: String? = null,
+    /** [customAgent]가 팀 이름 (M22) */
+    val team: Boolean = false,
 )
 
 /** SSE로 흘려보내는 대화 이벤트 (AgentEvent의 직렬화 형태) */
@@ -332,7 +334,11 @@ data class BuiltinAgentDto(val name: String, val label: String, val description:
 
 /** 에이전트 탭 (`GET /api/agents`) */
 @Serializable
-data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<CustomAgentDto>, val tools: List<ToolInfoDto>)
+data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<CustomAgentDto>, val tools: List<ToolInfoDto>, val teams: List<TeamDto> = emptyList())
+
+/** 팀 (A-14): 리더·멤버는 사용자 정의 에이전트 이름 (`PUT /api/teams/{name}`) */
+@Serializable
+data class TeamDto(val name: String, val description: String, val leader: String, val members: List<String>, val updatedAt: String? = null)
 
 @Serializable
 data class RunDto(

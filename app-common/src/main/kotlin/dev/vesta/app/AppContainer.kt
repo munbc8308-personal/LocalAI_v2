@@ -171,6 +171,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val userSettings = dev.vesta.storage.ExposedUserSettingsRepository(database.db)
     /** 에이전트 스튜디오 (M22): 사용자 정의 에이전트, 실행 기록 */
     val customAgentRepository = dev.vesta.storage.ExposedCustomAgentRepository(database.db)
+    val teamRepository = dev.vesta.storage.ExposedTeamRepository(database.db)
     val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
     val journal = StudioJournal(runRepository)
 
@@ -265,6 +266,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         scheduler = scheduler,
         persona = { id -> userSettings.get(id).persona() },
         customAgents = { user, name -> customAgent(user, name) },
+        teams = { user, name -> team(user, name) },
         journal = journal,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
@@ -310,19 +312,41 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 사용자 정의 에이전트 (A-11, M22): 작업 에이전트에 역할·지침을 얹고, 도구는 그 사용자가 쓸 수 있는 것 중 고른 것만.
      * 셸·쓰기 승인, MEMBER 셸의 주인 승인은 그대로
      */
-    private suspend fun customAgent(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
+    private suspend fun customAgent(
+        user: UserContext,
+        name: String,
+        /** 팀 리더면 멤버에게 맡기는 도구와 팀 규칙 */
+        delegate: dev.vesta.agents.DelegateTool? = null,
+        teamRules: String = "",
+    ): dev.vesta.core.agent.Agent? {
         val def = customAgentRepository.find(user.userId, name) ?: return null
-        val rules = Prompts.TASK_RULES + "\n\n너는 사용자 정의 에이전트 '${def.name}'이다. 역할: ${def.description}\n지침:\n${def.instructions.take(dev.vesta.core.studio.CustomAgentDef.MAX_INSTRUCTIONS)}"
+        val rules = Prompts.TASK_RULES + "\n\n너는 사용자 정의 에이전트 '${def.name}'이다. 역할: ${def.description}\n지침:\n${def.instructions.take(dev.vesta.core.studio.CustomAgentDef.MAX_INSTRUCTIONS)}" + teamRules
         return TaskAgent(
             inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
             maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
             maxToolOutputChars = config.tools.maxOutputChars,
             rules = rules,
-            toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in def.tools } },
+            toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in def.tools } + listOfNotNull(delegate) },
             judge = judge,
             escalation = escalation,
             modelRole = if (def.model == dev.vesta.core.ModelRole.CODE) dev.vesta.core.ModelRole.CODE else dev.vesta.core.ModelRole.GENERAL,
         )
+    }
+
+    /**
+     * 팀 (A-14, M22): 리더 에이전트에 `delegate` 도구와 멤버 소개를 얹는다. 멤버는 맡길 때마다 새로 만든다 (고친 지침이 바로 반영).
+     * 멤버는 다시 나눠 맡기지 않는다. 리더·멤버 모두 그 사용자 역할의 도구 안에서만
+     */
+    private suspend fun team(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
+        val def = teamRepository.find(user.userId, name) ?: return null
+        val members = def.members.mapNotNull { member -> customAgentRepository.find(user.userId, member) }
+            .map { m -> dev.vesta.agents.TeamMember(m.name, m.description) { customAgent(user, m.name) } }
+        if (members.isEmpty()) return null
+        val rules = "\n\n너는 팀 '${def.name}'(${def.description})의 리더다. 멤버:\n" + members.joinToString("\n") { "- ${it.name}: ${it.description}" } +
+            "\n- 일을 나눠 delegate 도구로 멤버에게 맡긴다. 한 번에 한 멤버, 앞 멤버의 결과가 필요하면 다음 task에 그 결과를 적어 넘긴다." +
+            "\n- 멤버는 이 대화를 보지 못한다. task에 목표·조건·경로·앞 단계 결과를 모두 적는다." +
+            "\n- 멤버의 결과를 그대로 믿지 말고 확인한 뒤, 무엇을 누가 했는지 짧게 밝혀 최종 답을 쓴다."
+        return customAgent(user, def.leader, dev.vesta.agents.DelegateTool(members), rules)
     }
 
     /** 사용자 정의 에이전트에 줄 수 있는 도구 목록 (이 사용자가 쓸 수 있는 것, 웹 UI 고르기용) */
