@@ -169,6 +169,10 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val userRepository = dev.vesta.storage.ExposedUserRepository(database.db)
     /** 사용자별 설정 (U-07, M20) */
     val userSettings = dev.vesta.storage.ExposedUserSettingsRepository(database.db)
+    /** 에이전트 스튜디오 (M22): 사용자 정의 에이전트, 실행 기록 */
+    val customAgentRepository = dev.vesta.storage.ExposedCustomAgentRepository(database.db)
+    val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
+    val journal = StudioJournal(runRepository)
 
     /** 고를 수 있는 읽어 주기 목소리: 이 Mac의 한국어 `say` 음성 (처음 물을 때 한 번 읽는다) */
     val voices: List<String> by lazy {
@@ -260,6 +264,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         media = mediaStore,
         scheduler = scheduler,
         persona = { id -> userSettings.get(id).persona() },
+        customAgents = { user, name -> customAgent(user, name) },
+        journal = journal,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
@@ -299,6 +305,28 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         ),
     )
 
+
+    /**
+     * 사용자 정의 에이전트 (A-11, M22): 작업 에이전트에 역할·지침을 얹고, 도구는 그 사용자가 쓸 수 있는 것 중 고른 것만.
+     * 셸·쓰기 승인, MEMBER 셸의 주인 승인은 그대로
+     */
+    private suspend fun customAgent(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
+        val def = customAgentRepository.find(user.userId, name) ?: return null
+        val rules = Prompts.TASK_RULES + "\n\n너는 사용자 정의 에이전트 '${def.name}'이다. 역할: ${def.description}\n지침:\n${def.instructions.take(dev.vesta.core.studio.CustomAgentDef.MAX_INSTRUCTIONS)}"
+        return TaskAgent(
+            inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
+            maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
+            maxToolOutputChars = config.tools.maxOutputChars,
+            rules = rules,
+            toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in def.tools } },
+            judge = judge,
+            escalation = escalation,
+            modelRole = if (def.model == dev.vesta.core.ModelRole.CODE) dev.vesta.core.ModelRole.CODE else dev.vesta.core.ModelRole.GENERAL,
+        )
+    }
+
+    /** 사용자 정의 에이전트에 줄 수 있는 도구 목록 (이 사용자가 쓸 수 있는 것, 웹 UI 고르기용) */
+    suspend fun toolCatalog(user: UserContext): List<dev.vesta.core.tools.Tool> = toolsFor(user)
 
     override fun close() {
         http.close()

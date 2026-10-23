@@ -89,6 +89,8 @@ fun main() {
     }
     val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val training = trainingEndpoints(app, background)
+    // 서버가 꺼지면서 끝나지 못한 실행 정리 (M22)
+    kotlinx.coroutines.runBlocking { app.runRepository.abandonRunning() }
     // 주간 자가 개선 (M16): 알림·승인 버튼·설정이 바뀌면 다시 시작. 봇은 아래에서 띄운다
     var notifiers: List<dev.vesta.channels.ChannelNotifier> = emptyList()
     val evolution = EvolutionDesk(
@@ -139,6 +141,7 @@ fun main() {
         users = app.users,
         evolution = evolution,
         userSettings = app.userSettings,
+        studio = StudioEndpoints(app.customAgentRepository, app.runRepository, app.journal.updates, { app.toolCatalog(it) }),
         voices = { app.voices },
         messengers = MessengerEndpoints(
             app.channelBindings, enabled = { notifiers.map { it.channel }.toSet() },

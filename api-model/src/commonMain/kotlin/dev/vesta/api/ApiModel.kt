@@ -172,6 +172,8 @@ data class RoutingDto(
     val confidence: Double,
     val collections: List<String>,
     val latencyMs: Long,
+    /** 사용자 정의 에이전트 이름 (M22) */
+    val customAgent: String? = null,
 )
 
 /** SSE로 흘려보내는 대화 이벤트 (AgentEvent의 직렬화 형태) */
@@ -307,3 +309,50 @@ data class SettingsDto(
     val voice: String? = null,
     val voices: List<String> = emptyList(),
 )
+
+// --- 에이전트 스튜디오 (M22) ---
+
+/** 사용자 정의 에이전트. [model]: GENERAL / CODE, [tools]: 쓸 도구 이름 */
+@Serializable
+data class CustomAgentDto(
+    val name: String,
+    val description: String,
+    val instructions: String,
+    val model: String = "GENERAL",
+    val tools: List<String> = emptyList(),
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class ToolInfoDto(val name: String, val risk: String, val description: String)
+
+/** 기본 에이전트 소개 */
+@Serializable
+data class BuiltinAgentDto(val name: String, val label: String, val description: String)
+
+/** 에이전트 탭 (`GET /api/agents`) */
+@Serializable
+data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<CustomAgentDto>, val tools: List<ToolInfoDto>)
+
+@Serializable
+data class RunDto(
+    val id: Long,
+    val agent: String,
+    val customAgent: String?,
+    val input: String,
+    /** RUNNING / DONE / FAILED / CANCELLED */
+    val status: String,
+    val startedAt: String,
+    val finishedAt: String?,
+    val sessionId: String?,
+)
+
+@Serializable
+data class RunEventDto(val run: Long, val seq: Int, val at: String, val kind: String, val title: String, val detail: String?)
+
+@Serializable
+data class RunDetailDto(val run: RunDto, val events: List<RunEventDto>, val answer: String?)
+
+/** 실시간 소식 (`GET /api/runs/stream`, SSE): 새 단계([event]) 또는 실행 상태([run]) */
+@Serializable
+data class RunUpdateDto(val run: RunDto? = null, val event: RunEventDto? = null)

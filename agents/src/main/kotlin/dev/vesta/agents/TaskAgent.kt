@@ -60,10 +60,12 @@ class TaskAgent(
     private val judge: dev.vesta.decision.Judge? = null,
     /** Mac 주인이 아닌 사용자의 셸 승인을 주인에게 넘긴다 (M20). 없으면 주인이 아닌 사람의 셸은 거부 */
     private val escalation: dev.vesta.core.tools.ApprovalEscalation? = null,
+    /** 쓸 모델 (사용자 정의 에이전트는 코드 모델도 고를 수 있다, M22) */
+    private val modelRole: ModelRole = ModelRole.GENERAL,
 ) : Agent {
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
-        val spec = models.acquire(ModelRole.GENERAL)
+        val spec = models.acquire(modelRole)
         val available = toolsFor(request).associateBy { it.spec.name }
         // 셸을 주지 않은 사용자(역할 정책, U-06)에게는 셸 규칙 대신 "쓸 수 없다"를 알려 준다
         val effectiveRules = if (available.values.any { it is ShellTool } || "run_shell" !in rules) rules

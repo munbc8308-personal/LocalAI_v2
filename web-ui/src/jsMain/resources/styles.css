@@ -184,3 +184,5 @@ a { color: var(--accent); }
 /* 사용자 관리·비밀번호 (M15) */
 .stack { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .stack select, .run select { background: var(--panel); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.run.selected { background: var(--panel); border-radius: 6px; }
+.run { cursor: pointer; }

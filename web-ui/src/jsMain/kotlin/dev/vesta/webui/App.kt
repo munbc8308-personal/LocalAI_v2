@@ -54,7 +54,7 @@ import org.jetbrains.compose.web.dom.Ul
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLTextAreaElement
 
-enum class Tab(val label: String) { CHAT("대화"), GALLERY("갤러리"), COLLECTIONS("컬렉션"), DASHBOARD("상태") }
+enum class Tab(val label: String) { CHAT("대화"), AGENTS("에이전트"), GALLERY("갤러리"), COLLECTIONS("컬렉션"), DASHBOARD("상태") }
 
 @Composable
 fun App() {
@@ -142,6 +142,7 @@ private fun Main(me: MeDto, onLogout: () -> Unit) {
         }
         when (tab) {
             Tab.CHAT -> ChatView(chat, drawer, { drawer = it }, draft, { draft = it })
+            Tab.AGENTS -> StudioView()
             Tab.GALLERY -> GalleryView()
             Tab.COLLECTIONS -> CollectionsView { name -> draft = "@$name "; tab = Tab.CHAT }
             Tab.DASHBOARD -> DashboardView(me)

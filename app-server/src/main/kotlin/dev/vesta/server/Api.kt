@@ -79,6 +79,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -124,6 +125,8 @@ class ServerDeps(
     val evolution: EvolutionDesk? = null,
     /** 메신저 계정 연결 (M20): 본인 것은 누구나, 다른 사용자 것은 OWNER만 */
     val messengers: MessengerEndpoints? = null,
+    /** 에이전트 스튜디오 (M22) */
+    val studio: StudioEndpoints? = null,
     /** 사용자별 설정 (U-07, M20)과 고를 수 있는 목소리 */
     val userSettings: dev.vesta.core.identity.UserSettingsRepository? = null,
     val voices: () -> List<String> = { emptyList() },
@@ -434,6 +437,66 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 본인 비밀번호 바꾸기 (U-02). 지금 비밀번호 확인은 로그인과 같은 잠금을 쓴다. 바꾸면 모든 기기 로그아웃
+            // 에이전트 스튜디오 (M22): 에이전트 목록·만들기·고치기·지우기, 실행 목록·상세·실시간. 본인 것만 (대화처럼)
+            route("/agents") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val studio = deps.studio ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.AgentsDto.serializer(), studio.agents(user)))
+                }
+                put("/{name}") {
+                    val user = call.principal(deps) ?: return@put
+                    val studio = deps.studio ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.CustomAgentDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    studio.save(user, dto.copy(name = call.parameters["name"].orEmpty()))?.let { error ->
+                        return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+                delete("/{name}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val studio = deps.studio ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val removed = studio.agentRepo.delete(user.userId, call.parameters["name"].orEmpty())
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
+            route("/runs") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val studio = deps.studio ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 50
+                    val runs = studio.runRepo.list(user.userId, limit).map { it.dto() }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(dev.vesta.api.RunDto.serializer()), runs))
+                }
+                get("/stream") {
+                    val user = call.principal(deps) ?: return@get
+                    val studio = deps.studio ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    call.sse { emit ->
+                        kotlinx.coroutines.coroutineScope {
+                            // 프록시가 끊지 않게 20초마다 빈 소식
+                            val ping = launch { while (true) { kotlinx.coroutines.delay(20_000); emit("{}") } }
+                            try {
+                                studio.updates.collect { update ->
+                                    if (update.user != user.userId) return@collect
+                                    val dto = dev.vesta.api.RunUpdateDto(update.finished?.dto(), update.event?.dto())
+                                    emit(ApiJson.encodeToString(dev.vesta.api.RunUpdateDto.serializer(), dto))
+                                }
+                            } finally {
+                                ping.cancel()
+                            }
+                        }
+                    }
+                }
+                get("/{id}") {
+                    val user = call.principal(deps) ?: return@get
+                    val studio = deps.studio ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val run = call.parameters["id"]?.toLongOrNull()?.let { studio.runRepo.get(it) }?.takeIf { it.user == user.userId }
+                        ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 실행입니다"}""")
+                    val detail = dev.vesta.api.RunDetailDto(run.dto(), studio.runRepo.events(run.id).map { it.dto() }, run.answer)
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.RunDetailDto.serializer(), detail))
+                }
+            }
             // 내 설정 (U-07, M20): 호칭·말투·음성 답장·목소리
             route("/me/settings") {
                 get {
@@ -767,4 +830,53 @@ private suspend fun ApplicationCall.bearer(token: String): Boolean {
     val ok = MessageDigest.isEqual(given.toByteArray(), token.toByteArray())
     if (!ok) respondJson(HttpStatusCode.Unauthorized, """{"error":"토큰이 필요합니다 (Authorization: Bearer …)"}""")
     return ok
+}
+
+private fun dev.vesta.core.studio.AgentRun.dto() = dev.vesta.api.RunDto(id, agent, customAgent, input.take(200), status.name, startedAt.toString(), finishedAt?.toString(), session?.value)
+private fun dev.vesta.core.studio.RunEvent.dto() = dev.vesta.api.RunEventDto(run, seq, at.toString(), kind, title, detail)
+
+/** 에이전트 스튜디오 (M22, A-10·A-11): 기본·사용자 정의 에이전트, 줄 수 있는 도구, 실행 기록 */
+class StudioEndpoints(
+    val agentRepo: dev.vesta.core.studio.CustomAgentRepository,
+    val runRepo: dev.vesta.core.studio.RunRepository,
+    val updates: kotlinx.coroutines.flow.Flow<dev.vesta.app.RunUpdate>,
+    /** 이 사용자가 쓸 수 있는 도구 */
+    val toolCatalog: suspend (UserContext) -> List<dev.vesta.core.tools.Tool>,
+) {
+    suspend fun agents(user: UserContext): dev.vesta.api.AgentsDto {
+        val builtin = BUILTIN.filter { (type, _, _) -> type in dev.vesta.identity.RolePolicy.agents(user.role) }
+            .map { (type, label, description) -> dev.vesta.api.BuiltinAgentDto(type.name, label, description) }
+        val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString()) }
+        val tools = toolCatalog(user).map { dev.vesta.api.ToolInfoDto(it.spec.name, it.risk.name, it.spec.description) }
+        return dev.vesta.api.AgentsDto(builtin, custom, tools)
+    }
+
+    /** 저장. 문제가 있으면 그 이유 */
+    suspend fun save(user: UserContext, dto: dev.vesta.api.CustomAgentDto): String? {
+        val d = dev.vesta.core.studio.CustomAgentDef
+        if (!d.NAME.matches(dto.name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/agent 이름 으로 부릅니다)"
+        if (!dev.vesta.identity.RolePolicy.agents(user.role).contains(dev.vesta.core.AgentType.TASK)) return "이 계정은 사용자 정의 에이전트를 쓸 수 없습니다"
+        if (dto.description.isBlank() || dto.description.length > d.MAX_DESCRIPTION) return "역할 설명은 1~${d.MAX_DESCRIPTION}자입니다"
+        if (dto.instructions.length > d.MAX_INSTRUCTIONS) return "지침은 ${d.MAX_INSTRUCTIONS}자까지입니다"
+        val model = runCatching { dev.vesta.core.ModelRole.valueOf(dto.model) }.getOrNull()?.takeIf { it == dev.vesta.core.ModelRole.GENERAL || it == dev.vesta.core.ModelRole.CODE }
+            ?: return "모델은 GENERAL 또는 CODE입니다"
+        // 권한을 넓히지 못한다: 이 사용자가 쓸 수 있는 도구만
+        val allowed = toolCatalog(user).map { it.spec.name }.toSet()
+        val unknown = dto.tools.filter { it !in allowed }
+        if (unknown.isNotEmpty()) return "쓸 수 없는 도구: ${unknown.joinToString()}"
+        agentRepo.save(dev.vesta.core.studio.CustomAgentDef(user.userId, dto.name, dto.description.trim(), dto.instructions, model, dto.tools.distinct()))
+        return null
+    }
+
+    private companion object {
+        val BUILTIN = listOf(
+            Triple(dev.vesta.core.AgentType.CHAT, "대화", "일반 대화·설명·글쓰기·번역"),
+            Triple(dev.vesta.core.AgentType.DOCS, "문서", "등록한 문서 컬렉션에서 찾아 출처와 함께 답한다"),
+            Triple(dev.vesta.core.AgentType.WEB, "웹 리서치", "웹을 검색해 출처와 함께 답한다"),
+            Triple(dev.vesta.core.AgentType.CODE, "코드 도우미", "등록한 저장소에서 찾아 파일·줄과 함께 답하고 수정안을 낸다"),
+            Triple(dev.vesta.core.AgentType.TASK, "작업", "파일·셸 도구로 직접 처리한다 (쓰기·셸은 승인)"),
+            Triple(dev.vesta.core.AgentType.PERSONAL, "개인 비서", "Apple 앱(일정·메일·미리 알림 등, Orchard)"),
+            Triple(dev.vesta.core.AgentType.IMAGE, "이미지", "그림을 만든다 (FLUX)"),
+        )
+    }
 }

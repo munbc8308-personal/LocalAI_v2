@@ -647,7 +647,7 @@ class ChannelBot(
         private val ENGINE_COMMANDS = setOf("start", "help", "new", "cancel", "status", "voice")
         private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif")
         private val AUDIO_EXTENSIONS = setOf("ogg", "oga", "opus", "m4a", "mp3", "wav", "webm")
-        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image")
+        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "code", "task")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */
         private val CODE = Regex("^[A-Za-z0-9]{4}[- ]?[A-Za-z0-9]{4}$")

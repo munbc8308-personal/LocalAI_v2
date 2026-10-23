@@ -59,6 +59,10 @@ class DefaultConversationService(
     private val scheduler: FairScheduler? = null,
     /** 사용자별 호칭·말투 (U-07, M20) */
     private val persona: suspend (dev.vesta.core.UserId) -> String? = { null },
+    /** 사용자 정의 에이전트 (`/agent 이름 할 일`, M22). 없는 이름이면 null */
+    private val customAgents: suspend (UserContext, String) -> Agent? = { _, _ -> null },
+    /** 실행 기록·실시간 보기 (M22) */
+    private val journal: dev.vesta.core.studio.RunJournal? = null,
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -68,7 +72,34 @@ class DefaultConversationService(
         approvals?.resolve(user, requestId, decision) ?: false
 
 
-    override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
+    /** 질문마다 실행으로 기록한다 (M22). 기록이 실패해도 대화는 계속한다 */
+    override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> {
+        val journal = journal ?: return answer(user, channel, sessionId, input)
+        return flow {
+            var run: Long? = null
+            val text = StringBuilder()
+            var status = dev.vesta.core.studio.RunStatus.CANCELLED
+            var failed = false
+            try {
+                answer(user, channel, sessionId, input).collect { event ->
+                    if (event is AgentEvent.SessionReady && run == null) run = runCatching { journal.start(user.userId, event.sessionId, input.text) }.getOrNull()
+                    run?.let { id -> if (event is AgentEvent.Token) text.append(event.text) else runCatching { journal.event(id, event) } }
+                    if (event is AgentEvent.Error) failed = true
+                    if (event is AgentEvent.Done) status = dev.vesta.core.studio.RunStatus.DONE
+                    emit(event)
+                }
+                if (failed) status = dev.vesta.core.studio.RunStatus.FAILED
+                else if (status == dev.vesta.core.studio.RunStatus.CANCELLED) status = dev.vesta.core.studio.RunStatus.DONE
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) status = dev.vesta.core.studio.RunStatus.FAILED
+                throw e
+            } finally {
+                run?.let { id -> withContext(NonCancellable) { runCatching { journal.finish(id, status, text.toString().ifBlank { null }) } } }
+            }
+        }
+    }
+
+    private fun answer(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }
         val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else "" }))
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
@@ -81,7 +112,8 @@ class DefaultConversationService(
         // 이미지는 가장 최근에 이미지를 붙인 질문 것만 다시 보낸다 (후속 질문 "그럼 두 번째 줄은?"용, 문맥·메모리 절약)
         val lastWithImages = stored.lastOrNull { it.role == ChatRole.USER && it.attachments.isNotEmpty() }?.id
         val history = stored.map { message ->
-            val text = ExplicitRoute.parse(message.content)?.question?.ifBlank { null } ?: message.content
+            val text = dev.vesta.core.studio.CustomCall.parse(message.content)?.task?.ifBlank { null }
+                ?: ExplicitRoute.parse(message.content)?.question?.ifBlank { null } ?: message.content
             val images = when {
                 message.id != lastWithImages -> emptyList()
                 message.id == current.id && input.images.isNotEmpty() -> input.images
@@ -94,7 +126,17 @@ class DefaultConversationService(
         val allowed = RolePolicy.agents(user.role)
         val available = availability(user).filter { it in agents && it in allowed }.toSet()
         // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
-        val routed = if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
+        // 사용자 정의 에이전트 (`/agent 이름 할 일`, M22): 라우터를 거치지 않고 그 에이전트로. 작업 에이전트 권한 안에서만
+        val call = dev.vesta.core.studio.CustomCall.parse(input.text)
+        val custom = call?.let { customAgents(user, it.name) }
+        if (call != null && custom == null) {
+            val notice = "'${call.name}' 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
+            messages.append(session.id, NewMessage(role = ChatRole.ASSISTANT, content = notice, agent = AgentType.CHAT, model = POLICY_MODEL))
+                .let { emit(AgentEvent.Token(notice)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
+            return@flow
+        }
+        val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name)
+            else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
@@ -115,7 +157,7 @@ class DefaultConversationService(
                 .let { emit(AgentEvent.Token(notice)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
             return@flow
         }
-        val agent = agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
+        val agent = custom?.takeIf { decision.agent == AgentType.TASK } ?: agents[decision.agent] ?: agents.getValue(AgentType.CHAT)
         val route = decision
         val answer = StringBuilder()
         // 에이전트가 만든 이미지 (답변 메시지에 붙인다)

@@ -1,0 +1,117 @@
+package dev.vesta.server
+
+import dev.vesta.app.StudioJournal
+import dev.vesta.core.AgentType
+import dev.vesta.core.RiskLevel
+import dev.vesta.core.UserContext
+import dev.vesta.core.UserId
+import dev.vesta.core.UserRole
+import dev.vesta.core.agent.AgentEvent
+import dev.vesta.core.decision.RoutingDecision
+import dev.vesta.core.decision.RoutingStage
+import dev.vesta.core.studio.RunStatus
+import dev.vesta.core.tools.Tool
+import dev.vesta.core.tools.ToolContext
+import dev.vesta.core.tools.ToolResult
+import dev.vesta.core.tools.ToolSpec
+import dev.vesta.storage.ExposedCustomAgentRepository
+import dev.vesta.storage.ExposedRunRepository
+import dev.vesta.storage.VestaDatabase
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
+import io.ktor.client.request.get
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.json.JsonObject
+import kotlin.io.path.createTempDirectory
+
+private class NamedTool(name: String, override val risk: RiskLevel) : Tool {
+    override val spec = ToolSpec(name, "$name 설명", JsonObject(emptyMap()))
+    override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("ok")
+}
+
+private object SilentConversation : dev.vesta.core.conversation.ConversationService {
+    override fun send(user: UserContext, channel: dev.vesta.core.ChannelType, sessionId: dev.vesta.core.SessionId?, input: dev.vesta.core.agent.UserInput): Flow<AgentEvent> = emptyFlow()
+    override suspend fun resolveApproval(user: UserContext, requestId: String, decision: dev.vesta.core.tools.ApprovalDecision) = false
+}
+
+private object EmptySessions : dev.vesta.core.session.SessionRepository {
+    override suspend fun create(userId: UserId, channel: dev.vesta.core.ChannelType, title: String?) = error("x")
+    override suspend fun find(userId: UserId, id: dev.vesta.core.SessionId): dev.vesta.core.session.Session? = null
+    override suspend fun listRecent(userId: UserId, limit: Int) = emptyList<dev.vesta.core.session.Session>()
+    override suspend fun updateTitle(userId: UserId, id: dev.vesta.core.SessionId, title: String) = Unit
+}
+
+private object EmptyMessages : dev.vesta.core.session.MessageRepository {
+    override suspend fun append(sessionId: dev.vesta.core.SessionId, message: dev.vesta.core.session.NewMessage) = error("x")
+    override suspend fun list(sessionId: dev.vesta.core.SessionId) = emptyList<dev.vesta.core.session.StoredMessage>()
+}
+
+class StudioTest : FunSpec({
+    test("실행 기록 저널: 단계는 사람이 읽는 말로, 답 글자는 끝에 한 번, 소식은 주인 이름표를 달고 흐른다") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val runs = ExposedRunRepository(db.db)
+        val journal = StudioJournal(runs)
+        val seen = mutableListOf<dev.vesta.app.RunUpdate>()
+        kotlinx.coroutines.coroutineScope {
+            val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { journal.updates.collect { seen += it } }
+            val id = journal.start(owner, null, "/agent reviewer 봐 줘")
+            journal.event(id, AgentEvent.Routed(RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = "봐 줘", customAgent = "reviewer")))
+            journal.event(id, AgentEvent.Token("무시"))
+            journal.event(id, AgentEvent.ToolStarted("c1", "read_file", RiskLevel.READ, "a.kt"))
+            journal.event(id, AgentEvent.ToolFinished("c1", "read_file", true, "120줄"))
+            journal.finish(id, RunStatus.DONE, "문제 없음")
+            kotlinx.coroutines.yield()
+            job.cancel()
+            runs.get(id)!!.let { it.agent shouldBe "TASK"; it.customAgent shouldBe "reviewer"; it.status shouldBe RunStatus.DONE }
+            runs.events(id).map { it.kind } shouldBe listOf("input", "routed", "tool_started", "tool_finished", "answer")
+            runs.events(id)[1].title shouldContain "reviewer (사용자 정의 에이전트)"
+            seen.all { it.user == owner } shouldBe true
+            seen.last().finished?.status shouldBe RunStatus.DONE
+        }
+    }
+
+    test("에이전트 탭 API: 쓸 수 있는 도구만, 이름 규칙, 실행은 자기 것만 본다") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val agents = ExposedCustomAgentRepository(db.db)
+        val runs = ExposedRunRepository(db.db)
+        val studio = StudioEndpoints(agents, runs, emptyFlow(), { listOf(NamedTool("read_file", RiskLevel.READ), NamedTool("run_shell", RiskLevel.EXEC)) })
+        val deps = ServerDeps(SilentConversation, EmptySessions, EmptyMessages, owner, token = "secret", version = "t", studio = studio)
+        application { vestaApi(deps) }
+
+        client.put("/api/agents/reviewer") { bearerAuth("secret"); setBody("""{"name":"","description":"코드 리뷰어","instructions":"짚기만","model":"CODE","tools":["read_file"]}""") }.status shouldBe HttpStatusCode.OK
+        client.put("/api/agents/bad name") { bearerAuth("secret"); setBody("""{"name":"","description":"x","instructions":"","model":"GENERAL","tools":[]}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.put("/api/agents/sneaky") { bearerAuth("secret"); setBody("""{"name":"","description":"x","instructions":"","model":"GENERAL","tools":["write_file"]}""") }.let {
+            it.status shouldBe HttpStatusCode.BadRequest
+            it.bodyAsText() shouldContain "write_file"
+        }
+        client.put("/api/agents/big") { bearerAuth("secret"); setBody("""{"name":"","description":"x","instructions":"","model":"IMAGE","tools":[]}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.get("/api/agents") { bearerAuth("secret") }.bodyAsText().let {
+            it shouldContain "\"name\":\"reviewer\""
+            it shouldContain "\"run_shell\""
+            it shouldNotContain "sneaky"
+        }
+
+        val mine = runs.start(owner.userId, null, "CHAT", null, "내 질문")
+        val mina = dev.vesta.storage.ExposedUserRepository(db.db).create("mina", UserRole.MEMBER, null).id
+        val other = runs.start(mina, null, "CHAT", null, "남의 질문")
+        client.get("/api/runs") { bearerAuth("secret") }.bodyAsText().let { it shouldContain "내 질문"; it shouldNotContain "남의 질문" }
+        client.get("/api/runs/${mine.id}") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+        client.get("/api/runs/${other.id}") { bearerAuth("secret") }.status shouldBe HttpStatusCode.NotFound
+        client.delete("/api/agents/reviewer") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+        agents.list(owner.userId) shouldBe emptyList()
+    } }
+})

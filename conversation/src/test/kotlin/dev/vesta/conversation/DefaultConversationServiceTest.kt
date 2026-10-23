@@ -71,6 +71,13 @@ private class ScriptedAgent(private val script: suspend kotlinx.coroutines.flow.
     }
 }
 
+private class RecordingJournal : dev.vesta.core.studio.RunJournal {
+    val log = mutableListOf<String>()
+    override suspend fun start(user: UserId, session: SessionId?, input: String): Long { log += "start $input"; return 1 }
+    override suspend fun event(run: Long, event: AgentEvent) { log += "event ${event::class.simpleName}" }
+    override suspend fun finish(run: Long, status: dev.vesta.core.studio.RunStatus, answer: String?) { log += "finish $status $answer" }
+}
+
 class DefaultConversationServiceTest : FunSpec({
     val user = UserContext(UserId(1), UserRole.OWNER)
 
@@ -187,6 +194,29 @@ class DefaultConversationServiceTest : FunSpec({
             it.content shouldBe "이 이미지를 설명해 줘."
             it.images.size shouldBe 1
         }
+    }
+
+    test("/agent 이름 할 일: 사용자 정의 에이전트가 맡고, 없는 이름은 안내한다. 실행 기록은 시작·단계·답·끝으로 남는다 (M22)") {
+        val chat = ScriptedAgent { error("chat이 불리면 안 됨") }
+        val reviewer = ScriptedAgent { emit(AgentEvent.Token("문제 ")); emit(AgentEvent.Token("없음")); emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
+        val journal = RecordingJournal()
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.TASK to chat),
+            customAgents = { _, name -> reviewer.takeIf { name == "reviewer" } }, journal = journal,
+        )
+        val routed = service.send(user, ChannelType.WEB, null, UserInput("/agent reviewer 이 함수 봐 줘")).toList()
+            .filterIsInstance<AgentEvent.Routed>().single().decision
+        routed.agent shouldBe AgentType.TASK
+        routed.customAgent shouldBe "reviewer"
+        reviewer.requests.single().history.last().content shouldBe "이 함수 봐 줘"
+        journal.log.first() shouldBe "start /agent reviewer 이 함수 봐 줘"
+        journal.log.last() shouldBe "finish DONE 문제 없음"
+        journal.log.any { it == "event Routed" } shouldBe true
+        journal.log.none { it == "event Token" } shouldBe true
+
+        val missing = service.send(user, ChannelType.WEB, null, UserInput("/agent nobody 해 줘")).toList()
+        missing.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "'nobody' 에이전트가 없습니다"
+        chat.requests.shouldBeEmpty()
     }
 })
 

@@ -278,3 +278,40 @@ object UserSettingsTable : org.jetbrains.exposed.v1.core.Table("user_settings") 
     val voice = varchar("voice", 80).nullable()
     override val primaryKey = PrimaryKey(userId)
 }
+
+/** 사용자 정의 에이전트 (M22, v16). tools·collections는 줄바꿈으로 나눈 목록 */
+object CustomAgents : LongIdTable("custom_agent") {
+    val owner = reference("owner_user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val name = varchar("name", 40)
+    val description = varchar("description", 400)
+    val instructions = text("instructions")
+    val model = varchar("model", 16)
+    val tools = text("tools")
+    val collections = text("collections")
+    val updatedAt = timestamp("updated_at")
+
+    init { uniqueIndex(owner, name) }
+}
+
+/** 실행 (M22, v16) */
+object AgentRuns : LongIdTable("agent_run") {
+    val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val sessionId = varchar("session_id", 36).nullable()
+    val agent = varchar("agent", 16)
+    val customAgent = varchar("custom_agent", 40).nullable()
+    val input = text("input")
+    val status = varchar("status", 16)
+    val answer = text("answer").nullable()
+    val startedAt = timestamp("started_at")
+    val finishedAt = timestamp("finished_at").nullable()
+}
+
+/** 실행의 단계 (M22, v16) */
+object RunEvents : LongIdTable("run_event") {
+    val run = reference("run_id", AgentRuns, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val seq = integer("seq")
+    val at = timestamp("at")
+    val kind = varchar("kind", 24)
+    val title = varchar("title", 300)
+    val detail = text("detail").nullable()
+}

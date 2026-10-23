@@ -41,6 +41,8 @@ data class RoutingDecision(
     val latencyMs: Long = 0,
     /** 판정은 했지만 아직 구현되지 않은 에이전트라 대신 쓴 경우 원래 판정 */
     val requested: AgentType? = null,
+    /** 사용자 정의 에이전트로 맡긴 경우 그 이름 (`/agent 이름`, M22). [agent]는 TASK */
+    val customAgent: String? = null,
 )
 
 /** 라우팅 기록 (PROJECT.md 11장 RoutingLog). 평가·보정(4.7)과 학습 데이터(L-01)에 쓴다. */
