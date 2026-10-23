@@ -449,4 +449,16 @@ class TelegramBotTest : FunSpec({
             }
         }
     }
+
+    test("백그라운드로 만든 영상은 연결된 대화방으로 글과 함께 보낸다 (M24)") {
+        runTest {
+            val h = Harness({ _, _ -> emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
+            with(h) {
+                bot.notifier.sendMedia(owner.userId, "영상을 만들었습니다: 가을 산책", ByteArray(1_000), "video/mp4", "가을 산책") shouldBe 1
+                api.messages.last().text shouldContain "영상을 만들었습니다"
+                api.videos.single().second shouldBe "AI 생성 · 가을 산책"
+                bot.notifier.sendMedia(dev.vesta.core.UserId(99), "x", ByteArray(1), "video/mp4", null) shouldBe 0
+            }
+        }
+    }
 })

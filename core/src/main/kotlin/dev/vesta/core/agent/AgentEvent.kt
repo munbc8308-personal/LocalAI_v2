@@ -51,6 +51,12 @@ sealed interface AgentEvent {
     /** 에이전트가 만든 이미지 등 (V-06). 이미 저장됐고, 채널은 [bytes]를 그대로 보낸다 */
     class Media(val asset: dev.vesta.core.media.MediaAsset, val bytes: ByteArray, val caption: String?) : AgentEvent
 
+    /**
+     * 오래 걸리는 일을 백그라운드로 넘겼다 (M24 영상 등). 채널은 기다리지 않고 답을 마친다.
+     * 끝나면 결과가 같은 대화에 답 메시지로 남고, 메신저면 그 메신저로 알린다. 웹·CLI는 `/api/jobs/{id}`로 진행을 본다
+     */
+    data class JobStarted(val id: String, val title: String) : AgentEvent
+
     /** 근거 검증 결과 (D7). [unsupported]는 근거로 확인되지 않은 문장. */
     data class Grounding(val checked: Int, val unsupported: List<String>) : AgentEvent
 

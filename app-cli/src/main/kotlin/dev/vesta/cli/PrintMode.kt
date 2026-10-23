@@ -29,6 +29,7 @@ internal object PrintMode {
         val renderer = if (console != null) StreamRenderer(out, false) else null
         val start = TimeSource.Monotonic.markNow()
         var failed = false
+        var job: AgentEvent.JobStarted? = null
         backend.use {
             backend.send(null, question, workspace).collect { event ->
                 renderer?.render(event, start.elapsedNow()) ?: when (event) {
@@ -39,6 +40,7 @@ internal object PrintMode {
                 }
                 if (event is AgentEvent.Error) failed = true
                 if (event is AgentEvent.Media) saveMedia(backend, event)?.let { err.println(mediaLine(event, it)) }
+                if (event is AgentEvent.JobStarted) job = event
                 if (event is AgentEvent.ApprovalRequested) {
                     val decision = when {
                         acceptWrites && AutoApprove.allows(event, workspace?.path) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (파일 쓰기): ${event.details.title}".let { if (console != null) dim(it) else it }) }
@@ -48,6 +50,16 @@ internal object PrintMode {
                         }
                     }
                     backend.resolveApproval(event.requestId, decision)
+                }
+            }
+            // 백그라운드로 넘긴 일(M24 영상): 한 번 묻고 끝나는 모드라 결과가 나올 때까지 기다린다
+            job?.let { started ->
+                err.println("… ${started.title} 만드는 중 (백그라운드)".let { if (console != null) dim(it) else it })
+                val result = awaitJob(backend, started.id) { err.println("· $it".let { p -> if (console != null) dim(p) else p }) }
+                if (result == null) { err.println("작업을 찾을 수 없습니다 (서버가 다시 켜졌을 수 있음)"); failed = true }
+                else {
+                    out.println(result.first)
+                    result.second?.let { err.println("🎬 영상: $it") }
                 }
             }
         }

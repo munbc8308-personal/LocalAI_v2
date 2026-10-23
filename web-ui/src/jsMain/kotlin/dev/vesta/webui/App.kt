@@ -364,6 +364,9 @@ private fun TurnView(chat: ChatController, turn: Turn) {
         }
         turn.approvals.forEach { ApprovalCard(chat, it) }
         // 만든 이미지: 누르면 원본을 새 탭에서
+        turn.job?.takeIf { it.status == "QUEUED" || it.status == "RUNNING" }?.let { job ->
+            Div({ classes("muted", "pulse", "small") }) { Text("🎬 ${job.title} 만드는 중 · ${job.progress ?: if (job.status == "QUEUED") "차례를 기다리는 중" else "시작"} (다른 것을 물어봐도 됩니다)") }
+        }
         if (turn.generated.isNotEmpty()) Div({ classes("generated") }) {
             turn.generated.forEach { item ->
                 if (item.video) VideoPlayer(item.src)

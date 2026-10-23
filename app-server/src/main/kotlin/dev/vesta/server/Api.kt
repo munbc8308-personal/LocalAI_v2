@@ -126,6 +126,8 @@ class ServerDeps(
     val users: dev.vesta.identity.UserService? = null,
     /** 주간 자가 개선 (M16). OWNER만 */
     val evolution: EvolutionDesk? = null,
+    /** 백그라운드 작업 (M24 영상) */
+    val jobs: dev.vesta.core.media.BackgroundJobs? = null,
     /** 메신저 계정 연결 (M20): 본인 것은 누구나, 다른 사용자 것은 OWNER만 */
     val messengers: MessengerEndpoints? = null,
     /** 에이전트 스튜디오 (M22) */
@@ -331,6 +333,14 @@ fun Application.vestaApi(deps: ServerDeps) {
                 } catch (e: MediaException) {
                     call.respondJson(HttpStatusCode.UnprocessableEntity, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
                 }
+            }
+            // 백그라운드 작업 진행 (M24): 본인 것만
+            get("/jobs/{id}") {
+                val user = call.principal(deps) ?: return@get
+                val job = deps.jobs?.get(user.userId, call.parameters["id"].orEmpty())
+                    ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.JobDto.serializer(),
+                    dev.vesta.api.JobDto(job.id, job.title, job.status.name, job.progress, job.mediaId, job.mime, job.text)))
             }
             // 갤러리: 만든 이미지 목록 (V-08)
             get("/media") {

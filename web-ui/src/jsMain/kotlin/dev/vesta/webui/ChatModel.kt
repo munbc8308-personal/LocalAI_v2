@@ -10,6 +10,7 @@ import dev.vesta.api.ChatRequestDto
 import dev.vesta.api.EventDto
 import dev.vesta.api.EvidenceDto
 import dev.vesta.api.FeedbackDto
+import dev.vesta.api.JobDto
 import dev.vesta.api.MessageDto
 import dev.vesta.api.RoutingDto
 import dev.vesta.api.SessionDto
@@ -38,6 +39,8 @@ class Turn(val question: String, val images: List<String> = emptyList()) {
     var interrupted by mutableStateOf(false)
     /** 이 답변에서 만든 이미지 주소 (/api/media/…) */
     val generated = mutableStateListOf<Generated>()
+    /** 백그라운드로 넘긴 작업의 지금 상태 (M24 영상). 끝나면 결과 글·영상을 이 답 아래에 붙인다 */
+    var job by mutableStateOf<JobDto?>(null)
     /** 저장된 답변 ID와 남긴 피드백 (C-09) */
     var messageId by mutableStateOf<Long?>(null)
     var rating by mutableStateOf(0)
@@ -161,6 +164,7 @@ class ChatController(private val scope: CoroutineScope) {
             is EventDto.Approval -> turn.approvals += ApprovalView(event)
             is EventDto.Grounding -> turn.grounding = event
             is EventDto.Media -> turn.generated += Generated("/api/media/${event.id}", event.mime.startsWith("video/"))
+            is EventDto.Job -> follow(turn, event)
             is EventDto.Saved -> turn.messageId = event.messageId
             is EventDto.Token -> {
                 turn.thinking = false
@@ -172,11 +176,39 @@ class ChatController(private val scope: CoroutineScope) {
         }
     }
 
+    /** 백그라운드 작업을 3초마다 본다. 끝나면 결과를 답 아래에 붙이고 그만 본다 (화면을 떠나도 결과는 대화에 남는다) */
+    private fun follow(turn: Turn, event: EventDto.Job) {
+        turn.job = JobDto(event.id, event.title, "QUEUED")
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(3_000)
+                val state = runCatching { Http.get("/api/jobs/${event.id}", JobDto.serializer()) }.getOrElse {
+                    // 서버가 다시 켜져 작업을 잃었으면(404) 그만 본다
+                    if ((it as? HttpError)?.status == 404) { turn.job = turn.job?.copy(status = "FAILED", text = "작업을 찾을 수 없습니다 (서버가 다시 켜졌을 수 있음).") ; break }
+                    continue
+                }
+                turn.job = state
+                if (state.status == "DONE" || state.status == "FAILED") {
+                    state.mediaId?.let { turn.generated += Generated("/api/media/$it", state.mime == "video/mp4") }
+                    state.text?.let { turn.answer += "\n\n---\n\n$it" }
+                    break
+                }
+            }
+        }
+    }
+
     private fun history(messages: List<MessageDto>): List<Turn> {
         val out = mutableListOf<Turn>()
         for (m in messages) when (m.role) {
             "USER" -> out += Turn(m.content, m.attachments.filter { it.mime.startsWith("image/") }.map { "/api/media/${it.id}" })
             "ASSISTANT" -> {
+                // 백그라운드 작업 결과(같은 담당의 두 번째 답)는 앞 답 아래에 붙인다 (M24)
+                val previous = out.lastOrNull()
+                if (previous != null && previous.answer.isNotEmpty() && m.agent == "VIDEO" && previous.agent == "VIDEO" && previous.generated.isEmpty()) {
+                    previous.answer += "\n\n---\n\n" + m.content
+                    previous.generated.addAll(m.attachments.filter { it.mime == "video/mp4" || it.mime.startsWith("image/") }.map { Generated("/api/media/${it.id}", it.mime == "video/mp4") })
+                    continue
+                }
                 val turn = out.lastOrNull()?.takeIf { it.answer.isEmpty() } ?: Turn("").also { out += it }
                 turn.answer = m.content
                 turn.agent = m.agent

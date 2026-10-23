@@ -85,6 +85,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 메신저 계정 연결 (M10) */
     val channelBindings = dev.vesta.storage.ExposedChannelBindingStore(database.db)
     val messages = ExposedMessageRepository(database.db)
+    /** 백그라운드 작업 (M24 영상): 이 컨테이너가 닫히면 함께 멈춘다 */
+    private val jobScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    val jobs = JobDesk(messages, jobScope)
     /** 답변 피드백·학습 기록·모델 버전 (M14) */
     val feedback = dev.vesta.storage.ExposedFeedbackRepository(database.db)
     /** 학습 재료 (M25 L-25) */
@@ -353,6 +356,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                         clips = clipGenerator,
                         maxClips = config.media.clips?.maxPerVideo ?: 0,
                         reserveClips = { config.media.clips?.let { modelManager.reserve(it.memoryGigabytes * 1024L * 1024 * 1024) } },
+                        jobs = jobs,
                     )
                 }
             } ?: ChatAgent(inference, modelManager)),
@@ -510,6 +514,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     suspend fun toolCatalog(user: UserContext): List<dev.vesta.core.tools.Tool> = toolsFor(user)
 
     override fun close() {
+        jobScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         http.close()
         webHttp.close()
         orchard?.close()

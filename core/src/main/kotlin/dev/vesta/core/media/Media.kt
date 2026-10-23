@@ -161,3 +161,37 @@ interface VideoComposer {
 
 /** 미디어 처리 중 사용자에게 보여 줄 실패 (짧은 한국어 문장) */
 class MediaException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** 백그라운드 작업 상태 (M24) */
+enum class JobStatus { QUEUED, RUNNING, DONE, FAILED }
+
+/** 백그라운드 작업 하나의 지금 상태. [mediaId]는 만든 결과물(영상), [text]는 끝난 뒤 남길 답 */
+data class JobState(
+    val id: String,
+    val userId: UserId,
+    val sessionId: String,
+    val title: String,
+    val status: JobStatus,
+    val progress: String? = null,
+    val mediaId: String? = null,
+    val mime: String? = null,
+    val text: String? = null,
+)
+
+/** 작업이 만든 것: 결과물(없을 수 있음)과 답 */
+class JobResult(val media: MediaAsset?, val bytes: ByteArray?, val text: String)
+
+/**
+ * 오래 걸리는 일을 백그라운드로 (M24 영상 만들기). 무거운 일이라 한 번에 하나씩 돌린다.
+ * 끝나면 결과를 그 대화에 답 메시지로 남기고(결과물 첨부), 요청한 메신저로 알린다
+ */
+interface BackgroundJobs {
+    fun submit(
+        user: dev.vesta.core.UserContext,
+        session: dev.vesta.core.session.Session,
+        title: String,
+        agent: dev.vesta.core.AgentType,
+        work: suspend (progress: suspend (String) -> Unit) -> JobResult,
+    ): JobState
+    fun get(userId: UserId, id: String): JobState?
+}

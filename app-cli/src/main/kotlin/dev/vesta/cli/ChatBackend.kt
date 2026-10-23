@@ -57,6 +57,8 @@ interface ChatBackend : AutoCloseable {
     suspend fun messages(id: SessionId): List<StoredMessage>
     /** 만든 이미지 등의 내용 (M13) */
     suspend fun media(id: String): ByteArray?
+    /** 백그라운드 작업의 지금 상태 (M24 영상). 없으면 null */
+    suspend fun job(id: String): dev.vesta.api.JobDto?
 }
 
 /** 같은 프로세스 안에서 바로 실행 */
@@ -74,6 +76,7 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
     override suspend fun find(id: SessionId) = app.sessions.find(app.owner.userId, id)
     override suspend fun messages(id: SessionId) = app.messages.list(id)
     override suspend fun media(id: String) = app.mediaStore.load(app.owner.userId, id)?.second
+    override suspend fun job(id: String) = app.jobs.get(app.owner.userId, id)?.let { dev.vesta.api.JobDto(it.id, it.title, it.status.name, it.progress, it.mediaId, it.mime, it.text) }
     override fun close() = app.close()
 }
 
@@ -145,6 +148,11 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
     override suspend fun media(id: String): ByteArray? {
         val response = http.get("$baseUrl/api/media/$id") { bearerAuth(token) }
         return if (response.status.isSuccess()) response.readRawBytes() else null
+    }
+
+    override suspend fun job(id: String): dev.vesta.api.JobDto? {
+        val response = http.get("$baseUrl/api/jobs/$id") { bearerAuth(token) }
+        return if (response.status.isSuccess()) ApiJson.decodeFromString(dev.vesta.api.JobDto.serializer(), response.bodyAsText()) else null
     }
 
     override fun close() = http.close()

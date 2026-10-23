@@ -191,4 +191,31 @@ class VideoAgentTest : FunSpec({
         reservedClips shouldBe 1
         composer.scenes.map { it.clip != null } shouldBe listOf(true, false, false)
     }
+
+    test("백그라운드 작업이 있으면 계획만 하고 넘긴 뒤 답을 바로 마친다. 작업이 장면을 만들고 결과를 돌려준다") {
+        val llm = OneReply("""{"title": "가을 산책", "aspect": "landscape", "scenes": [
+            {"narration": "단풍이 물든 길.", "image": "autumn path", "motion": "zoom_in"}]}""")
+        val generator = FakeGenerator()
+        val composer = FakeComposer()
+        var captured: (suspend (suspend (String) -> Unit) -> dev.vesta.core.media.JobResult)? = null
+        val jobs = object : dev.vesta.core.media.BackgroundJobs {
+            override fun submit(user: UserContext, session: dev.vesta.core.session.Session, title: String, agent: dev.vesta.core.AgentType,
+                                work: suspend (suspend (String) -> Unit) -> dev.vesta.core.media.JobResult): dev.vesta.core.media.JobState {
+                captured = work
+                return dev.vesta.core.media.JobState("j1", user.userId, session.id.value, title, dev.vesta.core.media.JobStatus.QUEUED)
+            }
+            override fun get(userId: UserId, id: String) = null
+        }
+        val events = VideoAgent(llm, models, generator, composer, MemoryMedia(), jobs = jobs).handle(request("가을 산책 영상 만들어 줘")).toList()
+        generator.calls.size shouldBe 0
+        events.filterIsInstance<AgentEvent.JobStarted>().single().let { it.id shouldBe "j1"; it.title shouldBe "가을 산책" }
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "끝나면 이 대화에 영상을 올리고 알려 드릴게요"
+        events.filterIsInstance<AgentEvent.Media>().size shouldBe 0
+        val progress = mutableListOf<String>()
+        val result = captured!!.invoke { progress += it }
+        generator.calls.size shouldBe 1
+        progress.first() shouldBe "장면 1/1 그리는 중"
+        result.media!!.mime shouldBe "video/mp4"
+        result.text shouldContain "영상을 만들었습니다"
+    }
 })

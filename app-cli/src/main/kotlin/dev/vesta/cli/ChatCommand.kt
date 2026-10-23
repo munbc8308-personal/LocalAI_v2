@@ -31,6 +31,9 @@ import kotlin.time.TimeSource
 class ChatCommand : CliktCommand(name = "chat") {
     override fun help(context: Context) = "대화를 시작한다. 생성 중 Ctrl+C로 중단, /help로 명령 보기"
 
+    /** 백그라운드 작업이 끝나기를 기다리는 일 (대화를 막지 않는다, M24) */
+    private val watchers = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
     private val sessionOption by option("--session", "-s", help = "이어서 할 세션 ID")
     private val continueLast by option("--continue", "-c", help = "가장 최근 세션 이어하기").flag()
     private val model by option("--model", "-m", help = "이번 실행에서 쓸 메인 모델 (설정 대신)")
@@ -183,6 +186,14 @@ class ChatCommand : CliktCommand(name = "chat") {
                     }
                     renderer.render(event, start.elapsedNow())
                     if (event is AgentEvent.Media) saveMedia(backend, event)?.let { out.println(mediaLine(event, it)); out.flush() }
+                    // 백그라운드로 넘긴 일(M24 영상): 입력을 막지 않고, 끝나면 입력 줄 위에 결과를 띄우고 저장한다
+                    if (event is AgentEvent.JobStarted) watchers.launch {
+                        val result = awaitJob(backend, event.id) {}
+                        reader.printAbove(
+                            if (result == null) dim("${event.title}: 작업을 찾을 수 없습니다 (서버가 다시 켜졌을 수 있음)")
+                            else "\n" + result.first + (result.second?.let { "\n🎬 영상: $it" } ?: ""),
+                        )
+                    }
                     if (event is AgentEvent.ApprovalRequested) {
                         val decision = if (autoWrites && AutoApprove.allows(event, workspace?.path)) {
                             out.println(dim("✓ 자동 승인 (파일 쓰기): ${event.details.title}"))
@@ -266,3 +277,23 @@ internal suspend fun saveMedia(backend: ChatBackend, event: AgentEvent.Media): j
 }.getOrNull()
 
 internal fun mediaLine(event: AgentEvent.Media, path: java.nio.file.Path) = if (event.asset.mime == "video/mp4") "🎬 영상: $path" else "🖼 이미지: $path"
+
+/**
+ * 백그라운드 작업(M24 영상)이 끝날 때까지 2초마다 본다. 진행이 바뀌면 [onProgress], 끝나면 결과 글을 돌려주고 결과물을 저장한다(저장한 경로도).
+ * 작업을 찾을 수 없으면(서버가 다시 켜짐 등) null
+ */
+internal suspend fun awaitJob(backend: ChatBackend, id: String, onProgress: (String) -> Unit): Pair<String, java.nio.file.Path?>? {
+    var last: String? = null
+    while (true) {
+        kotlinx.coroutines.delay(2_000)
+        val job = backend.job(id) ?: return null
+        job.progress?.takeIf { it != last }?.let { last = it; onProgress(it) }
+        if (job.status == "DONE" || job.status == "FAILED") {
+            val saved = job.mediaId?.let { mediaId ->
+                val asset = dev.vesta.core.media.MediaAsset(mediaId, dev.vesta.core.UserId(0), dev.vesta.core.media.MediaKind.VIDEO, job.mime ?: "video/mp4", 0)
+                saveMedia(backend, AgentEvent.Media(asset, ByteArray(0), job.title))
+            }
+            return job.text.orEmpty() to saved
+        }
+    }
+}

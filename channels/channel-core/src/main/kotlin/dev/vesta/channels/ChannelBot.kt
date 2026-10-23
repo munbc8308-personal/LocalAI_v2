@@ -308,6 +308,8 @@ class ChannelBot(
                     is AgentEvent.Status -> reply.status(event.text)
                     is AgentEvent.Reasoning -> Unit
                     is AgentEvent.Media -> images += event
+                    // 끝나면 서버가 이 메신저로 결과를 보낸다 (ChannelNotifier.sendMedia)
+                    is AgentEvent.JobStarted -> Unit
                     is AgentEvent.Saved -> saved = event.messageId
                     is AgentEvent.ToolStarted -> reply.status("${event.tool} · ${event.summary}")
                     // 시간 초과 등으로 끝난 승인 요청의 버튼을 닫는다
@@ -469,6 +471,19 @@ class ChannelBot(
                 val id = if (buttons.isEmpty()) surface.sendText(chat, body) else surface.sendButtons(chat, body, listOf(buttons))
                 if (buttons.isNotEmpty()) notices["$chat|$key"] = id to body
             }.onFailure { log.warn { "${surface.name} 알림 실패: ${it.message}" } }.isSuccess
+        }
+    }
+
+    override suspend fun sendMedia(user: UserId, text: String, bytes: ByteArray, mime: String, caption: String?): Int {
+        val chats = bindings.list(channel).filter { it.user.userId == user }.map { it.externalChatId }.distinct()
+        val video = mime.startsWith("video/")
+        return chats.count { chat ->
+            runCatching {
+                send(chat, text)
+                val sent = if (video) surface.sendVideo(chat, bytes, caption) else surface.sendImage(chat, bytes, caption)
+                if (!sent) send(chat, if (video) "영상(${"%.1f".format(bytes.size / 1_048_576.0)}MB)을 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다."
+                    else "이미지를 이 메신저로 보내지 못했습니다. 웹 UI 갤러리에서 볼 수 있습니다.")
+            }.onFailure { log.warn { "${surface.name} 결과 보내기 실패: ${it.message}" } }.isSuccess
         }
     }
 

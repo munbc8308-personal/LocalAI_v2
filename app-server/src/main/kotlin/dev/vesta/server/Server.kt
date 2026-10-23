@@ -98,10 +98,11 @@ fun main() {
         notifiers = { notifiers },
         busy = {
             val (running, waiting) = app.scheduler.load()
-            running > 0 || waiting > 0 || app.trainingRuns.list(1).firstOrNull()?.status == dev.vesta.core.training.TrainingStatus.RUNNING
+            running > 0 || waiting > 0 || app.jobs.busy || app.trainingRuns.list(1).firstOrNull()?.status == dev.vesta.core.training.TrainingStatus.RUNNING
         },
     )
     val deps = ServerDeps(
+        jobs = app.jobs,
         conversation = app.conversation,
         sessions = app.sessions,
         messages = app.messages,
@@ -157,6 +158,23 @@ fun main() {
     val ownerApprovals = OwnerApprovals(app.owner.userId, { notifiers }, { app.userRepository.get(it)?.name })
     app.escalation.target = ownerApprovals
     notifiers = startChannels(app, channels, dev.vesta.channels.ChannelActionSet(listOf(evolution, ownerApprovals))) { dashboard().statusText() }
+    // 백그라운드 작업이 끝나면 (M24 영상): 메신저에서 요청했으면 그 메신저로 보내고, 스튜디오 타임라인에 남긴다
+    app.jobs.onFinished { job, session, result ->
+        val bytes = result?.bytes
+        val media = result?.media
+        val text = job.text.orEmpty()
+        if (session.originChannel in MESSENGERS) {
+            val targets = notifiers.filter { it.channel == session.originChannel }
+            val sent = targets.sumOf { n ->
+                if (media != null && bytes != null) n.sendMedia(job.userId, text, bytes, media.mime, job.title)
+                else n.notify(job.userId, "job:${job.id}", text, emptyList())
+            }
+            if (sent == 0) log.warn { "작업 결과를 ${session.originChannel}로 보내지 못함 (연결된 대화방 없음): ${job.title}" }
+        }
+        app.journal.background(job.userId, "VIDEO", "백그라운드: ${job.title}", listOf(
+            Triple(if (media != null) "media" else "status", if (media != null) "영상 만듦" else "만들지 못함", job.title),
+        ))
+    }
     evolution.start(background)
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
@@ -208,11 +226,11 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
         samples = app.trainingSamples,
         dataUsers = { app.users.trainingUsers() },
         idle = {
-            !app.journal.busy && !service.running &&
+            !app.journal.busy && !service.running && !app.jobs.busy &&
                 java.time.Duration.between(app.journal.lastActivity, java.time.Instant.now()) > java.time.Duration.ofMinutes(2) &&
                 app.evolutionRepository.runs(1).firstOrNull()?.status != dev.vesta.core.evolution.EvolutionStatus.RUNNING
         },
-        busy = { app.journal.busy || service.running },
+        busy = { app.journal.busy || service.running || app.jobs.busy },
         // 검색 재료 (L-23): 조각 → 메인 모델 질문 → D6 검증. 결정 모델이 꺼져 있으면 검증할 수 없어 만들지 않는다
         miner = app.judge?.let { judge ->
             dev.vesta.training.PairMiner(app.passages, app.trainingSamples, ask = { app.questionWriter.ask(it) }, sufficient = { q, text -> judge.sufficient(q, text) })
@@ -294,3 +312,6 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
         },
     )
 }
+
+/** 백그라운드 결과를 그 메신저로 돌려보내는 채널 */
+private val MESSENGERS = setOf(dev.vesta.core.ChannelType.TELEGRAM, dev.vesta.core.ChannelType.DISCORD, dev.vesta.core.ChannelType.SLACK)

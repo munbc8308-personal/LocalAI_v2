@@ -11,6 +11,8 @@ import dev.vesta.core.inference.ChatRequest
 import dev.vesta.core.inference.ChatRole
 import dev.vesta.core.inference.InferenceClient
 import dev.vesta.core.media.AudioFormat
+import dev.vesta.core.media.BackgroundJobs
+import dev.vesta.core.media.JobResult
 import dev.vesta.core.media.ClipGenerator
 import dev.vesta.core.media.ProjectScene
 import dev.vesta.core.media.VideoProject
@@ -65,6 +67,8 @@ class VideoAgent(
     private val maxClips: Int = 2,
     /** 클립 모델 자리 비우기 */
     private val reserveClips: suspend () -> Unit = {},
+    /** 있으면 만들기를 백그라운드로 넘기고 답을 바로 마친다 (끝나면 같은 대화에 결과를 남기고 알린다) */
+    private val jobs: BackgroundJobs? = null,
 ) : Agent {
     override val type = AgentType.VIDEO
     private val json = Json { ignoreUnknownKeys = true }
@@ -89,6 +93,45 @@ class VideoAgent(
             emit(AgentEvent.Done(type, generator.model, null))
             return@flow
         }
+        if (jobs != null) {
+            // 몇 분 걸리므로 백그라운드로: 답은 바로 마치고, 끝나면 같은 대화에 결과를 남기고 알린다
+            val job = jobs.submit(request.user, request.session, plan.title, type) { progress -> produce(request, plan, previous, progress) }
+            emit(AgentEvent.JobStarted(job.id, plan.title))
+            emit(AgentEvent.Token(started(plan, previous, job.progress)))
+            emit(AgentEvent.Done(type, generator.model, null))
+            return@flow
+        }
+        try {
+            val result = produce(request, plan, previous) { emit(AgentEvent.Status(it)) }
+            val asset = result.media
+            val bytes = result.bytes
+            if (asset != null && bytes != null) emit(AgentEvent.Media(asset, bytes, plan.title))
+            emit(AgentEvent.Token(result.text))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: MediaException) {
+            emit(AgentEvent.Token(e.message ?: "영상을 만들지 못했습니다."))
+        }
+        emit(AgentEvent.Done(type, generator.model, null))
+    }
+
+    /** 백그라운드로 넘길 때의 답: 무엇을 얼마나 만드는지와 기다리는 동안 할 수 있는 것 */
+    private fun started(plan: Plan, previous: VideoProject?, queue: String?) = buildString {
+        val clipsPlanned = if (clips == null) 0 else plan.scenes.count { it.animate }.coerceAtMost(maxClips)
+        val minutes = (plan.scenes.size * 10 + clipsPlanned * 110 + 30) / 60.0
+        append(if (previous != null && plan.edit) "영상을 고치기 시작했습니다" else "영상을 만들기 시작했습니다")
+        append(": **${plan.title}** (장면 ${plan.scenes.size}개")
+        if (clipsPlanned > 0) append(", 움직이는 장면 ${clipsPlanned}개")
+        append(", 약 ${"%.0f".format(maxOf(1.0, minutes))}분)\n")
+        queue?.let { append("$it.\n") }
+        append("끝나면 이 대화에 영상을 올리고 알려 드릴게요. 그동안 다른 것을 물어보셔도 됩니다.")
+    }
+
+    /**
+     * 장면마다 그림·내레이션(·클립)을 만들고 합쳐 갤러리에 남긴다. 고치기면 앞 영상의 같은 재료를 다시 쓴다.
+     * 실패하면 [MediaException]
+     */
+    private suspend fun produce(request: AgentRequest, plan: Plan, previous: VideoProject?, progress: suspend (String) -> Unit): JobResult {
         // 고치기면 비율은 앞 영상 그대로 (그림을 다시 쓰려면 크기가 같아야 한다)
         val base = previous?.takeIf { plan.edit }
         val aspect = base?.aspect ?: plan.aspect
@@ -100,53 +143,46 @@ class VideoAgent(
         var drawn = 0
         var spoken = 0
         var animated = 0
-        try {
-            val animateIndexes = if (clips == null) emptySet() else plan.scenes.withIndex().filter { it.value.animate }.take(maxClips).map { it.index }.toSet()
-            plan.scenes.forEachIndexed { i, scene ->
-                // 앞 영상의 같은 그림·내레이션·클립은 다시 쓴다 (바뀐 장면만 다시 만든다)
-                val oldImage = base?.scenes?.firstOrNull { it.image == scene.image }
-                val reused = oldImage?.let { media.load(user, it.imageAsset)?.second }
-                val image = reused ?: run {
-                    if (drawn == 0) reserve()
-                    drawn++
-                    emit(AgentEvent.Status("장면 ${i + 1}/${plan.scenes.size} 그리는 중"))
-                    generator.generate(scene.image, imageWidth, imageHeight, steps).png
-                }
-                val imageAsset = if (reused != null && oldImage != null) oldImage.imageAsset else media.save(user, MediaKind.SCENE, "image/png", image, scene.image).id
-                val oldVoice = base?.scenes?.firstOrNull { it.narration == scene.narration && it.voiceAsset != null }
-                val voice = oldVoice?.voiceAsset?.let { media.load(user, it)?.second } ?: speech?.let { tts ->
-                    spoken++
-                    runCatching { tts.synthesize(scene.narration, AudioFormat.M4A) }
-                        .onFailure { if (it is CancellationException) throw it; log.warn { "내레이션 실패 (장면 ${i + 1}): ${it.message}" } }
-                        .getOrNull()
-                }
-                val voiceAsset = oldVoice?.voiceAsset ?: voice?.let { media.save(user, MediaKind.SCENE, "audio/mp4", it, scene.narration).id }
-                val oldClip = base?.scenes?.firstOrNull { it.image == scene.image && it.clipAsset != null }?.takeIf { i in animateIndexes }
-                var clipBytes = oldClip?.clipAsset?.let { media.load(user, it)?.second }
-                if (clipBytes == null && i in animateIndexes && clips != null) {
-                    if (animated == 0) reserveClips()
-                    animated++
-                    emit(AgentEvent.Status("장면 ${i + 1}/${plan.scenes.size} 움직이는 클립 만드는 중 (${clips.model})"))
-                    clipBytes = runCatching { clips.animate(image, scene.image, imageWidth, imageHeight, CLIP_SECONDS) }
-                        .onFailure { if (it is CancellationException) throw it; log.warn { "클립 실패 (장면 ${i + 1}), 그림으로: ${it.message}" } }
-                        .getOrNull()
-                }
-                val clipAsset = oldClip?.clipAsset ?: clipBytes?.let { media.save(user, MediaKind.SCENE, "video/mp4", it, scene.image).id }
-                scenes += VideoScene(image, voice, scene.narration, scene.motion, plan.speed, clipBytes, if (clipBytes != null) CLIP_SECONDS else 0.0)
-                saved += ProjectScene(scene.narration, scene.image, scene.motion, imageAsset, voiceAsset, clipAsset, clipBytes != null)
+        val animateIndexes = if (clips == null) emptySet() else plan.scenes.withIndex().filter { it.value.animate }.take(maxClips).map { it.index }.toSet()
+        plan.scenes.forEachIndexed { i, scene ->
+            // 앞 영상의 같은 그림·내레이션·클립은 다시 쓴다 (바뀐 장면만 다시 만든다)
+            val oldImage = base?.scenes?.firstOrNull { it.image == scene.image }
+            val reused = oldImage?.let { media.load(user, it.imageAsset)?.second }
+            val image = reused ?: run {
+                if (drawn == 0) reserve()
+                drawn++
+                progress("장면 ${i + 1}/${plan.scenes.size} 그리는 중")
+                generator.generate(scene.image, imageWidth, imageHeight, steps).png
             }
-            emit(AgentEvent.Status(if (base != null) "장면 합치는 중 (그림 ${drawn}개·내레이션 ${spoken}개만 새로)" else "장면 합치는 중"))
-            val mp4 = composer.compose(scenes, width, height, plan.title, runCatching { music() }.getOrNull())
-            val asset = media.save(user, MediaKind.VIDEO, "video/mp4", mp4, plan.title)
-            projects?.save(user, request.session.id.value, VideoProject(asset.id, plan.title, aspect, plan.speed, saved))
-            emit(AgentEvent.Media(asset, mp4, plan.title))
-            emit(AgentEvent.Token(summary(plan.copy(aspect = aspect), saved, width, height, mp4.size, base?.let { drawn to spoken })))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: MediaException) {
-            emit(AgentEvent.Token(e.message ?: "영상을 만들지 못했습니다."))
+            val imageAsset = if (reused != null && oldImage != null) oldImage.imageAsset else media.save(user, MediaKind.SCENE, "image/png", image, scene.image).id
+            val oldVoice = base?.scenes?.firstOrNull { it.narration == scene.narration && it.voiceAsset != null }
+            val voice = oldVoice?.voiceAsset?.let { media.load(user, it)?.second } ?: speech?.let { tts ->
+                spoken++
+                runCatching { tts.synthesize(scene.narration, AudioFormat.M4A) }
+                    .onFailure { if (it is CancellationException) throw it; log.warn { "내레이션 실패 (장면 ${i + 1}): ${it.message}" } }
+                    .getOrNull()
+            }
+            val voiceAsset = oldVoice?.voiceAsset ?: voice?.let { media.save(user, MediaKind.SCENE, "audio/mp4", it, scene.narration).id }
+            val oldClip = base?.scenes?.firstOrNull { it.image == scene.image && it.clipAsset != null }?.takeIf { i in animateIndexes }
+            var clipBytes = oldClip?.clipAsset?.let { media.load(user, it)?.second }
+            val clipper = clips
+            if (clipBytes == null && i in animateIndexes && clipper != null) {
+                if (animated == 0) reserveClips()
+                animated++
+                progress("장면 ${i + 1}/${plan.scenes.size} 움직이는 클립 만드는 중 (${clipper.model}, 약 2분)")
+                clipBytes = runCatching { clipper.animate(image, scene.image, imageWidth, imageHeight, CLIP_SECONDS) }
+                    .onFailure { if (it is CancellationException) throw it; log.warn { "클립 실패 (장면 ${i + 1}), 그림으로: ${it.message}" } }
+                    .getOrNull()
+            }
+            val clipAsset = oldClip?.clipAsset ?: clipBytes?.let { media.save(user, MediaKind.SCENE, "video/mp4", it, scene.image).id }
+            scenes += VideoScene(image, voice, scene.narration, scene.motion, plan.speed, clipBytes, if (clipBytes != null) CLIP_SECONDS else 0.0)
+            saved += ProjectScene(scene.narration, scene.image, scene.motion, imageAsset, voiceAsset, clipAsset, clipBytes != null)
         }
-        emit(AgentEvent.Done(type, generator.model, null))
+        progress(if (base != null) "장면 합치는 중 (그림 ${drawn}개·내레이션 ${spoken}개만 새로)" else "장면 합치는 중")
+        val mp4 = composer.compose(scenes, width, height, plan.title, runCatching { music() }.getOrNull())
+        val asset = media.save(user, MediaKind.VIDEO, "video/mp4", mp4, plan.title)
+        projects?.save(user, request.session.id.value, VideoProject(asset.id, plan.title, aspect, plan.speed, saved))
+        return JobResult(asset, mp4, summary(plan.copy(aspect = aspect), saved, width, height, mp4.size, base?.let { drawn to spoken }))
     }
 
     /** 답변에 대본을 남긴다 (사람이 읽고 "3번 장면 더 밝게"처럼 고치라고 할 수 있게, G-05) */

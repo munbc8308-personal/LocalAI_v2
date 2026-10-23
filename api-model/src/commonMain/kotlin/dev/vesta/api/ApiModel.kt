@@ -247,11 +247,25 @@ sealed interface EventDto {
     @Serializable @SerialName("saved") data class Saved(val messageId: Long) : EventDto
     /** 에이전트가 만든 이미지. 내용은 `GET /api/media/{id}` */
     @Serializable @SerialName("media") data class Media(val id: String, val mime: String, val caption: String?) : EventDto
+    /** 오래 걸리는 일을 백그라운드로 넘겼다 (M24). 진행은 `GET /api/jobs/{id}` */
+    @Serializable @SerialName("job") data class Job(val id: String, val title: String) : EventDto
     @Serializable @SerialName("grounding") data class Grounding(val checked: Int, val unsupported: List<String>) : EventDto
     @Serializable @SerialName("token") data class Token(val text: String) : EventDto
     @Serializable @SerialName("done") data class Done(val agent: String, val model: String, val promptTokens: Int?, val completionTokens: Int?) : EventDto
     @Serializable @SerialName("error") data class Error(val message: String) : EventDto
 }
+
+/** 백그라운드 작업 상태 (M24): QUEUED·RUNNING·DONE·FAILED. 끝나면 [mediaId]·[text] */
+@Serializable
+data class JobDto(
+    val id: String,
+    val title: String,
+    val status: String,
+    val progress: String? = null,
+    val mediaId: String? = null,
+    val mime: String? = null,
+    val text: String? = null,
+)
 
 // --- 웹 UI (M9) ---
 

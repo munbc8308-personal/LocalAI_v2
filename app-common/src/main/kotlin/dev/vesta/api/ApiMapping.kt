@@ -25,6 +25,7 @@ fun AgentEvent.toDto(): EventDto = when (this) {
         requestId, tool, risk.name, details.title, details.body, details.warning, reason, editableField, editableValue, details.targets,
     )
     is AgentEvent.Grounding -> EventDto.Grounding(checked, unsupported)
+    is AgentEvent.JobStarted -> EventDto.Job(id, title)
     is AgentEvent.Media -> EventDto.Media(asset.id, asset.mime, caption)
     is AgentEvent.Saved -> EventDto.Saved(messageId)
     is AgentEvent.Token -> EventDto.Token(text)
@@ -64,6 +65,7 @@ fun EventDto.toEvent(): AgentEvent = when (this) {
         requestId, tool, RiskLevel.valueOf(risk), ApprovalDetails(title, body, warning, targets), reason, editableField, editableValue,
     )
     is EventDto.Grounding -> AgentEvent.Grounding(checked, unsupported)
+    is EventDto.Job -> AgentEvent.JobStarted(id, title)
     // 원격 모드: 내용은 받지 않았다 (필요하면 /api/media/{id}로 받는다)
     is EventDto.Media -> AgentEvent.Media(
         dev.vesta.core.media.MediaAsset(id, dev.vesta.core.UserId(0), dev.vesta.core.media.MediaKind.GENERATED, mime, 0, caption),

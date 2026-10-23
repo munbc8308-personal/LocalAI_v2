@@ -177,6 +177,12 @@ interface ChannelNotifier {
      * (승인 카드는 잘린 명령에 버튼이 붙으면 안 된다, M20)
      */
     suspend fun notify(user: dev.vesta.core.UserId, key: String, text: String, buttons: List<ChannelButton>, exact: Boolean = false): Int
+
+    /**
+     * 백그라운드로 만든 결과(M24 영상)를 [user]와 연결된 대화방으로 보낸다: 글 + 영상·이미지. 첨부 한도를 넘으면 웹 갤러리로 안내한다.
+     * 보낸 대화방 수
+     */
+    suspend fun sendMedia(user: dev.vesta.core.UserId, text: String, bytes: ByteArray, mime: String, caption: String?): Int = 0
 }
 
 /** 여러 버튼 처리기를 하나로 (주간 점검 "ev", 셸 승인 넘기기 "sh" 등, M20) */
