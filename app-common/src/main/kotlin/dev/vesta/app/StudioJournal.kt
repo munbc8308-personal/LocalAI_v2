@@ -48,7 +48,8 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
     private fun describe(event: AgentEvent): Triple<String, String, String?>? = when (event) {
         is AgentEvent.Routed -> Triple(
             "routed",
-            "담당: " + (event.decision.customAgent?.let { if (event.decision.team) "$it (팀)" else "$it (사용자 정의 에이전트)" } ?: event.decision.agent.name) +
+            "담당: " + (event.decision.customAgent?.let { if (event.decision.team) "$it (팀)" else "$it (사용자 정의 에이전트)" }
+                ?: event.decision.skill?.let { "스킬 /$it · ${event.decision.agent.name}" } ?: event.decision.agent.name) +
                 " · ${event.decision.stage.name.lowercase()} ${"%.2f".format(event.decision.confidence)}",
             event.decision.collections.takeIf { it.isNotEmpty() }?.joinToString(prefix = "컬렉션: "),
         )

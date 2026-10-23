@@ -66,4 +66,14 @@ class ExposedStudioRepositoriesTest : FunSpec({
         teams.delete(owner, "dev") shouldBe true
         teams.find(owner, "dev") shouldBe null
     }
+
+    test("웹 스킬: 사용자마다, 같은 이름이면 바꾼다") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val repo = ExposedSkillRepository(db.db)
+        repo.save(owner, dev.vesta.core.skill.Skill("요약", "요약", "세 줄"))
+        repo.save(owner, dev.vesta.core.skill.Skill("요약", "요약 2", "다섯 줄", dev.vesta.core.AgentType.TASK, listOf("read_file")))
+        repo.list(owner).single().let { it.body shouldBe "다섯 줄"; it.agent shouldBe dev.vesta.core.AgentType.TASK; it.tools shouldBe listOf("read_file") }
+        repo.delete(owner, "요약") shouldBe true
+    }
 })

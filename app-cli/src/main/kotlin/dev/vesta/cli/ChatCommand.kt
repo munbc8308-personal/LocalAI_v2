@@ -65,22 +65,25 @@ class ChatCommand : CliktCommand(name = "chat") {
             val workspace = if (noWorkspace) null else Workspaces.current()?.let { ws ->
                 if (Workspaces.trusted(ws)) return@let ws
                 // 처음 보거나 바뀐 VESTA.md: 따를지 먼저 묻는다. 입력이 터미널이 아니면 묻지 않고 쓰지 않는다
+                val what = listOfNotNull(Workspaces.FILE.takeIf { ws.instructions != null }, "스킬 ${ws.skills.size}개".takeIf { ws.skills.isNotEmpty() }).joinToString("·")
                 if (Workspaces.hasControlChars(ws.instructions.orEmpty())) {
                     out.println(red("${Workspaces.FILE}에 터미널 제어 문자가 들어 있어 쓰지 않습니다 (화면을 속일 수 있음). 파일을 확인하세요"))
-                    return@let ws.copy(instructions = null)
+                    return@let ws.copy(instructions = null, skills = emptyList())
                 }
                 if (System.console() == null) {
-                    out.println(dim("${Workspaces.FILE}가 처음 보거나 바뀐 내용이라 이번에는 쓰지 않습니다 (터미널에서 vesta를 실행해 승인)"))
-                    return@let ws.copy(instructions = null)
+                    out.println(dim("${what}이 처음 보거나 바뀐 내용이라 이번에는 쓰지 않습니다 (터미널에서 vesta를 실행해 승인)"))
+                    return@let ws.copy(instructions = null, skills = emptyList())
                 }
-                out.println(bold("이 폴더의 ${Workspaces.FILE}를 처음 봅니다 (또는 내용이 바뀜). 모델이 이 지침을 따릅니다:"))
-                Workspaces.preview(ws).lines().forEach { out.println(dim("│ $it")) }
+                out.println(bold("이 폴더의 ${what}을 처음 봅니다 (또는 내용이 바뀜). 모델이 이 지침을 따릅니다:"))
+                Workspaces.preview(ws, lines = 120).lines().forEach { out.println(dim("│ $it")) }
                 out.flush()
                 val answer = runCatching { reader.readLine("이 지침을 따를까요? [y/N] ").trim().lowercase() }.getOrDefault("")
-                if (answer == "y" || answer == "yes" || answer == "ㅛ") ws.also(Workspaces::trust) else ws.copy(instructions = null).also { out.println(dim("지침 없이 시작합니다.")) }
+                if (answer == "y" || answer == "yes" || answer == "ㅛ") ws.also(Workspaces::trust) else ws.copy(instructions = null, skills = emptyList()).also { out.println(dim("지침·스킬 없이 시작합니다.")) }
             }
             workspace?.let { ws ->
+                Workspaces.skippedSkills(ws).takeIf { it.isNotEmpty() }?.let { out.println(red("쓰지 않은 스킬 (형식 오류·숨은 문자·예약된 이름): ${it.joinToString()}")) }
                 out.println(dim("작업 폴더 ${Workspaces.display(ws.path)}" + (if (ws.instructions != null) " · ${Workspaces.FILE} 읽음" else "") +
+                    (if (ws.skills.isNotEmpty()) " · 스킬 ${ws.skills.joinToString { "/" + it.name }}" else "") +
                     if (autoWrites) " · 파일 쓰기 자동 승인" else ""))
             }
             session?.let { printHistory(out, backend, it) }
@@ -250,6 +253,8 @@ class ChatCommand : CliktCommand(name = "chat") {
             /docs 질문        등록한 모든 문서에서 찾아 답하기
             /code 질문        코드 도우미 (작업 폴더가 등록한 저장소면 그 저장소에서 찾음)
             /task 할 일       작업 에이전트: 파일 읽기·쓰기·셸로 직접 처리 (쓰기·셸은 승인)
+            /이름 할 일       스킬 (~/.vesta/skills, 작업 폴더 .vesta/skills, 웹에서 만든 것). /skills 목록
+            /agent 이름 할 일 사용자 정의·A2A 에이전트, /team 이름 할 일 팀. /agents 목록
             @컬렉션 질문      지정한 컬렉션에서 찾아 답하기 (@a,b 여러 개)
             /accept [on|off] 파일 쓰기·수정을 묻지 않고 승인 (셸은 계속 묻는다)
             /exit            종료 (Ctrl+D)

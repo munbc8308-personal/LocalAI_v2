@@ -219,6 +219,34 @@ class DefaultConversationServiceTest : FunSpec({
         chat.requests.shouldBeEmpty()
     }
 
+    test("스킬 (M22): /이름 할 일은 지침에 할 일을 넣어 스킬의 에이전트로, 작업 스킬은 스킬 에이전트가. 없는 이름은 평소대로, /skills는 목록") {
+        val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val taskSkill = ScriptedAgent { emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
+        val plain = ScriptedAgent { error("기본 작업 에이전트가 불리면 안 됨") }
+        val skills = listOf(
+            dev.vesta.core.skill.Skill("요약", "세 줄 요약", "세 줄로 요약: ${'$'}ARGUMENTS"),
+            dev.vesta.core.skill.Skill("fix", "고치기", "고친다", AgentType.TASK, listOf("read_file")),
+        )
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.TASK to plain),
+            skills = { _, _ -> skills }, skillAgent = { _, s -> taskSkill.takeIf { s.name == "fix" } },
+            directory = { _, kind, _ -> "목록 $kind" },
+        )
+        val routed = service.send(user, ChannelType.WEB, null, UserInput("!요약 긴 글")).toList().filterIsInstance<AgentEvent.Routed>().single().decision
+        routed.skill shouldBe "요약"
+        routed.agent shouldBe AgentType.CHAT
+        chat.requests.last().history.last().content shouldContain "세 줄로 요약: 긴 글"
+        service.send(user, ChannelType.WEB, null, UserInput("/fix 버그")).toList()
+        taskSkill.requests.single().history.last().content shouldContain "고친다\n\n요청: 버그"
+        // 없는 스킬은 평소처럼 (여기서는 라우터가 없어 일반 대화)
+        service.send(user, ChannelType.WEB, null, UserInput("/없음 안녕")).toList().filterIsInstance<AgentEvent.Routed>().single().decision.skill shouldBe null
+        service.send(user, ChannelType.WEB, null, UserInput("/skills")).toList().filterIsInstance<AgentEvent.Token>().single().text shouldBe "목록 skills"
+        // 손님은 작업 스킬을 쓸 수 없다
+        val guest = UserContext(UserId(3), UserRole.GUEST)
+        service.send(guest, ChannelType.WEB, null, UserInput("/fix 버그")).toList().filterIsInstance<AgentEvent.Routed>().single().decision.agent shouldBe AgentType.CHAT
+        taskSkill.requests.size shouldBe 1
+    }
+
     test("/team 이름 할 일: 팀 리더가 맡고, 담당에 팀으로 표시된다. 없는 팀은 안내 (M22)") {
         val chat = ScriptedAgent { error("chat이 불리면 안 됨") }
         val leader = ScriptedAgent { emit(AgentEvent.Done(AgentType.TASK, "m", null)) }

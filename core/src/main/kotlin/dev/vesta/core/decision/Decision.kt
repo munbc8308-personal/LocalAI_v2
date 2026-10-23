@@ -45,6 +45,8 @@ data class RoutingDecision(
     val customAgent: String? = null,
     /** [customAgent]가 팀 이름인 경우 (`/team 이름`, M22) */
     val team: Boolean = false,
+    /** 스킬로 부른 경우 그 이름 (`/이름 할 일`, K-02) */
+    val skill: String? = null,
 )
 
 /** 라우팅 기록 (PROJECT.md 11장 RoutingLog). 평가·보정(4.7)과 학습 데이터(L-01)에 쓴다. */

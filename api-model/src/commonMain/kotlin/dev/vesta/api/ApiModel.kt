@@ -28,8 +28,24 @@ data class ChatRequestDto(
     /** CLI 작업 폴더(절대 경로)와 그 폴더의 VESTA.md 내용 (M17). CLI 요청의 Mac 주인 것만 쓴다 */
     val workspace: String? = null,
     val instructions: String? = null,
+    /** 작업 폴더의 스킬 파일(`.vesta/skills/<폴더>/SKILL.md` 내용, K-01). CLI가 사용자 승인을 받은 것만 보낸다 */
+    val skills: List<ProjectSkillDto> = emptyList(),
     /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,
+)
+
+@Serializable
+data class ProjectSkillDto(val folder: String, val text: String)
+
+/** 스킬 (K-01). [source]: PROJECT·PERSONAL·WEB. 웹에서 만든 것만 고칠 수 있다 */
+@Serializable
+data class SkillDto(
+    val name: String,
+    val description: String,
+    val body: String,
+    val agent: String = "CHAT",
+    val tools: List<String> = emptyList(),
+    val source: String = "WEB",
 )
 
 /** 메시지에 붙인 미디어. 내용은 `GET /api/media/{id}` */
@@ -176,6 +192,8 @@ data class RoutingDto(
     val customAgent: String? = null,
     /** [customAgent]가 팀 이름 (M22) */
     val team: Boolean = false,
+    /** 스킬로 부른 경우 그 이름 (M22) */
+    val skill: String? = null,
 )
 
 /** SSE로 흘려보내는 대화 이벤트 (AgentEvent의 직렬화 형태) */
@@ -338,6 +356,7 @@ data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<Custom
     val a2a: List<A2aAgentDto> = emptyList(),
     /** A2A 에이전트를 등록·쓸 수 있는가 (Mac 주인만) */
     val canA2a: Boolean = false,
+    val skills: List<SkillDto> = emptyList(),
 )
 
 /** 등록한 A2A 에이전트 (A-15) */

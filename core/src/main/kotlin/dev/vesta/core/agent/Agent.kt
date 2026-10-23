@@ -47,7 +47,12 @@ data class UserInput(
  * CLI 작업 폴더 (PROJECT.md 7.14, M17). `vesta chat`을 실행한 폴더를 파일 도구·셸의 기준으로 쓰고(상대 경로는 이 폴더 기준),
  * 그 폴더의 `VESTA.md`([instructions])를 프로젝트 지침으로 시스템 프롬프트에 붙인다
  */
-data class Workspace(val path: String, val instructions: String? = null) {
+data class Workspace(
+    val path: String,
+    val instructions: String? = null,
+    /** 작업 폴더의 스킬(`.vesta/skills`, K-01). CLI가 VESTA.md처럼 사용자 승인(해시)을 받은 것만 넣는다 */
+    val skills: List<dev.vesta.core.skill.Skill> = emptyList(),
+) {
     companion object {
         /** 지침 최대 글자 수 (넘으면 앞부분만) */
         const val MAX_INSTRUCTIONS = 8_000

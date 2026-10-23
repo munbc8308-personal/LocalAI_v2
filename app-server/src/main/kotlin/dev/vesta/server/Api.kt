@@ -252,7 +252,10 @@ fun Application.vestaApi(deps: ServerDeps) {
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
                     // 작업 폴더는 CLI에서만 받는다 (대화 서비스가 Mac 주인·홈 아래 폴더인지 다시 확인한다)
-                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI }?.let { dev.vesta.core.agent.Workspace(it, request.instructions) }
+                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI }?.let { path ->
+                        val skills = request.skills.take(100).mapNotNull { dev.vesta.core.skill.Skill.parse(it.folder, it.text, dev.vesta.core.skill.SkillSource.PROJECT) }
+                        dev.vesta.core.agent.Workspace(path, request.instructions, skills)
+                    }
                     deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken))
                         .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                 }
@@ -459,6 +462,25 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@delete
                     val studio = deps.studio ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
                     val removed = studio.agentRepo.delete(user.userId, call.parameters["name"].orEmpty())
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
+            // 스킬 (K-01): 웹에서 만든 것만 고치고 지운다 (파일 스킬은 파일로)
+            route("/skills") {
+                put("/{name}") {
+                    val user = call.principal(deps) ?: return@put
+                    val studio = deps.studio ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.SkillDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    studio.saveSkill(user, dto.copy(name = call.parameters["name"].orEmpty()))?.let { error ->
+                        return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+                delete("/{name}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val repo = deps.studio?.skillRepo ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val removed = repo.delete(user.userId, call.parameters["name"].orEmpty())
                     call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
                 }
             }
@@ -899,6 +921,9 @@ class StudioEndpoints(
     val a2aRepo: dev.vesta.core.studio.A2aAgentRepository? = null,
     val a2aClient: dev.vesta.a2a.A2aClient? = null,
     val a2aHasToken: (String) -> Boolean = { false },
+    /** 스킬 (K-01): 웹에서 만든 것 저장소, 이 사용자가 부를 수 있는 전체(파일 포함) */
+    val skillRepo: dev.vesta.core.skill.SkillRepository? = null,
+    val skillsFor: suspend (UserContext) -> List<dev.vesta.core.skill.Skill> = { u -> skillRepo?.list(u.userId).orEmpty() },
 ) {
     suspend fun agents(user: UserContext): dev.vesta.api.AgentsDto {
         val builtin = BUILTIN.filter { (type, _, _) -> type in dev.vesta.identity.RolePolicy.agents(user.role) }
@@ -910,7 +935,27 @@ class StudioEndpoints(
         val a2a = if (owner) a2aRepo!!.list(user.userId).map {
             dev.vesta.api.A2aAgentDto(it.name, it.displayName, it.description, it.endpoint, it.protocol, it.streaming, it.auth, it.local, it.auth && a2aHasToken(it.name), it.skills, it.cardUrl)
         } else emptyList()
-        return dev.vesta.api.AgentsDto(builtin, custom, tools, teams, a2a, owner)
+        val skills = skillsFor(user).map { dev.vesta.api.SkillDto(it.name, it.description, it.body, it.agent.name, it.tools, it.source.name) }
+        return dev.vesta.api.AgentsDto(builtin, custom, tools, teams, a2a, owner, skills)
+    }
+
+    /** 스킬 저장 (웹). 이름 규칙·예약어, 그 역할이 쓸 수 있는 에이전트, 쓸 수 있는 도구만, 숨은 문자 거부 (K-06). 문제가 있으면 그 이유 */
+    suspend fun saveSkill(user: UserContext, dto: dev.vesta.api.SkillDto): String? {
+        val repo = skillRepo ?: return "스킬을 쓸 수 없습니다"
+        val s = dev.vesta.core.skill.Skill
+        if (!s.NAME.matches(dto.name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/이름 으로 부릅니다)"
+        if (dto.name.lowercase() in s.RESERVED) return "이미 쓰는 명령 이름입니다: /${dto.name}"
+        if (dto.description.isBlank() || dto.description.length > s.MAX_DESCRIPTION) return "설명은 1~${s.MAX_DESCRIPTION}자입니다"
+        if (dto.body.isBlank() || dto.body.length > s.MAX_BODY) return "지침은 1~${s.MAX_BODY}자입니다"
+        if (dev.vesta.core.text.HiddenChars.has(dto.name + dto.description + dto.body)) return "보이지 않는 문자가 들어 있습니다"
+        val agent = runCatching { dev.vesta.core.AgentType.valueOf(dto.agent) }.getOrNull()?.takeIf { it in s.AGENTS } ?: return "에이전트는 ${s.AGENTS.joinToString { it.name }} 중 하나입니다"
+        if (agent !in dev.vesta.identity.RolePolicy.agents(user.role)) return "이 계정은 ${agent.name} 에이전트를 쓸 수 없습니다"
+        val tools = if (agent == dev.vesta.core.AgentType.TASK) dto.tools.distinct() else emptyList()
+        val allowed = toolCatalog(user).map { it.spec.name }.toSet()
+        val unknown = tools.filter { it !in allowed }
+        if (unknown.isNotEmpty()) return "쓸 수 없는 도구: ${unknown.joinToString()}"
+        repo.save(user.userId, dev.vesta.core.skill.Skill(dto.name, dto.description.trim(), dto.body.trim(), agent, tools))
+        return null
     }
 
     /** Agent Card를 읽어 등록 전에 보여 줄 내용과 경고 */

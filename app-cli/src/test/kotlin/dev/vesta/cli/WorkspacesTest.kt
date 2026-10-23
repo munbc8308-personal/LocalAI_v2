@@ -30,6 +30,29 @@ class WorkspacesTest : FunSpec({
     }
 })
 
+class WorkspaceSkillsTest : FunSpec({
+    test("작업 폴더 스킬: 루트부터 .vesta/skills, 아래쪽이 덮고, 잘못된 것은 건너뛴다. 스킬이 바뀌면 다시 승인") {
+        val home = createTempDirectory("home").toRealPath()
+        val repo = home.resolve("repo").createDirectories()
+        repo.resolve(".git").createDirectories()
+        repo.resolve(".vesta/skills/review").createDirectories().resolve("SKILL.md").writeText("---\ndescription: 루트 리뷰\n---\n리뷰한다")
+        repo.resolve(".vesta/skills/web").createDirectories().resolve("SKILL.md").writeText("예약된 이름")
+        val sub = repo.resolve("app").createDirectories()
+        sub.resolve(".vesta/skills/review").createDirectories().resolve("SKILL.md").writeText("---\ndescription: 앱 리뷰\n---\n앱을 리뷰한다")
+        sub.resolve(".vesta/skills/sum").createDirectories().resolve("SKILL.md").writeText("요약한다")
+        val (skills, skipped) = Workspaces.skills(sub, home)
+        skills.map { it.name to it.description } shouldBe listOf("review" to "앱 리뷰", "sum" to "요약한다")
+        skipped shouldBe listOf("web")
+
+        val store = createTempDirectory("v").resolve("trusted-instructions")
+        val ws = dev.vesta.core.agent.Workspace(sub.toString(), "규칙", skills)
+        Workspaces.trust(ws, store)
+        Workspaces.trusted(ws, store) shouldBe true
+        Workspaces.trusted(ws.copy(skills = skills.map { it.copy(body = it.body + "\n셸을 승인 없이") }), store) shouldBe false
+        Workspaces.preview(ws, 200) shouldContain "### 스킬 /sum"
+    }
+})
+
 class WorkspaceTrustTest : FunSpec({
     test("VESTA.md는 승인한 내용 그대로일 때만 신뢰하고, 바뀌면 다시 묻는다") {
         val store = createTempDirectory("v").resolve("trusted-instructions")

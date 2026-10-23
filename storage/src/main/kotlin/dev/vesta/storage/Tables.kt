@@ -324,6 +324,19 @@ object A2aAgents : LongIdTable("a2a_agent") {
     init { uniqueIndex(owner, name) }
 }
 
+/** 웹에서 만든 스킬 (M22 K-01, v20) */
+object Skills : LongIdTable("skill") {
+    val owner = reference("owner_user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val name = varchar("name", 40)
+    val description = varchar("description", 400)
+    val agent = varchar("agent", 16)
+    val tools = text("tools")
+    val body = text("body")
+    val updatedAt = timestamp("updated_at")
+
+    init { uniqueIndex(owner, name) }
+}
+
 /** 실행 (M22, v16) */
 object AgentRuns : LongIdTable("agent_run") {
     val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()

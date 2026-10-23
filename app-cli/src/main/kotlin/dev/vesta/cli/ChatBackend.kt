@@ -94,7 +94,8 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
         http.preparePost("$baseUrl/api/chat") {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
-            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions)))
+            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions,
+                skills = workspace?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) })))
         }.execute { response ->
             if (!response.status.isSuccess()) {
                 emit(AgentEvent.Error("서버 오류 ${response.status.value}: ${response.bodyAsText().take(200)}"))

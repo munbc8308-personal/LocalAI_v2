@@ -176,6 +176,46 @@ class ExposedA2aAgentRepository(private val db: Database, private val clock: Clo
     )
 }
 
+/** 웹에서 만든 스킬 (M22) */
+class ExposedSkillRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : dev.vesta.core.skill.SkillRepository {
+    override suspend fun list(owner: UserId): List<dev.vesta.core.skill.Skill> = db.tx {
+        Skills.selectAll().where { Skills.owner eq owner.value }.orderBy(Skills.name).map { it.toSkill() }
+    }
+
+    override suspend fun find(owner: UserId, name: String): dev.vesta.core.skill.Skill? = db.tx {
+        Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.name eq name) }.firstOrNull()?.toSkill()
+    }
+
+    override suspend fun save(owner: UserId, skill: dev.vesta.core.skill.Skill): dev.vesta.core.skill.Skill = db.tx {
+        val now = clock.instant()
+        Skills.deleteWhere { (Skills.owner eq owner.value) and (Skills.name eq skill.name) }
+        Skills.insert {
+            it[Skills.owner] = owner.value
+            it[name] = skill.name
+            it[description] = skill.description
+            it[agent] = skill.agent.name
+            it[tools] = skill.tools.joinToString("\n")
+            it[body] = skill.body
+            it[updatedAt] = now
+        }
+        skill.copy(updatedAt = now, source = dev.vesta.core.skill.SkillSource.WEB)
+    }
+
+    override suspend fun delete(owner: UserId, name: String): Boolean = db.tx {
+        Skills.deleteWhere { (Skills.owner eq owner.value) and (Skills.name eq name) } > 0
+    }
+
+    private fun ResultRow.toSkill() = dev.vesta.core.skill.Skill(
+        name = this[Skills.name],
+        description = this[Skills.description],
+        body = this[Skills.body],
+        agent = runCatching { dev.vesta.core.AgentType.valueOf(this[Skills.agent]) }.getOrDefault(dev.vesta.core.AgentType.CHAT),
+        tools = this[Skills.tools].lines().filter { it.isNotBlank() },
+        source = dev.vesta.core.skill.SkillSource.WEB,
+        updatedAt = this[Skills.updatedAt],
+    )
+}
+
 /** 실행 기록 (M22) */
 class ExposedRunRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : RunRepository {
     override suspend fun start(user: UserId, session: SessionId?, agent: String, customAgent: String?, input: String): AgentRun = db.tx {

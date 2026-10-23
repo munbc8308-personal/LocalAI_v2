@@ -173,6 +173,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val customAgentRepository = dev.vesta.storage.ExposedCustomAgentRepository(database.db)
     val teamRepository = dev.vesta.storage.ExposedTeamRepository(database.db)
     val a2aRepository = dev.vesta.storage.ExposedA2aAgentRepository(database.db)
+    val skillRepository = dev.vesta.storage.ExposedSkillRepository(database.db)
     /** A2A (A-15): 바깥 에이전트. 리다이렉트는 따라가지 않는다 (등록한 주소로만) */
     val a2aClient = dev.vesta.a2a.A2aClient(dev.vesta.a2a.A2aHttp.external(dev.vesta.web.UrlGuard::isInternal), dev.vesta.a2a.A2aHttp.local())
     val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
@@ -270,6 +271,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         persona = { id -> userSettings.get(id).persona() },
         customAgents = { user, name -> customAgent(user, name) ?: a2aAgent(user, name) },
         teams = { user, name -> team(user, name) },
+        skills = { user, workspace -> skillsFor(user, workspace) },
+        skillAgent = { user, skill -> skillAgent(skill) },
+        directory = { user, kind, workspace -> directory(user, kind, workspace) },
         journal = journal,
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
@@ -356,6 +360,59 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         return customAgent(user, def.leader, dev.vesta.agents.DelegateTool(members), rules)
     }
 
+    /**
+     * 부를 수 있는 스킬 (K-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것.
+     * 작업 폴더·내 파일은 Mac 주인 것이라 Mac 주인만 쓴다
+     */
+    suspend fun skillsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.skill.Skill> {
+        val owner = user.role == UserRole.OWNER
+        val project = if (owner) workspace?.skills.orEmpty() else emptyList()
+        val personal = if (owner) personalSkills() else emptyList()
+        return (project + personal + skillRepository.list(user.userId)).distinctBy { it.name }
+    }
+
+    /** `~/.vesta/skills/<이름>/SKILL.md`. 형식이 틀리거나 숨은 문자가 있는 파일은 건너뛴다 */
+    fun personalSkills(): List<dev.vesta.core.skill.Skill> = runCatching {
+        val root = paths.home.resolve("skills")
+        if (!java.nio.file.Files.isDirectory(root)) return emptyList()
+        java.nio.file.Files.list(root).use { dirs ->
+            dirs.toList().sorted().take(MAX_SKILLS).mapNotNull { dir ->
+                val file = dir.resolve("SKILL.md")
+                if (!java.nio.file.Files.isRegularFile(file) || java.nio.file.Files.size(file) > 64_000) return@mapNotNull null
+                dev.vesta.core.skill.Skill.parse(dir.fileName.toString(), java.nio.file.Files.readString(file), dev.vesta.core.skill.SkillSource.PERSONAL,
+                    java.nio.file.Files.getLastModifiedTime(file).toInstant())
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    /** 작업 에이전트 스킬: 스킬이 적은 도구 ∩ 그 사용자가 쓸 수 있는 도구 (K-06). 셸·쓰기 승인은 그대로 */
+    private fun skillAgent(skill: dev.vesta.core.skill.Skill): dev.vesta.core.agent.Agent = TaskAgent(
+        inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
+        maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
+        maxToolOutputChars = config.tools.maxOutputChars,
+        rules = Prompts.TASK_RULES + "\n\n이번 요청은 스킬 '/${skill.name}'이다. 요청 첫머리의 [스킬] 지침대로 일한다.",
+        toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in skill.tools } },
+        judge = judge,
+        escalation = escalation,
+    )
+
+    /** `/skills`·`/agents` 목록 */
+    private suspend fun directory(user: UserContext, kind: String, workspace: dev.vesta.core.agent.Workspace?): String = when (kind) {
+        "skills" -> skillsFor(user, workspace).takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "부를 수 있는 스킬 (`/이름 할 일`):\n") { s ->
+            val from = when (s.source) { dev.vesta.core.skill.SkillSource.PROJECT -> "작업 폴더"; dev.vesta.core.skill.SkillSource.PERSONAL -> "내 파일"; else -> "웹" }
+            "- /${s.name} — ${s.description} (${from} · ${s.agent.name.lowercase()}" + (if (s.tools.isNotEmpty()) " · 도구 ${s.tools.joinToString()}" else "") + ")"
+        } ?: "스킬이 없습니다. 웹 UI 에이전트 탭에서 만들거나, ~/.vesta/skills/<이름>/SKILL.md 파일로 둘 수 있습니다."
+        else -> buildString {
+            val custom = customAgentRepository.list(user.userId)
+            val teams = teamRepository.list(user.userId)
+            val remote = if (user.role == UserRole.OWNER) a2aRepository.list(user.userId) else emptyList()
+            if (custom.isEmpty() && teams.isEmpty() && remote.isEmpty()) append("만든 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다.")
+            if (custom.isNotEmpty()) append(custom.joinToString("\n", prefix = "에이전트 (`/agent 이름 할 일`):\n") { "- ${it.name} — ${it.description}" })
+            if (remote.isNotEmpty()) append((if (isNotEmpty()) "\n\n" else "") + remote.joinToString("\n", prefix = "A2A 에이전트 (`/agent 이름 할 일`):\n") { "- ${it.name} — ${it.displayName}: ${it.description.take(100)}" })
+            if (teams.isNotEmpty()) append((if (isNotEmpty()) "\n\n" else "") + teams.joinToString("\n", prefix = "팀 (`/team 이름 할 일`):\n") { "- ${it.name} — ${it.description} (리더 ${it.leader}, 멤버 ${it.members.joinToString()})" })
+        }
+    }
+
     /** A2A 에이전트 (A-15): Mac 주인만. 토큰은 키체인 `dev.vesta.a2a` / 이름 */
     private suspend fun a2aAgent(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
         if (user.role != UserRole.OWNER) return null
@@ -381,6 +438,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         const val DEFAULT_EMBEDDING = "bge-m3:567m"
         /** A2A 에이전트 토큰의 키체인 서비스 (계정 = 에이전트 이름) */
         const val A2A_KEYCHAIN = "dev.vesta.a2a"
+        /** 한 곳에서 읽는 스킬 수 */
+        const val MAX_SKILLS = 100
     }
 }
 

@@ -182,4 +182,20 @@ class StudioTest : FunSpec({
         this.client.put("/api/teams/bad") { bearerAuth("secret"); setBody("""{"name":"","description":"x","leader":"echo","members":["lead"]}""") }.bodyAsText() shouldContain "리더는 사용자 정의 에이전트"
         this.client.delete("/api/a2a/echo") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
     } }
+
+    test("스킬 API: 예약어·숨은 문자·쓸 수 없는 도구 거부, 작업 스킬만 도구를 남긴다") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val skills = dev.vesta.storage.ExposedSkillRepository(db.db)
+        val studio = StudioEndpoints(ExposedCustomAgentRepository(db.db), ExposedRunRepository(db.db), emptyFlow(), { listOf(NamedTool("read_file", RiskLevel.READ)) }, skillRepo = skills)
+        application { vestaApi(ServerDeps(SilentConversation, EmptySessions, EmptyMessages, owner, token = "secret", version = "t", studio = studio)) }
+        client.put("/api/skills/fix") { bearerAuth("secret"); setBody("""{"name":"","description":"고치기","body":"고친다 ${'$'}ARGUMENTS","agent":"TASK","tools":["read_file"]}""") }.status shouldBe HttpStatusCode.OK
+        client.put("/api/skills/sum") { bearerAuth("secret"); setBody("""{"name":"","description":"요약","body":"요약","agent":"CHAT","tools":["read_file"]}""") }.status shouldBe HttpStatusCode.OK
+        skills.find(owner.userId, "sum")!!.tools shouldBe emptyList()
+        client.put("/api/skills/web") { bearerAuth("secret"); setBody("""{"name":"","description":"x","body":"x"}""") }.bodyAsText() shouldContain "이미 쓰는 명령"
+        client.put("/api/skills/bad") { bearerAuth("secret"); setBody("""{"name":"","description":"x","body":"x","agent":"TASK","tools":["run_shell"]}""") }.bodyAsText() shouldContain "run_shell"
+        client.put("/api/skills/hid") { bearerAuth("secret"); setBody("{\"name\":\"\",\"description\":\"x\",\"body\":\"요약\u202e\"}") }.bodyAsText() shouldContain "보이지 않는"
+        client.get("/api/agents") { bearerAuth("secret") }.bodyAsText() shouldContain "\"name\":\"fix\""
+        client.delete("/api/skills/fix") { bearerAuth("secret") }.status shouldBe HttpStatusCode.OK
+    } }
 })

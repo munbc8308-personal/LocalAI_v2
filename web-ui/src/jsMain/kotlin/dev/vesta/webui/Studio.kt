@@ -20,6 +20,7 @@ import dev.vesta.api.RunDetailDto
 import dev.vesta.api.RunDto
 import dev.vesta.api.RunEventDto
 import dev.vesta.api.RunUpdateDto
+import dev.vesta.api.SkillDto
 import dev.vesta.api.TeamDto
 import kotlinx.browser.window
 import kotlinx.coroutines.launch
@@ -56,6 +57,7 @@ fun StudioView() {
     var editing by remember { mutableStateOf<CustomAgentDto?>(null) }
     var editingTeam by remember { mutableStateOf<TeamDto?>(null) }
     var addingA2a by remember { mutableStateOf(false) }
+    var editingSkill by remember { mutableStateOf<SkillDto?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf("") }
     var task by remember { mutableStateOf("") }
@@ -97,13 +99,14 @@ fun StudioView() {
         val a = agents
         // 일 맡기기: 사용자 정의 에이전트·팀에게 (기본 에이전트는 대화 탭에서 /web·/code·/task). target은 "agent 이름" 또는 "team 이름"
         if (a != null) Div({ classes("card") }) {
-            Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일, /team 이름 할 일") } }
-            if (a.custom.isEmpty() && a.a2a.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
+            Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일, /team 이름 할 일, /스킬 할 일") } }
+            if (a.custom.isEmpty() && a.a2a.isEmpty() && a.skills.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
             else {
                 Select({ onChange { e -> target = e.value.orEmpty() } }) {
                     Option("", { if (target.isEmpty()) selected() }) { Text("에이전트·팀 고르기") }
                     a.custom.forEach { c -> Option("agent ${c.name}", { if ("agent ${c.name}" == target) selected() }) { Text("${c.name} — ${c.description.take(40)}") } }
                     a.a2a.forEach { r -> Option("agent ${r.name}", { if ("agent ${r.name}" == target) selected() }) { Text("${r.name} (A2A) — ${r.description.take(40)}") } }
+                    a.skills.forEach { k -> Option(k.name, { if (k.name == target) selected() }) { Text("스킬 /${k.name} — ${k.description.take(40)}") } }
                     a.teams.forEach { t -> Option("team ${t.name}", { if ("team ${t.name}" == target) selected() }) { Text("팀 ${t.name} — ${t.description.take(40)}") } }
                 }
                 TextArea(task) { placeholder("할 일"); attr("rows", "3"); onInput { task = it.value } }
@@ -206,6 +209,39 @@ fun StudioView() {
                 }
             }
         }
+        // 스킬: 자주 하는 일의 지침. /이름 할 일 (웹에서 만든 것만 여기서 고친다. 파일 스킬은 파일로)
+        if (a != null) Div({ classes("card") }) {
+            Div({ classes("row") }) {
+                Span { B { Text("스킬") } }
+                Button({ classes("link", "small"); onClick { editingSkill = SkillDto("", "", "") } }) { Text("새 스킬") }
+            }
+            if (a.skills.isEmpty()) P({ classes("muted", "small") }) { Text("자주 하는 일을 지침으로 만들어 /이름 할 일 로 부릅니다. ~/.vesta/skills/<이름>/SKILL.md 파일이나 작업 폴더의 .vesta/skills 도 읽습니다.") }
+            a.skills.forEach { k ->
+                Div({ classes("run") }) {
+                    Div({ classes("row", "small") }) {
+                        Span { B { Text("/${k.name}") }; Text(" · ${k.description}") }
+                        if (k.source == "WEB") Span {
+                            Button({ classes("link", "small"); onClick { editingSkill = k } }) { Text("고치기") }
+                            Button({
+                                classes("link", "small", "bad")
+                                onClick {
+                                    if (!window.confirm("/${k.name} 스킬을 지울까요?")) return@onClick
+                                    scope.launch { runCatching { Http.delete("/api/skills/${k.name}") }.onFailure { error = it.message }; loadAgents() }
+                                }
+                            }) { Text("지우기") }
+                        } else Span({ classes("muted") }) { Text(if (k.source == "PERSONAL") "내 파일" else "작업 폴더") }
+                    }
+                    Div({ classes("muted", "small") }) { Text(agentLabel(k.agent) + if (k.tools.isNotEmpty()) " · 도구 ${k.tools.joinToString()}" else "") }
+                }
+            }
+        }
+        editingSkill?.let { k -> SkillEditor(k, a?.tools.orEmpty(), onCancel = { editingSkill = null }) { saved ->
+            scope.launch {
+                runCatching { Http.put("/api/skills/${saved.name}", ApiJson.encodeToString(SkillDto.serializer(), saved)) }
+                    .onSuccess { editingSkill = null; error = null; loadAgents() }
+                    .onFailure { error = it.message }
+            }
+        } }
         // A2A 에이전트: 바깥 에이전트를 표준 프로토콜로 (Mac 주인만)
         if (a != null && a.canA2a) Div({ classes("card") }) {
             Div({ classes("row") }) {
@@ -266,6 +302,40 @@ private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolI
             }
         }
         Button({ classes("primary"); onClick { onSave(CustomAgentDto(name.trim(), description.trim(), instructions, model, chosen.toList())) } }) { Text("저장") }
+    }
+}
+
+@Composable
+private fun SkillEditor(initial: SkillDto, tools: List<dev.vesta.api.ToolInfoDto>, onCancel: () -> Unit, onSave: (SkillDto) -> Unit) {
+    var name by remember(initial) { mutableStateOf(initial.name) }
+    var description by remember(initial) { mutableStateOf(initial.description) }
+    var body by remember(initial) { mutableStateOf(initial.body) }
+    var agent by remember(initial) { mutableStateOf(initial.agent) }
+    var chosen by remember(initial) { mutableStateOf(initial.tools.toSet()) }
+    Div({ classes("card", "stack") }) {
+        Div({ classes("row") }) { Span { B { Text(if (initial.name.isEmpty()) "새 스킬" else "/${initial.name} 고치기") } }; Button({ classes("link", "small"); onClick { onCancel() } }) { Text("닫기") } }
+        Input(InputType.Text) { value(name); placeholder("이름 (공백 없이, /이름 으로 부름)"); if (initial.name.isNotEmpty()) disabled(); onInput { name = it.value } }
+        Input(InputType.Text) { value(description); placeholder("무엇을 하는 스킬인지 (예: 변경 사항을 리뷰한다)"); onInput { description = it.value } }
+        Select({ onChange { e -> agent = e.value ?: "CHAT" } }) {
+            listOf("CHAT", "TASK", "CODE", "WEB", "DOCS").forEach { v -> Option(v, { if (v == agent) selected() }) { Text(agentLabel(v)) } }
+        }
+        TextArea(body) { placeholder("지침. \$ARGUMENTS 자리에 할 일이 들어갑니다 (없으면 끝에 붙음). 예: 다음 글을 세 줄로 요약하고 핵심 단어를 굵게: \$ARGUMENTS"); attr("rows", "8"); onInput { body = it.value } }
+        if (agent == "TASK") {
+            Div({ classes("small") }) { B { Text("도구") }; Span({ classes("muted") }) { Text(" (내가 쓸 수 있는 것만 · 쓰기·셸은 실행 때 승인)") } }
+            tools.forEach { t ->
+                Label(attrs = { classes("row", "small") }) {
+                    Span {
+                        Input(InputType.Checkbox) {
+                            checked(t.name in chosen)
+                            onChange { chosen = if (t.name in chosen) chosen - t.name else chosen + t.name }
+                        }
+                        Text(" ${t.name}")
+                    }
+                    Span({ classes("muted") }) { Text(riskLabel(t.risk)) }
+                }
+            }
+        }
+        Button({ classes("primary"); onClick { onSave(SkillDto(name.trim(), description.trim(), body, agent, if (agent == "TASK") chosen.toList() else emptyList())) } }) { Text("저장") }
     }
 }
 

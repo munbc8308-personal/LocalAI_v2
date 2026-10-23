@@ -63,6 +63,12 @@ class DefaultConversationService(
     private val customAgents: suspend (UserContext, String) -> Agent? = { _, _ -> null },
     /** 팀 (`/team 이름 할 일`, M22): 리더 에이전트. 없거나 리더가 지워졌으면 null */
     private val teams: suspend (UserContext, String) -> Agent? = { _, _ -> null },
+    /** 이 사용자가 부를 수 있는 스킬 (K-01): 작업 폴더 > 내 파일 > 웹 순. 작업 폴더는 Mac 주인의 쓸 수 있는 폴더만 넘어온다 */
+    private val skills: suspend (UserContext, dev.vesta.core.agent.Workspace?) -> List<dev.vesta.core.skill.Skill> = { _, _ -> emptyList() },
+    /** 작업 에이전트(TASK) 스킬을 맡을 에이전트: 스킬의 도구 ∩ 역할 도구 (K-06) */
+    private val skillAgent: suspend (UserContext, dev.vesta.core.skill.Skill) -> Agent? = { _, _ -> null },
+    /** `/skills`·`/agents` 목록 글 */
+    private val directory: suspend (UserContext, String, dev.vesta.core.agent.Workspace?) -> String? = { _, _, _ -> null },
     /** 실행 기록·실시간 보기 (M22) */
     private val journal: dev.vesta.core.studio.RunJournal? = null,
 ) : ConversationService {
@@ -129,8 +135,22 @@ class DefaultConversationService(
         val available = availability(user).filter { it in agents && it in allowed }.toSet()
         // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
         // 사용자 정의 에이전트 (`/agent 이름 할 일`, M22): 라우터를 거치지 않고 그 에이전트로. 작업 에이전트 권한 안에서만
+        // 작업 폴더는 Mac 주인만 (파일 도구 범위를 넓히므로). 다른 사용자가 보내면 무시한다
+        val workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) }
+        suspend fun notice(text: String) {
+            messages.append(session.id, NewMessage(role = ChatRole.ASSISTANT, content = text, agent = AgentType.CHAT, model = POLICY_MODEL))
+                .let { emit(AgentEvent.Token(text)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
+        }
+        // `/skills`·`/agents`: 부를 수 있는 것 목록 (메신저는 `!skills`)
+        LISTING.find(input.text.trim())?.let { match ->
+            notice(directory(user, match.groupValues[1].lowercase(), workspace) ?: "목록을 볼 수 없습니다.")
+            return@flow
+        }
         val call = dev.vesta.core.studio.CustomCall.parse(input.text)
+        // 스킬 (`/이름 할 일`, K-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
+        val skill = if (call == null) dev.vesta.core.skill.SkillCall.parse(input.text)?.let { c -> skills(user, workspace).firstOrNull { it.name == c.name }?.let { it to c } } else null
         val custom = call?.let { if (it.team) teams(user, it.name) else customAgents(user, it.name) }
+            ?: skill?.first?.takeIf { it.agent == AgentType.TASK }?.let { skillAgent(user, it) }
         if (call != null && custom == null) {
             val notice = if (call.team) "'${call.name}' 팀이 없거나 리더 에이전트가 지워졌습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
                 else "'${call.name}' 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
@@ -139,6 +159,7 @@ class DefaultConversationService(
             return@flow
         }
         val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name, team = call.team)
+            else if (skill != null) RoutingDecision(skill.first.agent, 1.0, RoutingStage.EXPLICIT, question = skill.first.expand(skill.second.arguments), skill = skill.first.name)
             else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
@@ -186,8 +207,7 @@ class DefaultConversationService(
         }
         suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
-                // 작업 폴더는 Mac 주인만 (파일 도구 범위를 넓히므로). 다른 사용자가 보내면 무시한다
-                workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) },
+                workspace = workspace,
                 spoken = input.spoken, persona = runCatching { persona(user.userId) }.getOrNull()))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
@@ -229,6 +249,9 @@ class DefaultConversationService(
     private companion object {
         /** 모델 없이 정책으로 답했을 때 메시지에 남기는 이름 */
         const val POLICY_MODEL = "policy"
+
+        /** `/skills`·`/agents` (메신저 `!skills`) */
+        val LISTING = Regex("^[/!](skills|agents)\\s*$", RegexOption.IGNORE_CASE)
 
         /** 글 없이 이미지만 보냈을 때 */
         const val DEFAULT_IMAGE_QUESTION = "이 이미지를 설명해 줘."
