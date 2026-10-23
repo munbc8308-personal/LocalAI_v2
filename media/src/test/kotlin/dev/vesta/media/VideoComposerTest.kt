@@ -75,4 +75,18 @@ class VideoComposerTest : FunSpec({
         probe(file, "-show_entries", "format_tags=comment", "-of", "default=nw=1:nk=1") shouldBe "AI 생성 (Vesta)"
         mp4.size shouldBeLessThanOrEqual 5_000_000
     }
+
+    test("생성형 클립 장면(G-03)과 내레이션 빠르기(G-05): 클립은 화면에 맞추고 내레이션보다 짧으면 늘린다, 빠르게 하면 장면이 짧아진다")
+        .config(enabled = Files.isExecutable(java.nio.file.Path.of(FFMPEG))) {
+        val dir = Files.createTempDirectory("clip")
+        val movie = dir.resolve("m.mp4")
+        ProcessBuilder(FFMPEG, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=256x256:rate=24:duration=1", "-pix_fmt", "yuv420p", movie.toString()).start().waitFor(60, TimeUnit.SECONDS)
+        val composer = FfmpegVideoComposer(Ffmpeg(FFMPEG), fps = 24, minSceneSeconds = 1.0, endCardSeconds = 1.0)
+        fun seconds(mp4: ByteArray) = Files.createTempFile("v", ".mp4").also { Files.write(it, mp4) }.let { probe(it, "-show_entries", "format=duration", "-of", "default=nw=1:nk=1").toDouble() }
+        val normal = composer.compose(listOf(VideoScene(png(Color.GREEN, 320, 180), silence(3.0), "클립", clip = Files.readAllBytes(movie))), 320, 180, "클립")
+        val fast = composer.compose(listOf(VideoScene(png(Color.GREEN, 320, 180), silence(3.0), "클립", speed = 1.5, clip = Files.readAllBytes(movie))), 320, 180, "클립")
+        // 3.0 + 0.6 + 끝 1.0 = 4.6초, 빠르게(1.5배)는 2.0 + 0.6 + 1.0 = 3.6초
+        seconds(normal).shouldBeBetween(4.3, 4.9, 0.0)
+        seconds(fast).shouldBeBetween(3.3, 3.9, 0.0)
+    }
 })

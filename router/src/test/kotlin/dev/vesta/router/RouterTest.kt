@@ -51,6 +51,15 @@ class RouterTest : FunSpec({
         }
         Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("여행 브이로그 느낌으로 하나 부탁해", emptyList(), all).agent shouldBe AgentType.VIDEO
         Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("여행 사진 느낌으로 하나 그려 줘", emptyList(), all).agent shouldBe AgentType.IMAGE
+        // 직전이 영상이면 고치기는 영상으로 (G-05)
+        val previous = dev.vesta.core.decision.RoutingDecision(AgentType.VIDEO, 1.0, RoutingStage.RULE, question = "제주 바다 영상 만들어 줘")
+        val recent = listOf(ChatMessage(ChatRole.USER, "제주 바다 영상 만들어 줘"), ChatMessage(ChatRole.ASSISTANT, "영상을 만들었습니다"))
+        Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("2번 장면을 노을 지는 바다로 바꾸고, 내레이션은 조금 빠르게 해 줘", recent, all, previous).agent shouldBe AgentType.VIDEO
+        (Router(DecisionConfig(), FakeDecision("WEB", 0.9), null).route("제주 날씨 알려 줘", recent, all, previous).agent == AgentType.VIDEO) shouldBe false
+        // 직전 판정이 다른 것이어도 최근에 영상 답이 있으면
+        val recentVideo = recent.dropLast(1) + ChatMessage(ChatRole.ASSISTANT, "영상을 만들었습니다: **제주**") + ChatMessage(ChatRole.USER, "2번 장면 바꿔") + ChatMessage(ChatRole.ASSISTANT, "이미지를 만들었습니다")
+        val image = dev.vesta.core.decision.RoutingDecision(AgentType.IMAGE, 0.9, RoutingStage.DECISION_MODEL, question = "2번 장면 바꿔")
+        Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("2번 장면을 노을로 바꾸고 내레이션 빠르게", recentVideo, all, image).agent shouldBe AgentType.VIDEO
     }
 
     test("결정 모델 신뢰도가 임계값 이상이면 그대로 쓴다") {

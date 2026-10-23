@@ -35,7 +35,7 @@ class FfmpegVideoComposer(
                 // Path는 Iterable<Path>라 += 가 목록 더하기로 읽힌다: add로
                 val clips = mutableListOf<Path>()
                 scenes.forEachIndexed { i, scene ->
-                    clips.add(clip(dir, "s$i", scene.image, scene.narration, SubtitleRenderer.subtitle(scene.subtitle, width, height), scene.motion, width, height))
+                    clips.add(clip(dir, "s$i", scene.image, scene.narration, SubtitleRenderer.subtitle(scene.subtitle, width, height), scene.motion, width, height, speed = scene.speed, moving = scene.clip))
                     onScene(i + 1)
                 }
                 val card = SubtitleRenderer.endCard(title, "AI 생성 · Vesta", width, height)
@@ -61,11 +61,18 @@ class FfmpegVideoComposer(
             }
         }
 
-    /** 장면 클립 하나. 내레이션이 없으면 [fixed]초(또는 최소 길이)만큼 소리 없이 */
-    private fun clip(dir: Path, name: String, image: ByteArray, narration: ByteArray?, subtitle: ByteArray?, motion: Motion?, width: Int, height: Int, fixed: Double? = null): Path {
+    /**
+     * 장면 클립 하나. 내레이션이 없으면 [fixed]초(또는 최소 길이)만큼 소리 없이. [speed]는 내레이션 빠르기(atempo).
+     * [moving]이 있으면(생성형 클립, G-03) 그림 대신 그 영상을 화면에 맞춰 쓰고, 내레이션보다 짧으면 마지막 프레임을 늘린다
+     */
+    private fun clip(
+        dir: Path, name: String, image: ByteArray, narration: ByteArray?, subtitle: ByteArray?, motion: Motion?, width: Int, height: Int,
+        fixed: Double? = null, speed: Double = 1.0, moving: ByteArray? = null,
+    ): Path {
         val img = dir.resolve("$name.png").also { it.writeBytes(image) }
         val audio = narration?.let { wav(dir, name, it) }
-        val seconds = fixed ?: maxOf(minSceneSeconds, (audio?.let { wavSeconds(it) } ?: 0.0) + padSeconds)
+        val tempo = speed.coerceIn(0.5, 2.0)
+        val seconds = fixed ?: maxOf(minSceneSeconds, (audio?.let { wavSeconds(it) / tempo } ?: 0.0) + padSeconds)
         val frames = (seconds * fps).toInt()
         val fade = minOf(0.4, seconds / 4)
         val z = when (motion) {
@@ -75,7 +82,8 @@ class FfmpegVideoComposer(
             Motion.PAN_RIGHT -> "z='1.12':x='(iw-iw/zoom)*on/$frames':y='ih/2-(ih/zoom/2)'"
             null -> "z='1':x='0':y='0'"
         }
-        val inputs = mutableListOf("-f", "png_pipe", "-i", img.toString())
+        val movie = moving?.let { dir.resolve("$name-clip.mp4").also { p -> p.writeBytes(it) } }
+        val inputs = if (movie != null) mutableListOf("-f", "mov", "-i", movie.toString()) else mutableListOf("-f", "png_pipe", "-i", img.toString())
         val sub = subtitle?.let { dir.resolve("$name-sub.png").also { p -> p.writeBytes(it) } }
         if (sub != null) inputs += listOf("-f", "png_pipe", "-i", sub.toString())
         if (audio != null) inputs += listOf("-f", "wav", "-i", audio.toString())
@@ -83,11 +91,17 @@ class FfmpegVideoComposer(
         val audioIndex = if (sub != null) 2 else 1
         val num = { v: Double -> String.format(Locale.ROOT, "%.3f", v) }
         // 확대할 때 떨림이 덜하게 두 배로 키운 뒤 zoompan
-        var video = "[0:v]scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},setsar=1," +
-            "zoompan=$z:d=$frames:s=${width}x$height:fps=$fps,format=yuv420p[base]"
+        var video = if (movie != null) {
+            "[0:v]scale=$width:$height:force_original_aspect_ratio=increase,crop=$width:$height,setsar=1,fps=$fps," +
+                "tpad=stop_mode=clone:stop_duration=${num(seconds)},trim=duration=${num(seconds)},setpts=PTS-STARTPTS,format=yuv420p[base]"
+        } else {
+            "[0:v]scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},setsar=1," +
+                "zoompan=$z:d=$frames:s=${width}x$height:fps=$fps,format=yuv420p[base]"
+        }
         video += if (sub != null) ";[base][1:v]overlay=0:0:format=auto,format=yuv420p[ov]" else ";[base]null[ov]"
         video += ";[ov]fade=t=in:st=0:d=${num(fade)},fade=t=out:st=${num(seconds - fade)}:d=${num(fade)}[v]"
-        val sound = "[$audioIndex:a]aresample=44100,aformat=channel_layouts=stereo,apad,atrim=0:${num(seconds)},afade=t=in:st=0:d=0.05,afade=t=out:st=${num(seconds - fade)}:d=${num(fade)}[a]"
+        val tempoFilter = if (audio != null && tempo != 1.0) "atempo=${num(tempo)}," else ""
+        val sound = "[$audioIndex:a]aresample=44100,aformat=channel_layouts=stereo,$tempoFilter" + "apad,atrim=0:${num(seconds)},afade=t=in:st=0:d=0.05,afade=t=out:st=${num(seconds - fade)}:d=${num(fade)}[a]"
         val out = dir.resolve("$name.mp4")
         exec(dir, inputs + listOf(
             "-filter_complex", "$video;$sound", "-map", "[v]", "-map", "[a]", "-t", num(seconds),

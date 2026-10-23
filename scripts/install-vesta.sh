@@ -37,6 +37,14 @@ if [ -x "$UV" ]; then
     echo "학습기: $TRAINER (vesta train decision)"
 fi
 
+# 영상 클립 환경 (M24 G-03): mlx-video 고정 커밋. 모델(수십 GB)은 video/README.md대로 직접 받는다
+VIDEO="$HOME/.vesta/video"
+if [ -x "$UV" ]; then
+    mkdir -p "$VIDEO"
+    rsync -a --exclude .venv --exclude models "$ROOT/video/" "$VIDEO/"
+    "$UV" sync --quiet --frozen --project "$VIDEO" && echo "영상 클립 환경: $VIDEO (모델: video/README.md)"
+fi
+
 # 이어 말하기 도우미 (M19): macOS 음성 합성을 스트리밍으로. Xcode 명령줄 도구(swiftc)가 있을 때만
 if command -v swiftc >/dev/null 2>&1; then
     mkdir -p "$HOME/.vesta/bin"

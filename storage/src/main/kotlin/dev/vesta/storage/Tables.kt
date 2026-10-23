@@ -178,6 +178,16 @@ object ChannelPairings : LongIdTable("channel_pairing") {
 }
 
 /** 미디어 (PROJECT.md 11장 MediaAsset, M12). 파일은 `~/.vesta/media/<사용자>/`에, 여기는 정보만 */
+/** 영상 프로젝트 (M24 G-05, v22): 계획·장면 재료 ID를 JSON으로. 대화별 마지막 것을 고친다 */
+object VideoProjects : org.jetbrains.exposed.v1.core.Table("video_project") {
+    val videoAsset = varchar("video_asset", 36)
+    val userId = long("user_id").index()
+    val sessionId = varchar("session_id", 64).index()
+    val plan = text("plan")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(videoAsset)
+}
+
 object MediaAssets : org.jetbrains.exposed.v1.core.Table("media_asset") {
     val id = varchar("id", 36)
     val userId = long("user_id").index()

@@ -131,6 +131,22 @@ data class MediaConfig(
     val speakBinary: String = "~/.vesta/bin/vesta-speak",
     /** 영상 배경 음악 (M24 G-02): 사용자가 넣은 소리 파일 하나, 또는 그런 파일이 든 폴더(하나를 고른다). 없으면 음악 없이 */
     val videoMusic: String? = null,
+    /** 움직이는 클립 (M24 G-03). 없으면 모든 장면을 그림 + 확대·이동으로 */
+    val clips: ClipConfig? = null,
+)
+
+/** 생성형 짧은 클립 (G-03): mlx-video 환경과 변환한 모델 폴더 */
+data class ClipConfig(
+    val projectDir: String = "~/.vesta/video",
+    val modelDir: String = "~/.vesta/video/models/Wan2.2-TI2V-5B-MLX",
+    val model: String = "Wan2.2-TI2V-5B",
+    /** 확산 단계 (없으면 모델 기본). 줄이면 빠르고 거칠다 */
+    val steps: Int? = null,
+    /** 영상 하나에서 움직이는 클립으로 만들 장면 수 상한 */
+    val maxPerVideo: Int = 2,
+    /** 클립 모델이 쓰는 메모리 (만들기 전에 이만큼 자리를 비운다) */
+    val memoryGigabytes: Int = 40,
+    val timeoutSeconds: Long = 900,
 )
 
 /** 메신저 채널 (PROJECT.md 6.5·6.6). 봇 토큰은 설정 파일이 아니라 키체인(또는 환경 변수)에 둔다. */

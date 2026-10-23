@@ -25,6 +25,30 @@ import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.flow.toList
 import java.time.Instant
 
+private class MemoryMedia : dev.vesta.core.media.MediaStore {
+    val files = linkedMapOf<String, Pair<dev.vesta.core.media.MediaAsset, ByteArray>>()
+    override suspend fun save(userId: UserId, kind: MediaKind, mime: String, bytes: ByteArray, caption: String?) =
+        dev.vesta.core.media.MediaAsset("a${files.size}", userId, kind, mime, bytes.size.toLong(), caption).also { files[it.id] = it to bytes }
+    override suspend fun load(userId: UserId, id: String) = files[id]?.takeIf { it.first.userId == userId }
+}
+
+private class MemoryProjects : dev.vesta.core.media.VideoProjectRepository {
+    val saved = mutableListOf<Pair<String, dev.vesta.core.media.VideoProject>>()
+    override suspend fun save(userId: UserId, sessionId: String, project: dev.vesta.core.media.VideoProject) { saved += sessionId to project }
+    override suspend fun latest(userId: UserId, sessionId: String) = saved.lastOrNull { it.first == sessionId }?.second
+}
+
+/** 부를 때마다 다음 답을 */
+private class Replies(vararg val texts: String) : dev.vesta.core.inference.InferenceClient {
+    val requests = mutableListOf<dev.vesta.core.inference.ChatRequest>()
+    override suspend fun listModels() = emptyList<dev.vesta.core.inference.ModelInfo>()
+    override suspend fun embed(model: String, texts: List<String>) = emptyList<FloatArray>()
+    override fun chat(request: dev.vesta.core.inference.ChatRequest): kotlinx.coroutines.flow.Flow<dev.vesta.core.inference.ChatChunk> {
+        requests += request
+        return kotlinx.coroutines.flow.flowOf(dev.vesta.core.inference.ChatChunk.Delta(texts[requests.size - 1]), dev.vesta.core.inference.ChatChunk.Done("stop", null))
+    }
+}
+
 private class FakeComposer : VideoComposer {
     var scenes = emptyList<VideoScene>()
     var size = 0 to 0
@@ -85,7 +109,8 @@ class VideoAgentTest : FunSpec({
         spoken shouldBe listOf("단풍이 물든 길.", "벤치에 앉아 쉰다.")
         composer.size shouldBe (1280 to 720)
         composer.scenes.map { it.subtitle to it.motion } shouldBe listOf("단풍이 물든 길." to Motion.ZOOM_IN, "벤치에 앉아 쉰다." to Motion.PAN_RIGHT)
-        media.saved.single().let { it.kind shouldBe MediaKind.VIDEO; it.mime shouldBe "video/mp4"; it.caption shouldBe "가을 산책" }
+        media.saved.single { it.kind == MediaKind.VIDEO }.let { it.mime shouldBe "video/mp4"; it.caption shouldBe "가을 산책" }
+        media.saved.count { it.kind == MediaKind.SCENE } shouldBe 4 // 그림 2 + 내레이션 2 (고치기용)
         events.filterIsInstance<AgentEvent.Media>().single().asset.mime shouldBe "video/mp4"
         events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }.let {
             it shouldContain "가을 산책"
@@ -101,5 +126,69 @@ class VideoAgentTest : FunSpec({
             .handle(request("유명 배우 얼굴로 광고 영상 만들어 줘")).toList()
         generator.calls.size shouldBe 0
         events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "만들지 않습니다"
+    }
+
+    test("고치기 (G-05): 앞 영상의 같은 그림·내레이션은 다시 쓰고 바뀐 장면만 새로, 빠르기, 비율은 앞 영상 그대로") {
+        val first = """{"mode": "new", "title": "가을 산책", "aspect": "landscape", "scenes": [
+            {"narration": "단풍이 물든 길.", "image": "autumn path", "motion": "zoom_in"},
+            {"narration": "벤치에 앉아 쉰다.", "image": "bench in a park", "motion": "pan_right"}]}"""
+        val edit = """{"mode": "edit", "title": "가을 산책", "aspect": "portrait", "speed": 1.2, "scenes": [
+            {"narration": "단풍이 물든 길.", "image": "autumn path", "motion": "zoom_in"},
+            {"narration": "벤치에 앉아 쉰다.", "image": "bench in a park, brighter sunlight", "motion": "pan_right"}]}"""
+        val llm = Replies(first, edit)
+        val generator = FakeGenerator()
+        val composer = FakeComposer()
+        val media = MemoryMedia()
+        val projects = MemoryProjects()
+        val spoken = mutableListOf<String>()
+        val tts = object : TextToSpeech {
+            override suspend fun synthesize(text: String, format: AudioFormat): ByteArray { spoken += text; return text.toByteArray() }
+        }
+        val agent = VideoAgent(llm, models, generator, composer, media, tts, projects = projects)
+        agent.handle(request("가을 산책 10초 영상 만들어 줘")).toList()
+        generator.calls.size shouldBe 2
+        spoken.size shouldBe 2
+        projects.saved.single().second.scenes.size shouldBe 2
+
+        val events = agent.handle(request("2번 장면 더 밝게, 내레이션은 조금 빠르게")).toList()
+        generator.calls.size shouldBe 3
+        generator.calls.last().first shouldBe "bench in a park, brighter sunlight"
+        spoken.size shouldBe 2
+        composer.size shouldBe (1280 to 720)
+        composer.scenes.map { it.speed } shouldBe listOf(1.2, 1.2)
+        composer.scenes.map { String(it.narration!!) } shouldBe listOf("단풍이 물든 길.", "벤치에 앉아 쉰다.")
+        projects.saved.last().second.let { it.speed shouldBe 1.2; it.aspect shouldBe "landscape" }
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }.let {
+            it shouldContain "영상을 고쳤습니다"
+            it shouldContain "그림 1개, 내레이션 0개"
+        }
+        llm.requests.last().messages.single().content.let {
+            it shouldContain "Previous video"
+            it shouldContain "bench in a park"
+        }
+        media.files.values.count { it.first.kind == MediaKind.VIDEO } shouldBe 2
+    }
+
+    test("움직이는 클립 (G-03): animate 장면만, 최대 개수까지. 실패하면 그림으로") {
+        val llm = OneReply("""{"title": "바다", "aspect": "landscape", "scenes": [
+            {"narration": "파도가 친다.", "image": "waves", "motion": "zoom_in", "animate": true},
+            {"narration": "갈매기가 난다.", "image": "seagulls", "motion": "pan_left", "animate": true},
+            {"narration": "노을이 진다.", "image": "sunset", "motion": "zoom_out", "animate": true}]}""")
+        val animated = mutableListOf<String>()
+        val clips = object : dev.vesta.core.media.ClipGenerator {
+            override val model = "wan"
+            override suspend fun animate(image: ByteArray, prompt: String, width: Int, height: Int, seconds: Double): ByteArray {
+                animated += prompt
+                if (prompt == "seagulls") throw dev.vesta.core.media.MediaException("메모리 부족")
+                return ByteArray(10)
+            }
+        }
+        val composer = FakeComposer()
+        var reservedClips = 0
+        VideoAgent(llm, models, FakeGenerator(), composer, MemoryMedia(), clips = clips, maxClips = 2, reserveClips = { reservedClips++ })
+            .handle(request("바다 영상 만들어 줘")).toList()
+        animated shouldBe listOf("waves", "seagulls")
+        reservedClips shouldBe 1
+        composer.scenes.map { it.clip != null } shouldBe listOf(true, false, false)
     }
 })

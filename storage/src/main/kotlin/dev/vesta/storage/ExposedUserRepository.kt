@@ -68,6 +68,7 @@ class ExposedUserRepository(private val db: Database, private val clock: Clock =
             Collections.deleteWhere { Collections.ownerUserId eq id.value }
         }
         MediaAssets.deleteWhere { MediaAssets.userId eq id.value }
+        VideoProjects.deleteWhere { VideoProjects.userId eq id.value }
         ToolRuns.deleteWhere { ToolRuns.userId eq id.value }
         WebSessions.deleteWhere { WebSessions.userId eq id.value }
         ChannelBindings.deleteWhere { ChannelBindings.userId eq id.value }

@@ -77,6 +77,7 @@ class FileMediaStore(private val db: Database, private val dir: Path, private va
         "image/webp" -> "webp"
         "audio/mp4" -> "m4a"
         "audio/ogg" -> "ogg"
+        "video/mp4" -> "mp4"
         else -> "bin"
     }
 }
@@ -90,3 +91,29 @@ internal fun ResultRow.toAsset() = MediaAsset(
     this[MediaAssets.caption],
     this[MediaAssets.createdAt],
 )
+
+/** 영상 프로젝트 (M24 G-05) */
+class ExposedVideoProjectRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : dev.vesta.core.media.VideoProjectRepository {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+    override suspend fun save(userId: UserId, sessionId: String, project: dev.vesta.core.media.VideoProject) {
+        withContext(Dispatchers.IO) {
+            transaction(db) {
+                VideoProjects.insert {
+                    it[videoAsset] = project.videoAsset
+                    it[VideoProjects.userId] = userId.value
+                    it[VideoProjects.sessionId] = sessionId
+                    it[plan] = json.encodeToString(dev.vesta.core.media.VideoProject.serializer(), project)
+                    it[createdAt] = clock.instant()
+                }
+            }
+        }
+    }
+
+    override suspend fun latest(userId: UserId, sessionId: String): dev.vesta.core.media.VideoProject? = withContext(Dispatchers.IO) {
+        transaction(db) {
+            VideoProjects.selectAll().where { (VideoProjects.userId eq userId.value) and (VideoProjects.sessionId eq sessionId) }
+                .orderBy(VideoProjects.createdAt, SortOrder.DESC).limit(1).firstOrNull()
+        }?.let { runCatching { json.decodeFromString(dev.vesta.core.media.VideoProject.serializer(), it[VideoProjects.plan]) }.getOrNull() }
+    }
+}

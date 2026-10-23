@@ -21,8 +21,11 @@ class ImageInput(val mime: String, val bytes: ByteArray) {
     }
 }
 
-/** IMAGE: 질문에 붙인 이미지, GENERATED: Vesta가 만든 이미지 (갤러리, V-08), VIDEO: Vesta가 만든 영상 (M24, G-04) */
-enum class MediaKind { IMAGE, AUDIO, GENERATED, VIDEO }
+/**
+ * IMAGE: 질문에 붙인 이미지, GENERATED: Vesta가 만든 이미지 (갤러리, V-08), VIDEO: Vesta가 만든 영상 (M24, G-04),
+ * SCENE: 영상 장면 재료(그림·내레이션, 고치기용, G-05). 갤러리에는 보이지 않는다
+ */
+enum class MediaKind { IMAGE, AUDIO, GENERATED, VIDEO, SCENE }
 
 /** 저장한 미디어 (PROJECT.md 11장 MediaAsset). 파일은 `~/.vesta/media/<사용자>/`에 둔다. [caption]은 생성 프롬프트 등 */
 data class MediaAsset(
@@ -94,8 +97,53 @@ enum class AudioFormat(val mime: String) {
 /** 영상 장면의 카메라 움직임 (Ken Burns, G-02) */
 enum class Motion { ZOOM_IN, ZOOM_OUT, PAN_LEFT, PAN_RIGHT }
 
-/** 영상 장면 하나 (G-02): 그림(PNG) + 내레이션(소리, 형식 상관없음) + 화면 아래 자막 */
-class VideoScene(val image: ByteArray, val narration: ByteArray?, val subtitle: String, val motion: Motion = Motion.ZOOM_IN)
+/**
+ * 영상 장면 하나 (G-02): 그림(PNG) 또는 움직이는 클립(mp4, G-03) + 내레이션(소리, 형식 상관없음) + 화면 아래 자막.
+ * [speed]: 내레이션 빠르기 (0.7~1.5, G-05 "내레이션 빠르게")
+ */
+class VideoScene(
+    val image: ByteArray,
+    val narration: ByteArray?,
+    val subtitle: String,
+    val motion: Motion = Motion.ZOOM_IN,
+    val speed: Double = 1.0,
+    val clip: ByteArray? = null,
+)
+
+/** 생성형 짧은 클립 (G-03): 장면 그림을 움직이는 몇 초짜리 영상(mp4)으로. 준비가 안 됐거나 실패하면 [MediaException] */
+interface ClipGenerator {
+    val model: String
+    suspend fun animate(image: ByteArray, prompt: String, width: Int, height: Int, seconds: Double): ByteArray
+}
+
+/** 영상 프로젝트의 장면 (G-05): 계획 + 만든 재료(SCENE 자산 ID) */
+@kotlinx.serialization.Serializable
+data class ProjectScene(
+    val narration: String,
+    val image: String,
+    val motion: Motion,
+    val imageAsset: String,
+    val voiceAsset: String? = null,
+    /** 움직이는 클립으로 만든 장면 (G-03) */
+    val clipAsset: String? = null,
+    val animate: Boolean = false,
+)
+
+/** 만든 영상 하나의 계획과 재료 (G-05): 같은 대화에서 "3번 장면 더 밝게"처럼 바뀐 장면만 다시 만든다 */
+@kotlinx.serialization.Serializable
+data class VideoProject(
+    val videoAsset: String,
+    val title: String,
+    val aspect: String,
+    val speed: Double,
+    val scenes: List<ProjectScene>,
+)
+
+interface VideoProjectRepository {
+    suspend fun save(userId: UserId, sessionId: String, project: VideoProject)
+    /** 이 대화에서 마지막으로 만든 영상 */
+    suspend fun latest(userId: UserId, sessionId: String): VideoProject?
+}
 
 /** 장면을 이어 붙여 mp4를 만든다 (G-02). [onScene]은 장면 하나를 마칠 때마다 (진행률) */
 interface VideoComposer {

@@ -104,6 +104,13 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 이미지 생성: 미디어 워커의 mflux (models.image, engine: mflux) */
     val imageGenerator: dev.vesta.core.media.ImageGenerator? = config.models.image?.takeIf { it.engine == "mflux" && it.baseUrl != null }
         ?.let { dev.vesta.media.WorkerImageGenerator(it.baseUrl!!, http, it.name) }
+    /** 움직이는 클립 (M24 G-03, media.clips) */
+    val clipGenerator: dev.vesta.core.media.ClipGenerator? = config.media.clips?.let { c ->
+        fun path(v: String) = java.nio.file.Path.of(v.replaceFirst(Regex("^~"), System.getProperty("user.home")))
+        dev.vesta.media.MlxVideoClipGenerator(config.training.uv, path(c.projectDir), path(c.modelDir), c.model, c.steps, timeoutSeconds = c.timeoutSeconds)
+    }
+    /** 만든 영상의 계획·재료 (M24 G-05 고치기) */
+    val videoProjects = dev.vesta.storage.ExposedVideoProjectRepository(database.db)
     /** 영상 합성 (M24 G-02): ffmpeg가 있으면 */
     val videoComposer: dev.vesta.core.media.VideoComposer? = ffmpeg.takeIf { dev.vesta.media.Ffmpeg.available(config.media.ffmpeg) }?.let { dev.vesta.media.FfmpegVideoComposer(it) }
     /** 읽어 주기: macOS say (models.tts, engine: say) */
@@ -342,6 +349,10 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                         reserve = { modelManager.reserve(config.media.imageMemoryGigabytes * 1024L * 1024 * 1024) },
                         music = { videoMusic() },
                         steps = config.media.imageSteps,
+                        projects = videoProjects,
+                        clips = clipGenerator,
+                        maxClips = config.media.clips?.maxPerVideo ?: 0,
+                        reserveClips = { config.media.clips?.let { modelManager.reserve(it.memoryGigabytes * 1024L * 1024 * 1024) } },
                     )
                 }
             } ?: ChatAgent(inference, modelManager)),
