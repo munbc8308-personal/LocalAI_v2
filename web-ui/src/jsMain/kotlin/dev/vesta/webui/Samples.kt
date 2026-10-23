@@ -45,7 +45,10 @@ fun SamplesCard(counts: Map<String, Int>, onChanged: () -> Unit) {
     Div({ classes("card") }) {
         Div({ classes("row") }) {
             Span { B { Text("학습 재료") } }
-            Span({ classes("muted", "small") }) { Text("큐레이터가 쉬는 때 모읍니다 (동의한 사용자만)") }
+            Span {
+                Span({ classes("muted", "small") }) { Text("쉬는 때 모읍니다 (동의한 사용자만) ") }
+                Button({ classes("link", "small"); onClick { scope.launch { runCatching { Http.post("/api/training/curate") }.onFailure { error = it.message }; tick++; onChanged() } } }) { Text("지금 모으기") }
+            }
         }
         Div({ classes("small") }) {
             Text(listOf("ROUTING" to "라우팅", "ANSWER" to "답 평가", "TOOL" to "도구").joinToString(" · ") { (kind, label) ->

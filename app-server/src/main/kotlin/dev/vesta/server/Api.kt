@@ -172,6 +172,8 @@ class TrainingEndpoints(
     /** 학습 재료 목록 (상태로 거르기)·검토 (L-26) */
     val samples: suspend (String?) -> List<dev.vesta.api.TrainingSampleDto> = { emptyList() },
     val review: suspend (Long, dev.vesta.api.SampleReviewDto) -> Boolean = { _, _ -> false },
+    /** 지금 모으기: 찾은 재료 수 */
+    val curate: suspend () -> Int = { 0 },
 )
 
 /**
@@ -398,6 +400,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val training = call.trainingFor(user, deps) ?: return@get
                     val status = call.request.queryParameters["status"]?.takeIf { it in setOf("PENDING", "ACCEPTED", "REJECTED") }
                     call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(dev.vesta.api.TrainingSampleDto.serializer()), training.samples(status)))
+                }
+                post("/curate") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    call.respondJson(HttpStatusCode.OK, buildJsonObject { put("added", training.curate()) }.toString())
                 }
                 post("/samples/{id}") {
                     val user = call.principal(deps) ?: return@post

@@ -99,9 +99,9 @@ class Curator(
 ) {
     private var job: Job? = null
 
-    /** 한 번 돈다. 쉬는 때가 아니거나 볼 것이 없으면 null */
-    suspend fun runOnce(): CuratorReport? {
-        if (!idle()) return null
+    /** 한 번 돈다. 쉬는 때가 아니거나 볼 것이 없으면 null. [force]는 주인이 "지금 모으기"를 누른 경우: 쉬는 때를 기다리지 않는다 */
+    suspend fun runOnce(force: Boolean = false): CuratorReport? {
+        if (!force && !idle()) return null
         val users = dataUsers()
         if (users.isEmpty()) return null
         val cursor = samples.cursor()
@@ -112,7 +112,7 @@ class Curator(
         val added = mutableListOf<TrainingSample>()
         var stopped = false
         for (sample in found) {
-            if (!idle()) { stopped = true; break }
+            if (!force && !idle()) { stopped = true; break }
             samples.add(sample)?.let { added += it }
         }
         // 멈췄으면 커서를 옮기지 않는다: 다음에 같은 턴을 다시 보고, 이미 넣은 것은 중복이라 빠진다

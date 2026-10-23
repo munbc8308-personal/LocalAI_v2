@@ -227,6 +227,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
                 samples = app.trainingSamples.counts(),
             )
         },
+        curate = { curator.runOnce(force = true)?.added?.size ?: 0 },
         samples = { status ->
             val names = app.userRepository.list().associate { it.id to it.name }
             app.trainingSamples.list(status?.let { dev.vesta.core.training.SampleStatus.valueOf(it) }, 100).map {
