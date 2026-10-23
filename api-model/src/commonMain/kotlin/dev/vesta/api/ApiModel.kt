@@ -86,6 +86,10 @@ data class TrainingStateDto(
     val versions: List<ModelVersionDto>,
     /** 학습 재료 개수: "ROUTING:PENDING" → 3 (L-25) */
     val samples: Map<String, Int> = emptyMap(),
+    /** 지금 쓰는 임베딩 모델과 출발점 (L-23) */
+    val embeddingModel: String? = null,
+    val embeddingBase: String? = null,
+    val embeddingVersions: List<ModelVersionDto> = emptyList(),
 )
 
 /** 학습 재료 하나 (L-25·L-26 검토) */
@@ -109,7 +113,8 @@ data class TrainingSampleDto(
 data class SampleReviewDto(val status: String, val label: String? = null)
 
 @Serializable
-data class ActivateDto(val name: String)
+/** [role]: decision(결정 모델) 또는 embedding(임베딩, L-23) */
+data class ActivateDto(val name: String, val role: String = "decision")
 
 /** 주간 점검 한 번 (M16, E-01). [report]는 마크다운 요약 */
 @Serializable

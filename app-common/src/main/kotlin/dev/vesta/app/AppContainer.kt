@@ -125,7 +125,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val indexer = Indexer(knowledge, inference)
     /** 리랭커는 선택 (models.reranker, engine: llama-server). 없으면 RRF 순서만 쓴다. */
     val reranker = config.models.reranker?.takeIf { it.baseUrl != null }?.let { HttpReranker(it.baseUrl!!, it.name, http) }
-    val retriever = LocalRetriever(knowledge, inference, VectorIndex(knowledge), reranker)
+    val vectorIndex = VectorIndex(knowledge)
+    val retriever = LocalRetriever(knowledge, inference, vectorIndex, reranker)
+    /** 검색 재료(L-23): 조각 고르기·지금 임베딩으로 이웃 찾기, 조각 → 질문 (메인 모델) */
+    val passages = KnowledgePassages(knowledge, vectorIndex, inference)
+    val questionWriter by lazy { QuestionWriter(inference, modelManager) }
+    val embeddingSwitcher = EmbeddingSwitcher(knowledge, vectorIndex, inference)
+
+    /** 새 컬렉션에 쓸 임베딩 모델: 학습해 켠 버전(L-23)이 있으면 그것, 아니면 설정 */
+    suspend fun embeddingModel(): String = modelVersions.active("embedding")?.name ?: config.models.embedding?.name ?: DEFAULT_EMBEDDING
 
     /** 외부 웹용 HTTP 클라이언트 (리다이렉트 따라감). 로컬 엔진용과 분리한다. */
     private val webHttp = HttpClients.web(config.web.pageTimeoutSeconds)

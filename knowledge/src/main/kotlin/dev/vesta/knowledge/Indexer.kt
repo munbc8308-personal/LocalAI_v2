@@ -136,10 +136,13 @@ class Indexer(
  */
 data class EmbeddingProfile(val queryPrefix: String) {
     fun query(text: String) = queryPrefix + text
-    fun passage(title: String, chunk: DocumentChunk) = buildString {
+    fun passage(title: String, chunk: DocumentChunk) = passage(title, chunk.heading, chunk.text)
+
+    /** 저장된 조각으로 같은 글을 다시 만든다 (임베딩 학습·전환, L-23) */
+    fun passage(title: String, heading: String?, text: String) = buildString {
         append(title)
-        chunk.heading?.let { append(" > ").append(it) }
-        append("\n").append(chunk.text)
+        heading?.let { append(" > ").append(it) }
+        append("\n").append(text)
     }
 
     companion object {

@@ -775,11 +775,23 @@ private fun TrainingCard() {
         }
         Div({ classes("row", "small") }) { Span { Text("지금 쓰는 모델") }; Span({ classes("mono") }) { Text(s.decisionModel) } }
         Div({ classes("row", "small") }) { Span { Text("다음 학습에 쓸 라우팅 정정·재료") }; Span { Text("${s.corrections}개") } }
+        // 임베딩 (L-23): 큐레이터가 만든 검색 재료로 bge-m3를 미세조정한다
+        s.embeddingModel?.let { model ->
+            Div({ classes("row") }) {
+                Span { B { Text("임베딩 학습") } }
+                Button({
+                    if (running != null) disabled()
+                    onClick { act { Http.post("/api/training/embedding"); tick++ } }
+                }) { Text(if (running != null) "학습 중…" else "학습 시작") }
+            }
+            Div({ classes("row", "small") }) { Span { Text("지금 쓰는 임베딩") }; Span({ classes("mono") }) { Text(model) } }
+            Div({ classes("row", "small") }) { Span { Text("검색 재료 (쓸 것·검토 대기)") }; Span { Text("${s.samples["RETRIEVAL:ACCEPTED"] ?: 0}개 · ${s.samples["RETRIEVAL:PENDING"] ?: 0}개") } }
+        }
         error?.let { P({ classes("error", "small") }) { Text(it) } }
         s.runs.take(5).forEach { run ->
             Div({ classes("run") }) {
                 Div({ classes("row", "small") }) {
-                    Span { Text("r${run.id} · ${trainingStatus(run.status)} · ${run.stage ?: "-"}") }
+                    Span { Text("r${run.id} ${if (run.kind == "embedding") "임베딩" else "결정"} · ${trainingStatus(run.status)} · ${run.stage ?: "-"}") }
                     Span {
                         run.loss?.let { Text("손실 ${(it * 1000).toInt() / 1000.0}  ") }
                         if (run.status == "RUNNING") Button({ classes("link", "small"); onClick { act { Http.post("/api/training/${run.id}/cancel") } } }) { Text("취소") }
@@ -789,8 +801,22 @@ private fun TrainingCard() {
                     Div({ classes("fill"); style { property("width", "${run.step * 100 / run.total}%") } })
                 }
                 run.error?.let { Div({ classes("muted", "small") }) { Text(it) } }
-                gateSummary(run.report)?.let { Div({ classes("muted", "small") }) { Text(it) } }
+                (if (run.kind == "embedding") embeddingGateSummary(run.report) else gateSummary(run.report))?.let { Div({ classes("muted", "small") }) { Text(it) } }
             }
+        }
+        if (s.embeddingVersions.isNotEmpty()) {
+            Div({ classes("small") }) { B { Text("임베딩 버전") } }
+            s.embeddingVersions.forEach { v ->
+                Div({ classes("row", "small") }) {
+                    Span({ classes("mono") }) { Text((if (v.active) "● " else "○ ") + v.name) }
+                    if (!v.active) Button({ classes("link", "small"); onClick { act { Http.post("/api/training/activate", ApiJson.encodeToString(ActivateDto.serializer(), ActivateDto(v.name, "embedding"))) } } }) { Text("이 버전 쓰기") }
+                }
+            }
+            val base = s.embeddingBase
+            if (base != null && s.embeddingModel != base) Button({
+                classes("link", "small")
+                onClick { act { Http.post("/api/training/activate", ApiJson.encodeToString(ActivateDto.serializer(), ActivateDto(base, "embedding"))) } }
+            }) { Text("기본 임베딩($base)으로 되돌리기 (벡터를 다시 만든다)") }
         }
         if (s.versions.isNotEmpty()) {
             Div({ classes("small") }) { B { Text("버전") } }
@@ -830,6 +856,13 @@ private fun gateSummary(report: String?): String? = runCatching {
         .joinToString("") { (k, label) -> " · $label ${base[k]}→${cand[k]}/${judgeTotal[k]}" }
     listOf("agent" to "담당", "needsWeb" to "웹", "needsLocal" to "로컬").joinToString(" · ") { (k, label) -> "$label ${base[k]}→${cand[k]}/$total" } + judges +
         " · 다른 판정 일치 ${replay["same"]!!.jsonPrimitive.content}/${replay["total"]!!.jsonPrimitive.content}"
+}.getOrNull()
+
+/** 임베딩 게이트 한 줄: 떼어 둔 재료·평가셋의 hit@5·MRR (L-23) */
+private fun embeddingGateSummary(report: String?): String? = runCatching {
+    val gate = ApiJson.parseToJsonElement(report ?: return null).jsonObject
+    fun part(model: String, set: String) = gate[model]!!.jsonObject[set]!!.jsonObject.let { it["hit5"]!!.jsonPrimitive.content + "/" + it["total"]!!.jsonPrimitive.content + " MRR " + it["mrr"]!!.jsonPrimitive.content }
+    "떼어 둔 재료 hit@5 ${part("base", "heldout")} → ${part("candidate", "heldout")} · 평가셋 ${part("base", "eval")} → ${part("candidate", "eval")}"
 }.getOrNull()
 
 // JS 정규식(u 플래그)은 닫는 ]도 이스케이프해야 한다

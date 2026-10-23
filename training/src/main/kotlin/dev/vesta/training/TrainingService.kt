@@ -56,6 +56,8 @@ class TrainingService(
     private val samples: dev.vesta.core.training.TrainingSampleRepository? = null,
     /** D6 코드 판정 재료를 만들 저장소 검색 (L-22). 없으면 손으로 쓴 판정 재료만 쓴다 */
     private val codeContext: (suspend (String) -> dev.vesta.core.training.CodeContext?)? = null,
+    /** 임베딩 학습 (L-23): 조각·지금 쓰는 임베딩 모델·통과하면 모든 컬렉션을 새 모델로 바꾸기. 없으면 임베딩 학습을 하지 않는다 */
+    private val embedding: EmbeddingHooks? = null,
     private val home: String = System.getProperty("user.home"),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -77,6 +79,78 @@ class TrainingService(
         val run = runs.start("decision", config.decisionBase)
         job = scope.launch(Dispatchers.IO) { execute(run) }
         run
+    }
+
+    /** 임베딩 모델 학습을 시작한다 (L-23). 이미 무엇이든 학습 중이면 그 실행을 돌려준다 */
+    suspend fun startEmbedding(): TrainingRun = mutex.withLock {
+        runs.list(1).firstOrNull()?.takeIf { it.status == TrainingStatus.RUNNING && job?.isActive == true }?.let { return it }
+        val hooks = checkNotNull(embedding) { "임베딩 학습을 쓸 수 없습니다 (Ollama 임베딩 모델 설정 확인)" }
+        check(trainer.resolve("vesta_train").exists()) { "학습기가 없습니다: $trainer (scripts/install-vesta.sh)" }
+        val run = runs.start("embedding", config.embeddingBase)
+        job = scope.launch(Dispatchers.IO) { executeEmbedding(run, hooks) }
+        run
+    }
+
+    private suspend fun executeEmbedding(run: TrainingRun, hooks: EmbeddingHooks) {
+        val dir = work.resolve("runs").resolve("r${run.id}")
+        val candidate = "bge-m3-vesta:r${run.id}"
+        try {
+            Files.createDirectories(dir)
+            runs.progress(run.id, "데이터", 0, 0, null)
+            val current = hooks.current()
+            val users = dataUsers()
+            val data = EmbeddingData.write(dir, samples?.accepted(dev.vesta.core.training.SampleKind.RETRIEVAL, users).orEmpty(), hooks.passages, users, current,
+                listOf("code-vesta.tsv", "retrieval-project-md.tsv").map { path(config.evalDir).resolve(it) }, hooks.query)
+            check(data.train > 0) { "학습할 검색 재료가 없습니다 (상태 탭 학습 재료: 큐레이터가 쉬는 때 만든다)" }
+            makeRoom(EMBEDDING_MEMORY)
+            runs.progress(run.id, "학습", 0, 0, null)
+            python(
+                dir, "embed_train", "--gguf", ollamaGguf(config.embeddingBase).toString(), "--pairs", data.pairs.toString(),
+                "--work", work.resolve("base").toString(), "--out", dir.resolve("model.gguf").toString(),
+                "--epochs", config.embeddingEpochs.toString(), "--lr", config.embeddingLearningRate.toString(),
+            ) { event ->
+                if (event["event"]?.jsonPrimitive?.contentOrNull == "progress") runs.progress(run.id, "학습", event.int("step"), event.int("total"), event["loss"]?.jsonPrimitive?.doubleOrNull)
+            }
+            runs.progress(run.id, "내보내기", 0, 0, null)
+            python(dir, "embed_register", "--gguf", dir.resolve("model.gguf").toString(), "--name", candidate, "--ollama", hooks.ollamaUrl)
+            runs.progress(run.id, "평가", 0, 0, null)
+            var gate: JsonObject? = null
+            python(
+                dir, "embed_verify", "--base", current, "--candidate", candidate, "--corpus", data.corpus.toString(), "--heldout", data.heldout.toString(),
+                "--eval", data.eval.toString(), "--min-heldout", config.minHeldoutPairs.toString(), "--ollama", hooks.ollamaUrl,
+            ) { event -> if (event["event"]?.jsonPrimitive?.contentOrNull == "gate") gate = event }
+            val report = gate ?: error("평가 결과가 없습니다")
+            if (report["passed"]?.jsonPrimitive?.booleanOrNull == true) {
+                runs.progress(run.id, "전환", 0, 0, null)
+                versions.add("embedding", candidate, config.embeddingBase, run.id, report.toString())
+                // 모든 컬렉션의 벡터를 새 모델로 다시 만든 뒤 켠다 (컬렉션마다 한 번에 바뀐다)
+                hooks.switch(candidate)
+                versions.activate("embedding", candidate)
+                runs.finish(run.id, TrainingStatus.PASSED, candidate, report.toString(), null)
+                log.info { "임베딩 학습 통과 → $candidate 사용" }
+            } else {
+                val reasons = report["reasons"]?.jsonArray?.joinToString("; ") { it.jsonPrimitive.content }
+                runs.finish(run.id, TrainingStatus.REJECTED, candidate, report.toString(), reasons)
+                log.info { "임베딩 학습 반영 안 함: $reasons" }
+            }
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) { if (runs.get(run.id)?.status == TrainingStatus.RUNNING) runs.finish(run.id, TrainingStatus.CANCELLED, null, null, "취소됨") }
+            throw e
+        } catch (e: Exception) {
+            if (runs.get(run.id)?.status != TrainingStatus.RUNNING) return
+            log.error(e) { "임베딩 학습 실패 (r${run.id})" }
+            runs.finish(run.id, TrainingStatus.FAILED, null, null, e.message ?: e::class.simpleName)
+        }
+    }
+
+    /** Ollama 매니페스트에서 모델의 GGUF 파일을 찾는다 */
+    private fun ollamaGguf(model: String): Path {
+        val (name, tag) = model.split(':').let { it[0] to (it.getOrNull(1) ?: "latest") }
+        val models = path(config.ollamaModels)
+        val manifest = json.parseToJsonElement(models.resolve("manifests/registry.ollama.ai/library/$name/$tag").readText()).jsonObject
+        val digest = manifest["layers"]!!.jsonArray.map { it.jsonObject }
+            .first { it["mediaType"]!!.jsonPrimitive.content == "application/vnd.ollama.image.model" }["digest"]!!.jsonPrimitive.content
+        return models.resolve("blobs").resolve(digest.replace(':', '-')).also { check(it.exists()) { "Ollama 모델 파일이 없습니다: $model" } }
     }
 
     suspend fun cancel(id: Long): Boolean = mutex.withLock {
@@ -210,6 +284,11 @@ class TrainingService(
     }
 
     private fun tail(file: File) = runCatching { file.readLines().filter { it.isNotBlank() }.takeLast(3).joinToString(" | ").take(500) }.getOrDefault("")
+
+    private companion object {
+        /** 임베딩 학습 메모리 (bge-m3 전체 미세조정, 묶음 16) */
+        const val EMBEDDING_MEMORY = 16L * 1024 * 1024 * 1024
+    }
 
     private fun JsonObject.int(key: String) = this[key]?.jsonPrimitive?.intOrNull ?: 0
 }

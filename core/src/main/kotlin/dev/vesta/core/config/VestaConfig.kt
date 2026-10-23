@@ -88,6 +88,14 @@ data class TrainingConfig(
     val ollayaModels: String = "~/.ollaya/models",
     /** 평가셋 (scripts/install-vesta.sh가 eval/을 복사). D6 코드 판정 시험 질문을 여기서 읽는다 (L-22) */
     val evalDir: String = "~/.vesta/evalsets",
+    /** 임베딩 학습의 출발점 (L-23, Ollama 모델). 학습한 버전 위에 쌓지 않고 항상 이 모델에서 새로 학습한다 */
+    val embeddingBase: String = "bge-m3:567m",
+    /** Ollama 모델 저장소 (임베딩 기본 GGUF를 찾는다) */
+    val ollamaModels: String = "~/.ollama/models",
+    val embeddingEpochs: Int = 2,
+    val embeddingLearningRate: Double = 1e-5,
+    /** 임베딩 평가 게이트: 학습에 쓰지 않고 떼어 둔 검색 재료가 이만큼은 있어야 한다 */
+    val minHeldoutPairs: Int = 10,
 )
 
 /**

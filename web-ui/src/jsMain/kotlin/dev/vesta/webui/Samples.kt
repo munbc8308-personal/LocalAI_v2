@@ -70,11 +70,11 @@ private fun SampleRow(s: TrainingSampleDto, onReview: (String, String?) -> Unit)
             Span({ classes("muted") }) { Text("확실함 ${(s.confidence * 100).toInt()}%") }
         }
         Div({ classes("small") }) { Text("질문: ${s.question.take(200)}") }
-        s.answer?.let { Div({ classes("muted", "small") }) { Text("답: ${it.take(200)}") } }
+        s.answer?.let { Div({ classes("muted", "small") }) { Text((if (s.kind == "RETRIEVAL") "정답 조각: " else "답: ") + it.take(200)) } }
         s.note?.let { Div({ classes("muted", "small") }) { Text(it.take(200)) } }
         Div({ classes("row", "small") }) {
             Span {
-                Text(if (s.kind == "ROUTING") "담당: " else if (s.kind == "ANSWER") "평가: " else "라벨: ")
+                Text(when (s.kind) { "ROUTING" -> "담당: "; "ANSWER" -> "평가: "; "RETRIEVAL" -> "어려운 오답 조각: "; else -> "라벨: " })
                 when (s.kind) {
                     "ROUTING" -> Select({ onChange { e -> label = e.value ?: label } }) {
                         listOf("CHAT", "DOCS", "WEB", "CODE", "TASK", "PERSONAL", "IMAGE").forEach { v -> Option(v, { if (v == label) selected() }) { Text(v) } }
@@ -96,6 +96,7 @@ private fun SampleRow(s: TrainingSampleDto, onReview: (String, String?) -> Unit)
 private fun kindLabel(kind: String) = when (kind) {
     "ROUTING" -> "라우팅"
     "ANSWER" -> "답 평가"
+    "RETRIEVAL" -> "검색"
     else -> "도구"
 }
 
@@ -105,5 +106,6 @@ private fun signalLabel(signal: String) = when (signal) {
     "REPHRASE" -> "말을 바꿔 다시 물음"
     "CORRECTION" -> "바로잡음"
     "DENIAL" -> "승인 거부"
+    "SYNTHETIC" -> "조각으로 만든 질문"
     else -> signal
 }

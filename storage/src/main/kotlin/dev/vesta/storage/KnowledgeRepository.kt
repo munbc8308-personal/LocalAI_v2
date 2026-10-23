@@ -22,6 +22,7 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -78,6 +79,13 @@ class KnowledgeRepository(
     }
 
     /** 내가 소유한 컬렉션 (관리용: 추가·삭제·공유) */
+    /** 모든 사용자의 컬렉션 (임베딩 모델 전환, L-23) */
+    suspend fun allCollections(): List<Collection> = io { Collections.selectAll().map { it.toCollection() } }
+
+    suspend fun collection(id: CollectionId): Collection? = io {
+        Collections.selectAll().where { Collections.id eq id.value }.firstOrNull()?.toCollection()
+    }
+
     suspend fun listCollections(owner: UserId): List<Collection> = io {
         Collections.selectAll().where { Collections.ownerUserId eq owner.value }.orderBy(Collections.name).map { it.toCollection() }
     }
@@ -200,6 +208,19 @@ class KnowledgeRepository(
         ) { rs ->
             buildList { while (rs.next()) add(rs.getLong(1) to -rs.getDouble(2)) }
         } ?: emptyList()
+    }
+
+    /** 컬렉션의 조각 ID와 글 길이 (검색 재료 고르기, L-23) */
+    suspend fun chunkIds(collections: List<CollectionId>): List<Pair<Long, Int>> = io {
+        if (collections.isEmpty()) return@io emptyList()
+        (Chunks innerJoin Documents).select(Chunks.id, Chunks.text).where { Documents.collectionId inList collections.map { it.value } }
+            .map { it[Chunks.id].value to it[Chunks.text].length }
+    }
+
+    /** 벡터를 한 번에 바꾸고 컬렉션의 임베딩 모델을 [model]로 (임베딩 모델 전환, L-23). 한 트랜잭션이라 섞인 상태가 보이지 않는다 */
+    suspend fun replaceVectors(collection: CollectionId, model: String, vectors: Map<Long, FloatArray>) = io {
+        for ((id, vector) in vectors) Chunks.update({ Chunks.id eq id }) { it[embedding] = encode(vector) }
+        Collections.update({ Collections.id eq collection.value }) { it[embeddingModel] = model }
     }
 
     suspend fun chunks(ids: List<Long>): List<ChunkRecord> = io {

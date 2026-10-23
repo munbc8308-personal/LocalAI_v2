@@ -168,7 +168,9 @@ class TrainingEndpoints(
     val state: suspend () -> TrainingStateDto,
     val start: suspend () -> TrainingRunDto,
     val cancel: suspend (Long) -> Boolean,
-    val activate: suspend (String) -> Boolean,
+    val activate: suspend (String, String) -> Boolean,
+    /** 임베딩 학습 시작 (L-23) */
+    val startEmbedding: suspend () -> TrainingRunDto = { error("임베딩 학습을 쓸 수 없습니다") },
     /** 학습 재료 목록 (상태로 거르기)·검토 (L-26) */
     val samples: suspend (String?) -> List<dev.vesta.api.TrainingSampleDto> = { emptyList() },
     val review: suspend (Long, dev.vesta.api.SampleReviewDto) -> Boolean = { _, _ -> false },
@@ -388,6 +390,14 @@ fun Application.vestaApi(deps: ServerDeps) {
                     }
                     call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingRunDto.serializer(), run))
                 }
+                post("/embedding") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val run = runCatching { training.startEmbedding() }.getOrElse {
+                        return@post call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", it.message ?: "학습을 시작하지 못했습니다") }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingRunDto.serializer(), run))
+                }
                 post("/{id}/cancel") {
                     val user = call.principal(deps) ?: return@post
                     val training = call.trainingFor(user, deps) ?: return@post
@@ -418,8 +428,8 @@ fun Application.vestaApi(deps: ServerDeps) {
                 post("/activate") {
                     val user = call.principal(deps) ?: return@post
                     val training = call.trainingFor(user, deps) ?: return@post
-                    val name = ApiJson.decodeFromString(ActivateDto.serializer(), call.receiveText()).name
-                    val ok = training.activate(name)
+                    val dto = ApiJson.decodeFromString(ActivateDto.serializer(), call.receiveText())
+                    val ok = training.activate(dto.role, dto.name)
                     call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("activated", ok) }.toString())
                 }
             }

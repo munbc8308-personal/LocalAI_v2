@@ -20,7 +20,7 @@ private val t0 = Instant.parse("2026-10-23T00:00:00Z")
 private fun turn(id: Long, q: String, agent: String? = "CHAT", stage: String? = "DECISION_MODEL", minutes: Long = id, session: String = "s", denied: List<String> = emptyList()) =
     CuratorTurn(me, session, id, q, t0.plusSeconds(minutes * 60), answerId = id * 100, answer = "답 $id", answerAgent = agent, routedStage = stage, deniedTools = denied)
 
-private class MemorySamples : TrainingSampleRepository {
+internal class MemorySamples : TrainingSampleRepository {
     val items = mutableListOf<TrainingSample>()
     var at = 0L
     override suspend fun add(sample: TrainingSample) =
@@ -75,11 +75,11 @@ class CuratorTest : FunSpec({
         val samples = MemorySamples()
         var idle = false
         val reports = mutableListOf<CuratorReport>()
-        val curator = Curator(source, samples, { setOf(me) }, { idle }, { reports += it })
+        val curator = Curator(source, samples, { setOf(me) }, { idle }, record = { reports += it })
         curator.runOnce() shouldBe null
         var calls = 0
         idle = true
-        val busyAfterOne = Curator(source, samples, { setOf(me) }, { calls++ < 2 }, { reports += it })
+        val busyAfterOne = Curator(source, samples, { setOf(me) }, { calls++ < 2 }, record = { reports += it })
         busyAfterOne.runOnce()!!.stoppedEarly shouldBe true
         samples.at shouldBe 0
         samples.items.size shouldBe 1

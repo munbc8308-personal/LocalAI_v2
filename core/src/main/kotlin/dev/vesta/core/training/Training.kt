@@ -75,8 +75,8 @@ interface ModelVersionRepository {
     suspend fun list(role: String): List<ModelVersion>
 }
 
-/** 학습 재료 종류 (L-25): 라우팅(질문 → 담당), 답 좋고 나쁨, 도구 사용 */
-enum class SampleKind { ROUTING, ANSWER, TOOL }
+/** 학습 재료 종류 (L-25): 라우팅(질문 → 담당), 답 좋고 나쁨, 도구 사용, 검색(질문 ↔ 정답 조각, L-23) */
+enum class SampleKind { ROUTING, ANSWER, TOOL, RETRIEVAL }
 
 /** 재료를 찾은 신호 (L-20·L-21) */
 enum class SampleSignal {
@@ -90,13 +90,16 @@ enum class SampleSignal {
     CORRECTION,
     /** 도구 승인 거부 */
     DENIAL,
+    /** 메인 모델이 조각을 보고 만든 질문 (L-23) */
+    SYNTHETIC,
 }
 
 /** 검토 상태 (L-26): 확실한 것만 바로 쓰고, 나머지는 주인이 본다 */
 enum class SampleStatus { PENDING, ACCEPTED, REJECTED }
 
 /**
- * 학습 재료 하나 (L-25). [label]: ROUTING은 담당 에이전트 이름, ANSWER는 good·bad, TOOL은 denied:<도구>.
+ * 학습 재료 하나 (L-25). [label]: ROUTING은 담당 에이전트 이름, ANSWER는 good·bad, TOOL은 denied:<도구>,
+ * RETRIEVAL은 어려운 오답 조각 ID(쉼표로, 없으면 "-")이고 [messageId]가 정답 조각 ID, [answer]는 그 조각 글(검토용).
  * [question]·[answer]는 개인정보를 지운 글. [confidence]는 신호의 확실함(0~1)
  */
 data class TrainingSample(
@@ -125,6 +128,8 @@ interface TrainingSampleRepository {
     suspend fun counts(): Map<String, Int>
     /** 학습에 쓸 재료: [kind]의 ACCEPTED, [users]의 것만 (동의한 사용자, L-09) */
     suspend fun accepted(kind: SampleKind, users: Set<UserId>): List<TrainingSample>
+    /** [kind] 재료가 가리키는 [TrainingSample.messageId]들 (상태 무관). 검색 재료는 이미 질문을 만든 조각을 다시 보지 않게 */
+    suspend fun messageIds(kind: SampleKind): Set<Long> = list(null, 100_000).filter { it.kind == kind }.mapNotNull { it.messageId }.toSet()
     /** 큐레이터가 어디까지 봤는지 (메시지 ID) */
     suspend fun cursor(): Long
     suspend fun setCursor(messageId: Long)
@@ -161,3 +166,28 @@ interface CuratorSource {
  * 그 글에 들어간 파일 경로
  */
 data class CodeContext(val text: String, val files: List<String>)
+
+/**
+ * 검색 재료(L-23)를 만들 조각: 동의한 사용자(L-09)가 가진 컬렉션의 것. [passage]는 색인할 때 임베딩에 넣은 글과 같은 꼴(제목 > 구역 + 본문)
+ */
+data class Passage(
+    val chunkId: Long,
+    val userId: UserId,
+    val collectionId: Long,
+    val embeddingModel: String,
+    val path: String,
+    val heading: String?,
+    val text: String,
+    val passage: String,
+    val code: Boolean,
+)
+
+interface PassageSource {
+    /** 아직 재료로 쓰지 않은 조각 [limit]개 (컬렉션을 고르게 섞어서) */
+    suspend fun sample(users: Set<UserId>, exclude: Set<Long>, limit: Int): List<Passage>
+    /** 지금 임베딩으로 [question]을 [of]가 있는 컬렉션에서 벡터 검색한 조각, 가까운 것부터 */
+    suspend fun nearest(of: Passage, question: String, limit: Int): List<Passage>
+    suspend fun byIds(ids: List<Long>): List<Passage>
+    /** 학습·평가에 쓸 조각 전부: [users]의 컬렉션 중 임베딩 모델이 [model]인 것 */
+    suspend fun corpus(users: Set<UserId>, model: String): List<Passage>
+}

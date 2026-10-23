@@ -29,12 +29,11 @@ class CollectionCreateCommand : CliktCommand(name = "create") {
     override fun help(context: Context) = "컬렉션을 만든다"
     private val name by argument(help = "컬렉션 이름 (영문·숫자·-·_ 권장, @이름으로 부른다)")
     private val description by option("--description", "-d", help = "무슨 문서인지 설명 (라우팅에 쓴다)")
-    private val embeddingModel by option("--embedding-model", help = "임베딩 모델 (기본: 설정의 models.embedding)")
+    private val embeddingModel by option("--embedding-model", help = "임베딩 모델 (기본: 학습해 켠 임베딩, 없으면 설정의 models.embedding)")
 
     override fun run() = runBlocking {
         AppContainer().use { app ->
-            val model = embeddingModel ?: app.config.models.embedding?.name
-                ?: run { echo("임베딩 모델이 없습니다. 설정의 models.embedding을 정하거나 --embedding-model을 주세요.", err = true); throw ProgramResult(1) }
+            val model = embeddingModel ?: app.embeddingModel()
             if (app.knowledge.findCollection(app.owner.userId, name) != null) {
                 echo("이미 있습니다: $name", err = true)
                 throw ProgramResult(1)

@@ -80,26 +80,30 @@ object SignalDetector {
     }
 }
 
-/** 큐레이터가 한 번 돈 결과 */
-data class CuratorReport(val turns: Int, val added: List<TrainingSample>, val stoppedEarly: Boolean)
+/** 큐레이터가 한 번 돈 결과. [pairs]는 검색 재료(L-23)로 새로 넣은 것 (버린 조각 포함) */
+data class CuratorReport(val turns: Int, val added: List<TrainingSample>, val stoppedEarly: Boolean, val pairs: List<TrainingSample> = emptyList())
 
 /**
  * 학습 재료 큐레이터 (PROJECT.md L-25): 백그라운드에서 **쉬는 때만** 돈다 ([idle]: 요청·음성 대화·학습·주간 점검이 없음).
  * 동의한 사용자(L-09) 대화의 새 턴에서 신호를 찾아 재료로 넣는다(개인정보 지움, 중복 제외). 누가 쓰기 시작하면 바로 멈추고 다음에 이어 간다.
- * 확실한 재료는 바로, 나머지는 검토 대기(L-26)
+ * 확실한 재료는 바로, 나머지는 검토 대기(L-26). [miner]가 있으면 남는 시간에 검색 재료(L-23)도 [pairsPerRun]개 조각씩 만든다
  */
 class Curator(
     private val source: CuratorSource,
     private val samples: TrainingSampleRepository,
     private val dataUsers: suspend () -> Set<UserId>,
     private val idle: suspend () -> Boolean,
+    /** 지금 답하는 중인가 ("지금 모으기"는 쉬는 때를 기다리지 않지만, 답하는 중이면 검색 재료 만들기를 멈춘다) */
+    private val busy: suspend () -> Boolean = { false },
     /** 한 일을 남긴다 (에이전트 스튜디오 타임라인, L-27). 새 턴이 있었을 때만 */
     private val record: suspend (CuratorReport) -> Unit = {},
     private val batch: Int = 500,
+    private val miner: PairMiner? = null,
+    private val pairsPerRun: Int = 20,
 ) {
     private var job: Job? = null
 
-    /** 한 번 돈다. 쉬는 때가 아니거나 볼 것이 없으면 null. [force]는 주인이 "지금 모으기"를 누른 경우: 쉬는 때를 기다리지 않는다 */
+    /** 한 번 돈다. 쉬는 때가 아니거나 한 일이 없으면 null. [force]는 주인이 "지금 모으기"를 누른 경우: 쉬는 때를 기다리지 않는다 */
     suspend fun runOnce(force: Boolean = false): CuratorReport? {
         if (!force && !idle()) return null
         val users = dataUsers()
@@ -107,19 +111,23 @@ class Curator(
         val cursor = samples.cursor()
         val turns = source.turns(cursor, users, batch)
         val fresh = turns.filter { it.questionId > cursor }
-        if (fresh.isEmpty()) return null
-        val found = SignalDetector.detect(turns, cursor)
         val added = mutableListOf<TrainingSample>()
         var stopped = false
-        for (sample in found) {
-            if (!force && !idle()) { stopped = true; break }
-            samples.add(sample)?.let { added += it }
+        if (fresh.isNotEmpty()) {
+            for (sample in SignalDetector.detect(turns, cursor)) {
+                if (!force && !idle()) { stopped = true; break }
+                samples.add(sample)?.let { added += it }
+            }
+            // 멈췄으면 커서를 옮기지 않는다: 다음에 같은 턴을 다시 보고, 이미 넣은 것은 중복이라 빠진다
+            if (!stopped) samples.setCursor(fresh.maxOf { it.questionId })
         }
-        // 멈췄으면 커서를 옮기지 않는다: 다음에 같은 턴을 다시 보고, 이미 넣은 것은 중복이라 빠진다
-        if (!stopped) samples.setCursor(fresh.maxOf { it.questionId })
-        val report = CuratorReport(fresh.size, added, stopped)
+        // 검색 재료는 조각마다 메인 모델을 부르므로 누가 쓰기 시작하면 바로 멈춘다 ("지금 모으기"여도 답하는 중이면)
+        val pairs = if (stopped || miner == null) emptyList() else miner.run(users, pairsPerRun) { if (force) busy() else !idle() }
+        if (fresh.isEmpty() && pairs.isEmpty()) return null
+        val report = CuratorReport(fresh.size, added, stopped, pairs)
         runCatching { record(report) }.onFailure { log.warn { "큐레이터 기록 실패: ${it.message}" } }
         if (added.isNotEmpty()) log.info { "학습 재료 ${added.size}개 (검토 대기 ${added.count { it.status == SampleStatus.PENDING }})" }
+        if (pairs.isNotEmpty()) log.info { "검색 재료: 조각 ${pairs.size}개 봄, 쓸 것 ${pairs.count { it.status != SampleStatus.REJECTED }}" }
         return report
     }
 

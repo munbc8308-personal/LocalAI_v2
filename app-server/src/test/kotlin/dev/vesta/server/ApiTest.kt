@@ -345,7 +345,7 @@ class ApiTest : FunSpec({
             state = { dev.vesta.api.TrainingStateDto("winnow:e4b", "winnow:e4b", 2, listOf(run), emptyList()) },
             start = { calls += "start"; run },
             cancel = { calls += "cancel $it"; it == 1L },
-            activate = { calls += "activate $it"; it == "winnow:e4b" },
+            activate = { _, name -> calls += "activate $name"; name == "winnow:e4b" },
         )
         application { vestaApi(ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", feedback = feedback, training = training)) }
         client.post("/api/messages/7/feedback") { bearerAuth("secret"); setBody("""{"rating":-1,"correctAgent":"TASK"}""") }.status shouldBe HttpStatusCode.OK

@@ -89,6 +89,10 @@ class ExposedTrainingSampleRepository(private val db: Database, private val cloc
         }.orderBy(TrainingSamples.id).map { it.toSample() }
     }
 
+    override suspend fun messageIds(kind: SampleKind): Set<Long> = db.tx {
+        TrainingSamples.select(TrainingSamples.messageId).where { TrainingSamples.kind eq kind.name }.mapNotNull { it[TrainingSamples.messageId] }.toSet()
+    }
+
     override suspend fun cursor(): Long = db.tx { CuratorState.selectAll().where { CuratorState.key eq CURSOR }.firstOrNull()?.get(CuratorState.value) ?: 0L }
 
     override suspend fun setCursor(messageId: Long) {

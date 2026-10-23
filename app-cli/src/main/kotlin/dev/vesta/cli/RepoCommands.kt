@@ -35,7 +35,7 @@ class RepoAddCommand : CliktCommand(name = "add") {
                 echo("이미 있습니다: $name (갱신: vesta repo update $name)", err = true)
                 throw ProgramResult(1)
             }
-            val model = app.config.models.embedding?.name ?: AppContainer.DEFAULT_EMBEDDING
+            val model = app.embeddingModel()
             val root = path.absolute().normalize()
             val repo = app.knowledge.createCollection(app.owner.userId, name, description, model, CollectionKind.CODE, root.toString())
             indexRepo(app, repo)
