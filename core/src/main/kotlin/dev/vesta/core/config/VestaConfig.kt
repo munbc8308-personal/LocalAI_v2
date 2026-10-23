@@ -96,6 +96,17 @@ data class TrainingConfig(
     val embeddingLearningRate: Double = 1e-5,
     /** 임베딩 평가 게이트: 학습에 쓰지 않고 떼어 둔 검색 재료가 이만큼은 있어야 한다 */
     val minHeldoutPairs: Int = 10,
+    /** 메인 모델 학습(L-24)에 필요한 👍 받은 일반 대화 답 수. 적으면 시작하지 않는다 */
+    val minGeneralSamples: Int = 30,
+    val generalEpochs: Int = 2,
+    val generalLearningRate: Double = 5e-5,
+    /** 메인 모델 학습 메모리 (QLoRA, 2,048토큰에서 약 50GB) */
+    val generalMemoryGigabytes: Int = 55,
+    /**
+     * 주간 점검이 재료가 쌓이면 메인 모델 학습을 스스로 시작할지. 기본은 끔: MLX(mlx-lm 0.32.2)의 gemma4 계산이 Ollama와 달라
+     * 학습한 후보가 Ollama에서 나빠진다 (PROJECT.md 13.30). 직접 시작(`vesta train general`)과 후보 평가는 그대로 된다
+     */
+    val generalAutoRetrain: Boolean = false,
 )
 
 /**

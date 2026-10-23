@@ -1,7 +1,10 @@
 package dev.vesta.cli
 
+import dev.vesta.api.ApiJson
 import dev.vesta.app.AppContainer
 import dev.vesta.core.ModelRole
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import dev.vesta.core.evolution.CandidateRecord
 import dev.vesta.core.evolution.EvolutionStatus
 import dev.vesta.core.evolution.ProposalKind
@@ -135,6 +138,7 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
             if (options.retrain) {
                 repo.stage(run.id, "결정 모델 재학습 확인")
                 retrain(app, ::note)
+                retrainGeneral(app, ::note)
             }
             if (options.tune && config.tune) {
                 repo.stage(run.id, "임계값 조정")
@@ -164,6 +168,17 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
                 Candidate(name, local[name]?.digest?.take(12) ?: "manual", local[name]?.sizeBytes ?: 0, name.substringBefore(':'), "직접 지정")
             }
         }
+        // 직접 학습한 메인 모델(L-24) 중 아직 평가하지 않은 것도 후보로
+        val local = runCatching { admin.localModels().associateBy { it.name } }.getOrDefault(emptyMap())
+        val trained = app.modelVersions.list("general").mapNotNull { v -> local[v.name]?.let { v to it } }
+            .filter { (v, m) -> v.name != current && app.evolutionRepository.candidate(v.name, m.digest.take(12)) == null }
+            .map { (v, m) -> Candidate(v.name, m.digest.take(12), m.sizeBytes, v.name.substringBefore(':'), "직접 학습 (r${v.runId})") }
+        if (trained.isNotEmpty()) note("- 직접 학습한 후보: ${trained.joinToString { it.name }}")
+        return trained + catalogCandidates(app, current, admin, note)
+    }
+
+    private suspend fun catalogCandidates(app: AppContainer, current: String, admin: OllamaAdmin, note: (String) -> Unit): List<Candidate> {
+        val config = app.config.evolution
         val http = HttpClients.web(30)
         try {
             val catalog = OllamaLibraryCatalog(config.catalogUrl, http)
@@ -209,7 +224,7 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
 
     private suspend fun retrain(app: AppContainer, note: (String) -> Unit) {
         val config = app.config.evolution
-        val last = app.trainingRuns.list(10).firstOrNull { it.status != TrainingStatus.FAILED && it.status != TrainingStatus.CANCELLED }
+        val last = app.trainingRuns.list(50).firstOrNull { it.kind == "decision" && it.status != TrainingStatus.FAILED && it.status != TrainingStatus.CANCELLED }
         // 학습에 동의한 사용자의 정정만 센다 (L-09)
         val fresh = app.users.trainingUsers().sumOf { user ->
             app.feedback.routingCorrections(user).count { last == null || it.createdAt.isAfter(last.startedAt) }
@@ -219,6 +234,23 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
         runCatching { TrainingClient().use { it.post("/api/training/decision") } }
             .onSuccess { note("→ 결정 모델 재학습 시작 (서버, 평가 게이트를 통과하면 바로 바뀜)") }
             .onFailure { note("→ 재학습을 시작하지 못함: ${it.message}") }
+    }
+
+    /**
+     * 메인 모델 (L-24): 지난 메인 모델 학습 뒤 👍 받은 일반 대화 답이 `training.minGeneralSamples`개 이상 늘었으면 학습을 맡긴다.
+     * 결과(후보)는 다음 점검에서 평가한다 (학습이 끝나기를 기다리지 않는다)
+     */
+    private suspend fun retrainGeneral(app: AppContainer, note: (String) -> Unit) {
+        val state = runCatching { TrainingClient().use { ApiJson.decodeFromString(dev.vesta.api.TrainingStateDto.serializer(), it.get("/api/training")) } }.getOrNull() ?: return
+        val last = state.runs.firstOrNull { it.kind == "general" && it.status == "PASSED" }
+        val usedBefore = last?.report?.let { runCatching { ApiJson.parseToJsonElement(it).jsonObject["samples"]?.jsonPrimitive?.content?.toInt() }.getOrNull() } ?: 0
+        val fresh = state.generalSamples - usedBefore
+        note("\n메인 모델: 학습 재료(👍 받은 일반 대화 답) ${state.generalSamples}개, 지난 학습 뒤 ${fresh}개 (${state.generalMinimum}개 이상이면 학습)")
+        if (!app.config.training.generalAutoRetrain) { note("→ 자동 학습은 꺼 둠 (training.generalAutoRetrain)"); return }
+        if (state.generalSamples < state.generalMinimum || fresh < state.generalMinimum || options.dryRun) return
+        runCatching { TrainingClient().use { it.post("/api/training/general") } }
+            .onSuccess { note("→ 메인 모델 학습 시작 (서버). 다음 점검에서 후보로 평가합니다") }
+            .onFailure { note("→ 메인 모델 학습을 시작하지 못함: ${it.message}") }
     }
 
     /** 문항별 답변·판정을 `~/.vesta/evolution/run-<번호>/<모델>.md`에 남긴다 */

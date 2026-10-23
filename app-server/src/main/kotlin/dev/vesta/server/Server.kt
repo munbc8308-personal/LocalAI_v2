@@ -196,6 +196,11 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             current = { app.embeddingModel() },
             switch = { app.embeddingSwitcher.switch(it) },
         ),
+        general = dev.vesta.training.GeneralHooks(
+            turn = { app.curatorSource.turnOfAnswer(it) },
+            system = { at -> dev.vesta.agents.Prompts.base(java.time.Clock.fixed(at, java.time.ZoneId.systemDefault()), java.time.ZoneId.systemDefault()) },
+            current = { app.config.models.general?.name ?: error("메인 모델이 설정에 없습니다 (models.general)") },
+        ),
     )
     // 학습 재료 큐레이터 (L-25): 쉬는 때만(답하는 중·마지막 대화 뒤 2분 안·학습·주간 점검 중이 아님) 10분마다
     val curator = dev.vesta.training.Curator(
@@ -242,6 +247,11 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
                 embeddingModel = app.embeddingModel(),
                 embeddingBase = app.config.training.embeddingBase,
                 embeddingVersions = app.modelVersions.list("embedding").map { dev.vesta.api.ModelVersionDto(it.name, it.baseModel, it.active, it.runId, it.createdAt.toString()) },
+                generalSamples = service.generalSamples(),
+                generalMinimum = app.config.training.minGeneralSamples,
+                generalVersions = app.modelVersions.list("general").map {
+                    dev.vesta.api.ModelVersionDto(it.name, it.baseModel, it.name == app.config.models.general?.name, it.runId, it.createdAt.toString())
+                },
             )
         },
         curate = { curator.runOnce(force = true)?.let { r -> r.added.size + r.pairs.count { it.status != dev.vesta.core.training.SampleStatus.REJECTED } } ?: 0 },
@@ -259,6 +269,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
         },
         start = { service.startDecision().dto() },
         startEmbedding = { service.startEmbedding().dto() },
+        startGeneral = { service.startGeneral().dto() },
         cancel = { service.cancel(it) },
         // 설정의 기본 모델로 되돌리거나, 학습한 버전 중 하나로 바꾼다 (L-07). 임베딩은 모든 컬렉션 벡터를 그 모델로 다시 만든 뒤 켠다 (L-23)
         activate = { role, name ->

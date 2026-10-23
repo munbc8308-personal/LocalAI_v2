@@ -171,6 +171,8 @@ class TrainingEndpoints(
     val activate: suspend (String, String) -> Boolean,
     /** 임베딩 학습 시작 (L-23) */
     val startEmbedding: suspend () -> TrainingRunDto = { error("임베딩 학습을 쓸 수 없습니다") },
+    /** 메인 모델 학습 시작 (L-24): 후보만 만든다 */
+    val startGeneral: suspend () -> TrainingRunDto = { error("메인 모델 학습을 쓸 수 없습니다") },
     /** 학습 재료 목록 (상태로 거르기)·검토 (L-26) */
     val samples: suspend (String?) -> List<dev.vesta.api.TrainingSampleDto> = { emptyList() },
     val review: suspend (Long, dev.vesta.api.SampleReviewDto) -> Boolean = { _, _ -> false },
@@ -386,6 +388,14 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@post
                     val training = call.trainingFor(user, deps) ?: return@post
                     val run = runCatching { training.start() }.getOrElse {
+                        return@post call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", it.message ?: "학습을 시작하지 못했습니다") }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingRunDto.serializer(), run))
+                }
+                post("/general") {
+                    val user = call.principal(deps) ?: return@post
+                    val training = call.trainingFor(user, deps) ?: return@post
+                    val run = runCatching { training.startGeneral() }.getOrElse {
                         return@post call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", it.message ?: "학습을 시작하지 못했습니다") }.toString())
                     }
                     call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(TrainingRunDto.serializer(), run))

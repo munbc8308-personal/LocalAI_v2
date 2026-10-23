@@ -90,6 +90,10 @@ data class TrainingStateDto(
     val embeddingModel: String? = null,
     val embeddingBase: String? = null,
     val embeddingVersions: List<ModelVersionDto> = emptyList(),
+    /** 메인 모델 학습 (L-24): 쓸 수 있는 재료(👍 받은 일반 대화 답)·최소 수·학습한 후보 */
+    val generalSamples: Int = 0,
+    val generalMinimum: Int = 0,
+    val generalVersions: List<ModelVersionDto> = emptyList(),
 )
 
 /** 학습 재료 하나 (L-25·L-26 검토) */

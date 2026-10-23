@@ -38,7 +38,7 @@ class TrainCommand : CliktCommand(name = "train") {
     override fun run() = Unit
 
     companion object {
-        fun create() = TrainCommand().subcommands(TrainDecisionCommand(), TrainEmbeddingCommand(), TrainStatusCommand(), TrainActivateCommand(), TrainCancelCommand(), TrainJudgeDataCommand())
+        fun create() = TrainCommand().subcommands(TrainDecisionCommand(), TrainEmbeddingCommand(), TrainGeneralCommand(), TrainStatusCommand(), TrainActivateCommand(), TrainCancelCommand(), TrainJudgeDataCommand())
     }
 }
 
@@ -93,6 +93,13 @@ class TrainEmbeddingCommand : CliktCommand(name = "embedding") {
     override fun run() = withClient { client -> follow(client, "/api/training/embedding", "임베딩", detach) }
 }
 
+class TrainGeneralCommand : CliktCommand(name = "general") {
+    override fun help(context: Context) = "메인 모델을 👍 받은 일반 대화 답으로 QLoRA 학습해 후보를 만든다. 바로 쓰지 않고 주간 점검이 평가해 승인을 받는다 (L-24)"
+    private val detach by option("--detach", help = "시작만 하고 바로 끝낸다").flag()
+
+    override fun run() = withClient { client -> follow(client, "/api/training/general", "메인 모델", detach) }
+}
+
 private suspend fun CliktCommand.follow(client: TrainingClient, path: String, label: String, detach: Boolean) {
     val run = ApiJson.decodeFromString(TrainingRunDto.serializer(), client.post(path))
     echo("$label 학습 r${run.id} 시작. 웹 UI 상태 탭에서도 볼 수 있습니다.")
@@ -119,11 +126,12 @@ class TrainStatusCommand : CliktCommand(name = "status") {
         echo("지금 결정 모델: ${state.decisionModel} (기본 ${state.baseModel})")
         state.embeddingModel?.let { echo("지금 임베딩 모델: $it (기본 ${state.embeddingBase})") }
         val pairs = state.samples["RETRIEVAL:ACCEPTED"] ?: 0
+        echo("메인 모델 학습에 쓸 재료: 👍 받은 일반 대화 답 ${state.generalSamples}개 (최소 ${state.generalMinimum}개)")
         if (pairs > 0 || state.samples.containsKey("RETRIEVAL:PENDING")) echo("다음 임베딩 학습에 쓸 검색 재료: ${pairs}개 (검토 대기 ${state.samples["RETRIEVAL:PENDING"] ?: 0})")
         echo("다음 학습에 쓸 라우팅 정정: ${state.corrections}개")
         if (state.versions.isNotEmpty() || state.embeddingVersions.isNotEmpty()) {
             echo("버전:")
-            (state.versions + state.embeddingVersions).forEach { echo("  ${if (it.active) "●" else "○"} ${it.name}  (r${it.runId}, ${it.createdAt.take(16)})") }
+            (state.versions + state.embeddingVersions + state.generalVersions).forEach { echo("  ${if (it.active) "●" else "○"} ${it.name}  (r${it.runId}, ${it.createdAt.take(16)})") }
         }
         if (state.runs.isNotEmpty()) {
             echo("학습 기록:")
@@ -187,7 +195,7 @@ private fun describe(run: TrainingRunDto): String {
 }
 
 private fun result(run: TrainingRunDto, state: TrainingStateDto): String = when (run.status) {
-    "PASSED" -> "통과: ${run.candidate} 을(를) 쓰기 시작했습니다. 되돌리려면 vesta train activate ${if (run.kind == "embedding") state.embeddingBase else state.baseModel}"
+    "PASSED" -> if (run.kind == "general") "후보 ${run.candidate} 을(를) 만들었습니다. 다음 주간 점검(vesta evolve run)이 평가하고, 통과하면 승인을 묻습니다" else "통과: ${run.candidate} 을(를) 쓰기 시작했습니다. 되돌리려면 vesta train activate ${if (run.kind == "embedding") state.embeddingBase else state.baseModel}"
     "REJECTED" -> "평가를 통과하지 못해 반영하지 않았습니다: ${run.error}"
     "CANCELLED" -> "취소됨"
     else -> "실패: ${run.error}"

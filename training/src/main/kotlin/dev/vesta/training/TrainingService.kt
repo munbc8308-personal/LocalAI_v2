@@ -58,6 +58,8 @@ class TrainingService(
     private val codeContext: (suspend (String) -> dev.vesta.core.training.CodeContext?)? = null,
     /** 임베딩 학습 (L-23): 조각·지금 쓰는 임베딩 모델·통과하면 모든 컬렉션을 새 모델로 바꾸기. 없으면 임베딩 학습을 하지 않는다 */
     private val embedding: EmbeddingHooks? = null,
+    /** 메인 모델 개인화 (L-24). 없으면 하지 않는다 */
+    private val general: GeneralHooks? = null,
     private val home: String = System.getProperty("user.home"),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -139,6 +141,64 @@ class TrainingService(
         } catch (e: Exception) {
             if (runs.get(run.id)?.status != TrainingStatus.RUNNING) return
             log.error(e) { "임베딩 학습 실패 (r${run.id})" }
+            runs.finish(run.id, TrainingStatus.FAILED, null, null, e.message ?: e::class.simpleName)
+        }
+    }
+
+    /** 메인 모델 학습에 쓸 재료 수 (L-24) */
+    suspend fun generalSamples(): Int {
+        val hooks = general ?: return 0
+        return GeneralData.rows(samples?.accepted(dev.vesta.core.training.SampleKind.ANSWER, dataUsers()).orEmpty(), hooks).size
+    }
+
+    /**
+     * 메인 모델 QLoRA를 시작한다 (L-24). 결과는 바로 쓰지 않는다: Ollama에 `gemma4-vesta:rN`으로 등록만 하고,
+     * 주간 점검이 지금 모델과 같은 평가로 재서 통과하면 승인을 받은 뒤에만 바뀐다 (E-05)
+     */
+    suspend fun startGeneral(): TrainingRun = mutex.withLock {
+        runs.list(1).firstOrNull()?.takeIf { it.status == TrainingStatus.RUNNING && job?.isActive == true }?.let { return it }
+        val hooks = checkNotNull(general) { "메인 모델 학습을 쓸 수 없습니다" }
+        check(trainer.resolve("vesta_train").exists()) { "학습기가 없습니다: $trainer (scripts/install-vesta.sh)" }
+        val rows = GeneralData.rows(samples?.accepted(dev.vesta.core.training.SampleKind.ANSWER, dataUsers()).orEmpty(), hooks)
+        check(rows.size >= config.minGeneralSamples) {
+            "재료가 부족합니다: 👍 받은 일반 대화 답 ${rows.size}개 (최소 ${config.minGeneralSamples}개). 답에 👍·👎를 남기면 쌓입니다"
+        }
+        val base = hooks.current()
+        val run = runs.start("general", base)
+        job = scope.launch(Dispatchers.IO) { executeGeneral(run, rows, base) }
+        run
+    }
+
+    private suspend fun executeGeneral(run: TrainingRun, rows: List<GeneralData.Row>, base: String) {
+        val dir = work.resolve("runs").resolve("r${run.id}")
+        val candidate = "gemma4-vesta:r${run.id}"
+        try {
+            Files.createDirectories(dir)
+            runs.progress(run.id, "데이터", 0, 0, null)
+            val data = GeneralData.write(rows, dir.resolve("sft.jsonl"))
+            makeRoom(config.generalMemoryGigabytes * 1024L * 1024 * 1024)
+            runs.progress(run.id, "학습", 0, 0, null)
+            var registered: JsonObject? = null
+            python(
+                dir, "general_train", "--base", base, "--models", path(config.ollamaModels).toString(), "--data", data.toString(),
+                "--work", dir.resolve("work").toString(), "--name", candidate,
+                "--epochs", config.generalEpochs.toString(), "--lr", config.generalLearningRate.toString(),
+            ) { event ->
+                when (event["event"]?.jsonPrimitive?.contentOrNull) {
+                    "progress" -> runs.progress(run.id, "학습", event.int("step"), event.int("total"), event["loss"]?.jsonPrimitive?.doubleOrNull)
+                    "registered" -> registered = event
+                }
+            }
+            val report = registered ?: error("등록 결과가 없습니다")
+            versions.add("general", candidate, base, run.id, report.toString())
+            runs.finish(run.id, TrainingStatus.PASSED, candidate, report.toString(), null)
+            log.info { "메인 모델 학습 끝 → 후보 $candidate (주간 점검에서 평가·승인)" }
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) { if (runs.get(run.id)?.status == TrainingStatus.RUNNING) runs.finish(run.id, TrainingStatus.CANCELLED, null, null, "취소됨") }
+            throw e
+        } catch (e: Exception) {
+            if (runs.get(run.id)?.status != TrainingStatus.RUNNING) return
+            log.error(e) { "메인 모델 학습 실패 (r${run.id})" }
             runs.finish(run.id, TrainingStatus.FAILED, null, null, e.message ?: e::class.simpleName)
         }
     }

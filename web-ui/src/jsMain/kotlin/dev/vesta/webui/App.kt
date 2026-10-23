@@ -787,11 +787,28 @@ private fun TrainingCard() {
             Div({ classes("row", "small") }) { Span { Text("지금 쓰는 임베딩") }; Span({ classes("mono") }) { Text(model) } }
             Div({ classes("row", "small") }) { Span { Text("검색 재료 (쓸 것·검토 대기)") }; Span { Text("${s.samples["RETRIEVAL:ACCEPTED"] ?: 0}개 · ${s.samples["RETRIEVAL:PENDING"] ?: 0}개") } }
         }
+        // 메인 모델 (L-24): 후보만 만든다. 주간 점검이 평가해 통과하면 승인을 묻는다
+        if (s.generalMinimum > 0) {
+            Div({ classes("row") }) {
+                Span { B { Text("메인 모델 학습") } }
+                Button({
+                    if (running != null || s.generalSamples < s.generalMinimum) disabled()
+                    onClick { act { Http.post("/api/training/general"); tick++ } }
+                }) { Text(if (running != null) "학습 중…" else "후보 만들기") }
+            }
+            Div({ classes("row", "small") }) { Span { Text("👍 받은 일반 대화 답") }; Span { Text("${s.generalSamples}개 (최소 ${s.generalMinimum}개)") } }
+            s.generalVersions.forEach { v ->
+                Div({ classes("row", "small") }) {
+                    Span({ classes("mono") }) { Text((if (v.active) "● " else "○ ") + v.name) }
+                    Span({ classes("muted") }) { Text(if (v.active) "사용 중" else "주간 점검에서 평가·승인") }
+                }
+            }
+        }
         error?.let { P({ classes("error", "small") }) { Text(it) } }
         s.runs.take(5).forEach { run ->
             Div({ classes("run") }) {
                 Div({ classes("row", "small") }) {
-                    Span { Text("r${run.id} ${if (run.kind == "embedding") "임베딩" else "결정"} · ${trainingStatus(run.status)} · ${run.stage ?: "-"}") }
+                    Span { Text("r${run.id} ${when (run.kind) { "embedding" -> "임베딩"; "general" -> "메인"; else -> "결정" }} · ${if (run.kind == "general" && run.status == "PASSED") "후보 등록" else trainingStatus(run.status)} · ${run.stage ?: "-"}") }
                     Span {
                         run.loss?.let { Text("손실 ${(it * 1000).toInt() / 1000.0}  ") }
                         if (run.status == "RUNNING") Button({ classes("link", "small"); onClick { act { Http.post("/api/training/${run.id}/cancel") } } }) { Text("취소") }
@@ -801,7 +818,7 @@ private fun TrainingCard() {
                     Div({ classes("fill"); style { property("width", "${run.step * 100 / run.total}%") } })
                 }
                 run.error?.let { Div({ classes("muted", "small") }) { Text(it) } }
-                (if (run.kind == "embedding") embeddingGateSummary(run.report) else gateSummary(run.report))?.let { Div({ classes("muted", "small") }) { Text(it) } }
+                (when (run.kind) { "embedding" -> embeddingGateSummary(run.report); "general" -> null; else -> gateSummary(run.report) })?.let { Div({ classes("muted", "small") }) { Text(it) } }
             }
         }
         if (s.embeddingVersions.isNotEmpty()) {
