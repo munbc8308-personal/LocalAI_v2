@@ -54,7 +54,7 @@ data class A2aCard(
     val auth: Boolean,
     val skills: List<String>,
     val version: String?,
-    /** 연결 주소가 내부 주소(이 Mac·사설망·Tailscale)로 해석되는가 */
+    /** 사용자가 고른 내부 에이전트(이 Mac·내 네트워크)인가. 아니면 내부 주소에는 연결하지 않는다 */
     val local: Boolean = false,
 )
 
@@ -77,61 +77,55 @@ class A2aException(message: String) : RuntimeException(message)
  * 카드·응답 크기와 답 길이에 한도를 둔다 (바깥 서버를 믿지 않는다)
  */
 class A2aClient(
+    /** 바깥 에이전트용: 연결할 때마다 내부 주소를 막는다 ([A2aHttp.external]) */
     private val http: HttpClient,
+    /** 사용자가 고른 내부 에이전트(이 Mac·내 네트워크)용 ([A2aHttp.local]) */
+    private val localHttp: HttpClient = http,
     private val maxCardBytes: Long = 256_000,
     private val maxResponseBytes: Long = 2_000_000,
     private val maxAnswerChars: Int = 20_000,
     private val requestTimeoutMillis: Long = 600_000,
-    private val resolve: suspend (String) -> List<java.net.InetAddress> = { host ->
-        withContext(kotlinx.coroutines.Dispatchers.IO) { java.net.InetAddress.getAllByName(host).toList() }
-    },
-    /** 내부 주소인가 (앱에서는 웹 수집과 같은 UrlGuard.isInternal) */
-    private val internal: (java.net.InetAddress) -> Boolean = { it.isLoopbackAddress || it.isSiteLocalAddress || it.isLinkLocalAddress || it.isAnyLocalAddress },
 ) {
     private val ids = AtomicLong()
 
-    /** 주소에서 Agent Card를 읽는다. 카드 주소(…json)가 아니면 `/.well-known/agent-card.json`, 다음 `/.well-known/agent.json`(0.3 이전) */
-    suspend fun card(address: String): A2aCard {
+    /**
+     * 주소에서 Agent Card를 읽는다. 카드 주소(…json)가 아니면 `/.well-known/agent-card.json`, 다음 `/.well-known/agent.json`(0.3 이전).
+     * [local]은 사용자가 "이 Mac·내 네트워크의 에이전트"라고 직접 고른 경우: 내부 주소에 연결할 수 있는 대신 연결 주소가 카드와 같은 출처(scheme·호스트·포트)여야 한다.
+     * 아니면 카드·연결 주소 모두 바깥 주소에만 연결한다 (DNS 검사가 연결마다)
+     */
+    suspend fun card(address: String, local: Boolean = false): A2aCard {
+        val http = if (local) localHttp else http
         val url = runCatching { Url(address.trim()) }.getOrNull()?.takeIf { it.protocol.name == "http" || it.protocol.name == "https" }
             ?: throw A2aException("http(s) 주소가 아닙니다")
         val candidates = if (url.encodedPath.endsWith(".json")) listOf(url.toString())
             else listOf("agent-card.json", "agent.json").map { file -> io.ktor.http.URLBuilder(url).apply { pathSegments = listOf("", ".well-known", file); parameters.clear(); fragment = "" }.buildString() }
         var lastError = "카드를 찾지 못했습니다"
         for (candidate in candidates) {
-            val response = runCatching { http.get(candidate) { timeout { requestTimeoutMillis = 15_000 } } }.getOrElse { lastError = "연결 실패: ${it.message}"; continue }
+            val response = try { http.get(candidate) { timeout { requestTimeoutMillis = 15_000 } } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+                lastError = "연결 실패: ${e.message}" + if (!local && "내부 주소" in e.message.orEmpty()) " (이 Mac·내 네트워크의 에이전트면 '내부 에이전트'를 고르고 다시 읽으세요)" else ""
+                continue
+            }
             if (!response.status.isSuccess()) { lastError = "$candidate: HTTP ${response.status.value}"; continue }
             val bytes = response.bodyAsChannel().readRemaining(maxCardBytes + 1).readByteArray()
             if (bytes.size > maxCardBytes) throw A2aException("Agent Card가 너무 큽니다")
             val json = runCatching { Json.parseToJsonElement(bytes.decodeToString()).jsonObject }.getOrElse { throw A2aException("Agent Card가 JSON이 아닙니다") }
-            return checkEndpoint(parseCard(candidate, json))
+            return parseCard(candidate, json).let { if (local) sameOrigin(it) else it }.copy(local = local)
         }
         throw A2aException(lastError)
     }
 
-    /**
-     * 카드가 정한 연결 주소 검사 (SSRF 방지, M22 보안 검토). 바깥 카드가 이 Mac·사설망의 다른 서비스(Ollama 등)로 보내게 만들지 못하게:
-     * 연결 주소가 내부 주소면 카드와 같은 호스트여야 한다 (사용자가 직접 넣은 로컬 에이전트는 된다)
-     */
-    private suspend fun checkEndpoint(card: A2aCard): A2aCard {
-        val endpointHost = Url(card.endpoint).host
-        val local = isInternal(endpointHost) ?: throw A2aException("연결 주소를 찾을 수 없습니다: $endpointHost")
-        if (local && endpointHost != Url(card.cardUrl).host) throw A2aException("카드가 다른 호스트의 내부 주소($endpointHost)로 연결하게 합니다. 이런 에이전트는 붙이지 않습니다")
-        return card.copy(local = local)
-    }
-
-    /** 해석한 IP 중 하나라도 내부면 true, 찾지 못하면 null */
-    private suspend fun isInternal(host: String): Boolean? {
-        val addresses = runCatching { resolve(host) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
-        return addresses.any(internal)
+    /** 내부 에이전트는 연결 주소가 카드와 같은 출처여야 한다 (카드가 이 Mac의 다른 서비스·포트로 보내게 만들지 못하게) */
+    private fun sameOrigin(card: A2aCard): A2aCard {
+        val endpoint = Url(card.endpoint)
+        val origin = Url(card.cardUrl)
+        if (endpoint.protocol != origin.protocol || endpoint.host != origin.host || endpoint.port != origin.port) {
+            throw A2aException("내부 에이전트의 연결 주소(${endpoint.protocol.name}://${endpoint.host}:${endpoint.port})가 카드 주소와 출처가 다릅니다. 이런 에이전트는 붙이지 않습니다")
+        }
+        return card
     }
 
     /** 할 일을 보내고 소식을 흘린다. 흐름이 취소되면 원격 작업 취소를 한 번 보낸다 */
     fun send(card: A2aCard, text: String, token: String?): Flow<A2aUpdate> = flow {
-        // 등록 때 바깥 주소였는데 지금 내부로 해석되면 보내지 않는다 (DNS rebinding). 확인과 연결 사이의 바뀜은 남은 위험 (UrlGuard와 같음)
-        if (!card.local) {
-            val host = Url(card.endpoint).host
-            if (isInternal(host) != false) throw A2aException("연결 주소 $host 가 등록 때와 달리 내부 주소로 해석되거나 찾을 수 없어 보내지 않았습니다")
-        }
         val v1 = card.protocol == "1.0"
         val method = when {
             v1 && card.streaming -> "SendStreamingMessage"
@@ -179,7 +173,7 @@ class A2aClient(
     }
 
     private suspend fun <T> post(card: A2aCard, body: JsonObject, token: String?, block: suspend (HttpResponse) -> T): T =
-        http.preparePost(card.endpoint) {
+        (if (card.local) localHttp else http).preparePost(card.endpoint) {
             contentType(ContentType.Application.Json)
             header(HttpHeaders.Accept, "application/json, text/event-stream")
             if (card.protocol == "1.0") header("A2A-Version", "1.0")

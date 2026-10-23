@@ -470,7 +470,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     if (user.role != UserRole.OWNER) return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
-                    studio.previewA2a(dto.url).fold(
+                    studio.previewA2a(dto.url, dto.local).fold(
                         { call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.A2aPreviewDto.serializer(), it)) },
                         { call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it.message ?: "카드를 읽지 못했습니다") }.toString()) },
                     )
@@ -481,7 +481,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     if (user.role != UserRole.OWNER) return@put call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
-                    studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url, dto.endpoint)?.let { error ->
+                    studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url, dto.endpoint, dto.local)?.let { error ->
                         return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
                     }
                     call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
@@ -908,19 +908,19 @@ class StudioEndpoints(
         val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString()) }
         val owner = user.role == UserRole.OWNER && a2aRepo != null && a2aClient != null
         val a2a = if (owner) a2aRepo!!.list(user.userId).map {
-            dev.vesta.api.A2aAgentDto(it.name, it.displayName, it.description, it.endpoint, it.protocol, it.streaming, it.auth, it.auth && a2aHasToken(it.name), it.skills, it.cardUrl)
+            dev.vesta.api.A2aAgentDto(it.name, it.displayName, it.description, it.endpoint, it.protocol, it.streaming, it.auth, it.local, it.auth && a2aHasToken(it.name), it.skills, it.cardUrl)
         } else emptyList()
         return dev.vesta.api.AgentsDto(builtin, custom, tools, teams, a2a, owner)
     }
 
     /** Agent Card를 읽어 등록 전에 보여 줄 내용과 경고 */
-    suspend fun previewA2a(url: String): Result<dev.vesta.api.A2aPreviewDto> = runCatching {
+    suspend fun previewA2a(url: String, local: Boolean = false): Result<dev.vesta.api.A2aPreviewDto> = runCatching {
         val client = a2aClient ?: error("A2A를 쓸 수 없습니다")
-        val card = try { client.card(url) } catch (e: dev.vesta.a2a.A2aException) { error(e.message ?: "카드를 읽지 못했습니다") }
+        val card = try { client.card(url, local) } catch (e: dev.vesta.a2a.A2aException) { error(e.message ?: "카드를 읽지 못했습니다") }
         val cardHost = runCatching { java.net.URI(card.cardUrl).host }.getOrNull()
         val endpoint = java.net.URI(card.endpoint)
-        val local = endpoint.host == "localhost" || endpoint.host == "127.0.0.1" || endpoint.host.endsWith(".ts.net")
         val warnings = listOfNotNull(
+            "내부 에이전트로 붙입니다: 이 Mac·내 네트워크의 ${endpoint.host}:${endpoint.port}에 연결합니다. 직접 띄운 에이전트가 맞을 때만 붙이세요".takeIf { local },
             "맡기는 할 일 내용이 이 에이전트(${endpoint.host})로 나갑니다. 대화 기록·파일은 보내지 않지만, 할 일에 적힌 내용은 그대로 보냅니다",
             "카드 주소(${cardHost})와 연결 주소(${endpoint.host})의 호스트가 다릅니다".takeIf { cardHost != null && cardHost != endpoint.host },
             "암호화되지 않은 http 연결입니다".takeIf { endpoint.scheme == "http" && !local },
@@ -932,12 +932,12 @@ class StudioEndpoints(
     }
 
     /** 등록 (카드를 다시 읽어 저장). 이름은 사용자 정의 에이전트와 겹치면 안 된다 (`/agent 이름`으로 함께 부른다) */
-    suspend fun saveA2a(user: UserContext, name: String, url: String, previewed: String?): String? {
+    suspend fun saveA2a(user: UserContext, name: String, url: String, previewed: String?, local: Boolean = false): String? {
         val repo = a2aRepo ?: return "A2A를 쓸 수 없습니다"
         val client = a2aClient ?: return "A2A를 쓸 수 없습니다"
         if (!dev.vesta.core.studio.CustomAgentDef.NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/agent 이름 으로 부릅니다)"
         if (agentRepo.find(user.userId, name) != null) return "같은 이름의 사용자 정의 에이전트가 있습니다"
-        val card = try { client.card(url) } catch (e: dev.vesta.a2a.A2aException) { return e.message ?: "카드를 읽지 못했습니다" }
+        val card = try { client.card(url, local) } catch (e: dev.vesta.a2a.A2aException) { return e.message ?: "카드를 읽지 못했습니다" }
         // 미리 보기에서 사용자가 본 연결 주소와 같아야 한다 (그사이 카드가 바뀌었으면 다시 확인하게)
         if (previewed == null || previewed != card.endpoint) return "미리 보기 뒤에 Agent Card의 연결 주소가 바뀌었습니다 (${card.endpoint}). 다시 카드를 읽어 확인해 주세요"
         repo.save(dev.vesta.core.studio.A2aAgentDef(user.userId, name, card.cardUrl, card.endpoint, card.protocol, card.name, card.description, card.skills, card.streaming, card.auth, card.local))

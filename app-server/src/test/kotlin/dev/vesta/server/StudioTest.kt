@@ -159,7 +159,7 @@ class StudioTest : FunSpec({
         val client = dev.vesta.a2a.A2aClient(io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { request ->
             if (request.url.host == "agent.example") respond(card, HttpStatusCode.OK, io.ktor.http.headersOf(io.ktor.http.HttpHeaders.ContentType, "application/json"))
             else respond("", HttpStatusCode.NotFound)
-        }) { install(io.ktor.client.plugins.HttpTimeout) }, resolve = { host -> listOf(java.net.InetAddress.getByAddress(host, byteArrayOf(93, 184.toByte(), 216.toByte(), 34))) })
+        }) { install(io.ktor.client.plugins.HttpTimeout) })
         val studio = StudioEndpoints(agents, ExposedRunRepository(db.db), emptyFlow(), { emptyList() }, teams, remote, client)
         application { vestaApi(ServerDeps(SilentConversation, EmptySessions, EmptyMessages, owner, token = "secret", version = "t", studio = studio)) }
 

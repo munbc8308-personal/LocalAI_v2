@@ -317,7 +317,7 @@ object A2aAgents : LongIdTable("a2a_agent") {
     val skills = text("skills")
     val streaming = bool("streaming")
     val auth = bool("auth")
-    /** 등록할 때 연결 주소가 내부 주소(이 Mac·사설망·Tailscale)였는가 (v19). 아니었는데 나중에 내부로 해석되면 보내지 않는다 */
+    /** 사용자가 고른 내부 에이전트인가 (v19). 아니면 내부 주소에는 연결하지 않는다 */
     val local = bool("local").default(false)
     val addedAt = timestamp("added_at")
 

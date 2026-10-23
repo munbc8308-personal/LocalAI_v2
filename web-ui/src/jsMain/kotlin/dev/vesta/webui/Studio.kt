@@ -278,7 +278,7 @@ private fun A2aRow(r: A2aAgentDto, onDelete: () -> Unit) {
         }
         val host = r.endpoint.substringAfter("://").substringBefore('/')
         Div({ classes("muted", "small") }) {
-            Text("$host · A2A ${r.protocol}" + (if (r.streaming) " · 실시간" else "") + if (r.auth) (if (r.hasToken) " · 토큰 있음" else "") else "")
+            Text("$host · A2A ${r.protocol}" + (if (r.local) " · 내부" else "") + (if (r.streaming) " · 실시간" else "") + if (r.auth) (if (r.hasToken) " · 토큰 있음" else "") else "")
         }
         if (r.auth && !r.hasToken) Div({ classes("bad", "small") }) {
             Text("인증이 필요합니다. 터미널에서: security add-generic-password -U -s dev.vesta.a2a -a ${r.name} -w")
@@ -295,14 +295,19 @@ private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
     var preview by remember { mutableStateOf<A2aPreviewDto?>(null) }
     var name by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var local by remember { mutableStateOf(false) }
     Div({ classes("stack") }) {
         Input(InputType.Url) { value(url); placeholder("에이전트 주소 (예: https://agent.example.com 또는 …/agent-card.json)"); onInput { url = it.value; preview = null } }
+        Label(attrs = { classes("small") }) {
+            Input(InputType.Checkbox) { checked(local); onChange { local = !local; preview = null } }
+            Text(" 내부 에이전트 (이 Mac·내 네트워크·Tailscale에서 내가 띄운 것)")
+        }
         Button({
             if (url.isBlank() || busy) disabled()
             onClick {
                 busy = true
                 scope.launch {
-                    runCatching { Http.post("/api/a2a/preview", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim())), A2aPreviewDto.serializer()) }
+                    runCatching { Http.post("/api/a2a/preview", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim(), local = local)), A2aPreviewDto.serializer()) }
                         .onSuccess { preview = it; name = it.suggestedName; onError(null) }
                         .onFailure { onError(it.message) }
                     busy = false
@@ -321,7 +326,7 @@ private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
                 onClick {
                     busy = true
                     scope.launch {
-                        runCatching { Http.put("/api/a2a/${name.trim()}", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim(), p.endpoint))) }
+                        runCatching { Http.put("/api/a2a/${name.trim()}", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim(), p.endpoint, local))) }
                             .onSuccess { onSaved() }
                             .onFailure { onError(it.message) }
                         busy = false

@@ -350,6 +350,8 @@ data class A2aAgentDto(
     val protocol: String,
     val streaming: Boolean,
     val auth: Boolean,
+    /** 내부 에이전트 (이 Mac·내 네트워크) */
+    val local: Boolean = false,
     /** 키체인에 토큰이 있는가 */
     val hasToken: Boolean,
     val skills: List<String>,
@@ -362,6 +364,8 @@ data class A2aAddDto(
     val url: String,
     /** 미리 보기에서 확인한 연결 주소 (등록할 때 카드가 바뀌었으면 거부) */
     val endpoint: String? = null,
+    /** 이 Mac·내 네트워크(Tailscale)의 에이전트라고 사용자가 직접 고름: 내부 주소에 연결하되 카드와 같은 출처만 */
+    val local: Boolean = false,
 )
 
 /** 등록 전에 보여 줄 Agent Card 내용과 경고 */

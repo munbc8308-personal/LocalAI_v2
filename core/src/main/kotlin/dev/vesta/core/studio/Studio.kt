@@ -79,7 +79,7 @@ data class A2aAgentDef(
     val streaming: Boolean = false,
     /** Agent Card가 인증을 요구하는지 */
     val auth: Boolean = false,
-    /** 등록할 때 연결 주소가 내부 주소였는가. 아니었는데 보낼 때 내부로 해석되면 보내지 않는다 (DNS rebinding) */
+    /** 사용자가 "이 Mac·내 네트워크의 에이전트"라고 고른 내부 에이전트인가. 아니면 내부 주소에는 연결하지 않는다 (연결마다 DNS 검사) */
     val local: Boolean = false,
     val addedAt: Instant = Instant.EPOCH,
 )

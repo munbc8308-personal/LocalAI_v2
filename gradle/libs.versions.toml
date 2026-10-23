@@ -47,6 +47,7 @@ libdave-adapter-jda = { module = "moe.kyokobot.libdave:adapter-jda", version.ref
 libdave-impl-jni = { module = "moe.kyokobot.libdave:impl-jni", version.ref = "libdave-jvm" }
 libdave-natives-darwin = { module = "moe.kyokobot.libdave:natives-darwin", version.ref = "libdave-jvm" }
 ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }

@@ -33,7 +33,7 @@ class VestaDatabase private constructor(val db: Database) {
         // v11: media_asset.caption (생성 이미지 프롬프트)
         val mediaColumns = exec("PRAGMA table_info(media_asset)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("caption" !in mediaColumns) exec("ALTER TABLE media_asset ADD COLUMN caption TEXT NULL")
-        // v19: a2a_agent.local (등록 때 내부 주소였는지, M22 보안 검토)
+        // v19: a2a_agent.local (사용자가 고른 내부 에이전트인지, M22 보안 검토)
         val a2aColumns = exec("PRAGMA table_info(a2a_agent)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("local" !in a2aColumns) exec("ALTER TABLE a2a_agent ADD COLUMN local BOOLEAN DEFAULT 0 NOT NULL")
         if (current < CURRENT_VERSION) {

@@ -36,20 +36,13 @@ import java.time.Instant
 private val json = headersOf(HttpHeaders.ContentType, "application/json")
 private val sse = headersOf(HttpHeaders.ContentType, "text/event-stream")
 
-/** 가짜 DNS: *.example은 바깥, localhost·internal.example은 내부. [rebound]에 든 호스트는 내부로 */
-val rebound = mutableSetOf<String>()
-private val dns: suspend (String) -> List<java.net.InetAddress> = { host ->
-    val internal = host == "localhost" || host == "127.0.0.1" || host == "internal.example" || host in rebound
-    listOf(java.net.InetAddress.getByAddress(host, if (internal) byteArrayOf(127, 0, 0, 1) else byteArrayOf(93, 184.toByte(), 216.toByte(), 34)))
-}
-
 private fun client(handler: suspend (HttpRequestData, String) -> Pair<String, io.ktor.http.Headers>, seen: MutableList<Pair<HttpRequestData, String>> = mutableListOf()) =
     A2aClient(HttpClient(MockEngine { request ->
         val body = runCatching { request.body.toByteArray().decodeToString() }.getOrDefault("")
         seen += request to body
         val (text, headers) = handler(request, body)
         if (text == "404") respond("", HttpStatusCode.NotFound) else respond(text, HttpStatusCode.OK, headers)
-    }) { install(HttpTimeout) }, resolve = dns)
+    }) { install(HttpTimeout) })
 
 private val card10 = """{"name":"Echo","description":"따라 말하기","supportedInterfaces":[{"url":"https://agent.example/grpc","protocolBinding":"GRPC","protocolVersion":"1.0"},{"url":"https://agent.example/a2a/v1","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
   "capabilities":{"streaming":true},"securitySchemes":{"bearer":{"httpAuthSecurityScheme":{"scheme":"Bearer"}}},"skills":[{"id":"echo","name":"Echo","description":"그대로"}],"version":"2.1"}"""
@@ -119,7 +112,7 @@ class A2aClientTest : FunSpec({
     }
 
     test("답 길이 한도: 넘으면 자르고 알린다") {
-        val c = A2aClient(HttpClient(MockEngine { respond("""{"jsonrpc":"2.0","id":1,"result":{"message":{"role":"ROLE_AGENT","parts":[{"text":"${"가".repeat(50)}"}]}}}""", HttpStatusCode.OK, json) }) { install(HttpTimeout) }, maxAnswerChars = 10, resolve = dns)
+        val c = A2aClient(HttpClient(MockEngine { respond("""{"jsonrpc":"2.0","id":1,"result":{"message":{"role":"ROLE_AGENT","parts":[{"text":"${"가".repeat(50)}"}]}}}""", HttpStatusCode.OK, json) }) { install(HttpTimeout) }, maxAnswerChars = 10)
         val card = A2aClient.parseCard("x", Json.parseToJsonElement(card10).jsonObject).copy(streaming = false)
         val text = c.send(card, "길게", null).toList().filterIsInstance<A2aUpdate.Text>().joinToString("") { it.text }
         text shouldContain "가".repeat(10)
@@ -151,23 +144,36 @@ class A2aClientTest : FunSpec({
         seen.size shouldBe 1 // 거부한 것은 보내지 않았다
     }
 
-    test("보안 검토: 카드가 다른 호스트의 내부 주소로 연결하게 하면 거부, 등록 뒤 내부로 바뀐 주소로는 보내지 않는다, 끝없는 한 줄은 한도에서 멈춘다") {
-        val evil = """{"name":"x","supportedInterfaces":[{"url":"http://internal.example:11434/api","protocolBinding":"JSONRPC","protocolVersion":"1.0"}]}"""
-        val c = client({ _, _ -> evil to json })
-        shouldThrow<A2aException> { c.card("https://agent.example") }.message shouldContain "내부 주소"
-        // 사용자가 직접 넣은 로컬 에이전트(카드와 같은 호스트)는 된다
-        val own = client({ _, _ -> card03 to json }).card("http://localhost:9999/.well-known/agent.json")
+    test("보안 검토: 내부 에이전트는 사용자가 고른 경우만, 연결 주소는 카드와 같은 출처. 바깥 에이전트는 연결마다 내부 주소를 막는다. 끝없는 한 줄은 한도에서 멈춘다") {
+        // 내부 에이전트로 고르면 같은 출처만
+        val own = client({ _, _ -> card03 to json }).card("http://localhost:9999/.well-known/agent.json", local = true)
         own.local shouldBe true
+        val otherPort = """{"name":"x","url":"http://localhost:11434/api","protocolVersion":"0.3.0"}"""
+        shouldThrow<A2aException> { client({ _, _ -> otherPort to json }).card("http://localhost:9999/.well-known/agent.json", local = true) }.message shouldContain "출처"
+        // 고르지 않은 카드는 local이 아니다 (DNS로 짐작하지 않는다)
+        client({ _, _ -> card03 to json }).card("http://localhost:9999/.well-known/agent.json").local shouldBe false
 
-        val outside = client({ _, _ -> """{"jsonrpc":"2.0","id":1,"result":{"message":{"parts":[{"text":"ok"}]}}}""" to json })
-        val card = A2aClient.parseCard("https://rebind.example/.well-known/agent-card.json", Json.parseToJsonElement(card10.replace("agent.example", "rebind.example")).jsonObject).copy(streaming = false)
-        outside.send(card, "hi", null).toList().filterIsInstance<A2aUpdate.Text>().single().text shouldBe "ok"
-        rebound += "rebind.example"
-        try {
-            shouldThrow<A2aException> { outside.send(card, "hi", null).toList() }.message shouldContain "내부 주소"
-        } finally { rebound.clear() }
+        // 바깥 에이전트용 DNS: 해석할 때마다 내부 주소면 연결하지 않는다 (검사한 주소 = 연결 주소)
+        val answers = mutableMapOf("agent.example" to byteArrayOf(93, 184.toByte(), 216.toByte(), 34))
+        val dns = A2aHttp.PinnedDns({ it.isLoopbackAddress || it.isSiteLocalAddress }) { host -> listOf(java.net.InetAddress.getByAddress(host, answers.getValue(host))) }
+        dns.lookup("agent.example").single().hostAddress shouldBe "93.184.216.34"
+        answers["agent.example"] = byteArrayOf(127, 0, 0, 1) // rebinding
+        shouldThrow<java.net.UnknownHostException> { dns.lookup("agent.example") }
+        shouldThrow<java.net.UnknownHostException> { dns.lookup("localhost") }
+        // IP 주소는 DNS를 거치지 않으므로 글자로 판정한다
+        A2aHttp.literal("127.0.0.1")!!.isLoopbackAddress shouldBe true
+        A2aHttp.literal("[::1]")!!.isLoopbackAddress shouldBe true
+        A2aHttp.literal("agent.example") shouldBe null
 
-        val huge = A2aClient(HttpClient(MockEngine { respond("data: " + "x".repeat(5_000), HttpStatusCode.OK, sse) }) { install(HttpTimeout) }, maxResponseBytes = 1_000, resolve = dns)
+        // 내부 에이전트는 내부용 클라이언트로만 보낸다
+        val hits = mutableListOf<String>()
+        fun engine(tag: String) = HttpClient(MockEngine { hits += tag; respond("""{"jsonrpc":"2.0","id":1,"result":{"message":{"parts":[{"text":"ok"}]}}}""", HttpStatusCode.OK, json) }) { install(HttpTimeout) }
+        val split = A2aClient(engine("external"), engine("local"))
+        split.send(own, "hi", null).toList()
+        split.send(own.copy(local = false), "hi", null).toList()
+        hits shouldBe listOf("local", "external")
+
+        val huge = A2aClient(HttpClient(MockEngine { respond("data: " + "x".repeat(5_000), HttpStatusCode.OK, sse) }) { install(HttpTimeout) }, maxResponseBytes = 1_000)
         val streaming = A2aClient.parseCard("x", Json.parseToJsonElement(card10).jsonObject)
         shouldThrow<A2aException> { huge.send(streaming, "hi", null).toList() }.message shouldContain "너무 큽니다"
     }
