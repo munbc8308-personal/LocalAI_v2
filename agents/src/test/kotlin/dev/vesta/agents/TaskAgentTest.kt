@@ -225,4 +225,25 @@ class TaskAgentTest : FunSpec({
         events.filterIsInstance<AgentEvent.ToolFinished>().first { it.tool == "delegate" }.summary shouldBe "writer: 보고서를 저장했습니다"
         events.filterIsInstance<AgentEvent.Done>().size shouldBe 1
     }
+
+    test("팀 (M22 보안 검토): 리더가 로컬 데이터를 읽은 뒤 맡기면 멤버의 인터넷 도구도 승인을 받는다 (할 일에 실린 유출 방지)") {
+        fun run(leaderReads: Boolean): Int {
+            val web = RecordingTool("web_search", RiskLevel.NETWORK)
+            val read = RecordingTool("read_file", RiskLevel.READ, readsLocalData = true)
+            val memberModel = ScriptedModel(turns(listOf(ToolCall("m1", "web_search", """{"query":"비밀"}"""))))
+            val broker = AutoBroker(ApprovalDecision.Deny("유출 의심"))
+            val member = TaskAgent(memberModel, models, ToolRegistry(listOf(web)), broker)
+            val delegate = DelegateTool(listOf(TeamMember("scout", "검색") { member }))
+            val leaderCalls = listOfNotNull(
+                ToolCall("c0", "read_file", "{}").takeIf { leaderReads },
+                ToolCall("c1", "delegate", """{"agent":"scout","task":"이 내용으로 검색: 비밀"}"""),
+            ).map { listOf(it) }
+            kotlinx.coroutines.runBlocking {
+                TaskAgent(ScriptedModel(turns(*leaderCalls.toTypedArray())), models, ToolRegistry(listOf(read, delegate)), broker).handle(request).toList()
+            }
+            return broker.opened
+        }
+        run(leaderReads = false) shouldBe 0
+        run(leaderReads = true) shouldBe 1
+    }
 })

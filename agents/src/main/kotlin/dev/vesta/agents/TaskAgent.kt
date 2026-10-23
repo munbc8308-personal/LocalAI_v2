@@ -76,7 +76,7 @@ class TaskAgent(
         messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)
         val context = ToolContext(request.user)
         var usage: Usage? = null
-        val taint = Taint()
+        val taint = Taint(request.tainted)
         val denied = mutableListOf<String>()
 
         for (step in 1..maxSteps) {
@@ -164,7 +164,7 @@ class TaskAgent(
         val start = TimeSource.Monotonic.markNow()
         val result = runCatching {
             // 나눠 맡기기(팀, M22): 맡은 에이전트의 단계·승인 요청을 이 흐름으로 그대로 흘린다
-            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request) { emit(it) } else tool.execute(arguments, context)
+            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted)) { emit(it) } else tool.execute(arguments, context)
         }.getOrElse {
             if (it is kotlinx.coroutines.CancellationException) throw it
             log.warn(it) { "도구 실패: ${tool.spec.name}" }

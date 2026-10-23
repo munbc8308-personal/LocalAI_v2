@@ -2186,6 +2186,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
   - 멤버의 답 글자는 리더 답에 섞이지 않고 도구 결과로만 간다(6,000자까지).
   - `readsLocalData`라서, 멤버 결과가 들어온 뒤 리더의 인터넷 도구는 승인을 받고 결과 속 지시문 검사(D10)도 거친다.
   - 멤버는 맡길 때마다 새로 만든다. 멤버는 다시 나눠 맡기지 않는다(한 단계).
+  - 보안 검토: 리더가 로컬 데이터를 읽은 뒤 맡기면 할 일에 그 내용이 실릴 수 있어, `AgentRequest.tainted`로 상태를 넘겨 멤버도 처음부터 인터넷 도구에 승인을 받는다.
 - `/team 이름 할 일`(웹·CLI·메신저 `!team`), `RoutingDecision.team`. 실행 기록의 담당은 `TEAM`, 단계 종류는 `delegate_started`·`delegate_finished`.
 - 웹 UI: 팀 카드(만들기·고치기·지우기, 지워진 에이전트 경고), 맡기기에서 팀 고르기, 타임라인에서 나눠 맡긴 사이의 단계 들여쓰기.
 - 실사용 확인: 팀 `research`(리더 `lead` 도구 없음, 멤버 `lister`(list_files)·`reader`(read_file))에 "scripts 폴더 목록 + install-vesta.sh 요약"을 맡김.

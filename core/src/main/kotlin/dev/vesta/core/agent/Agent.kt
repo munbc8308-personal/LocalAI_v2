@@ -27,6 +27,11 @@ data class AgentRequest(
     val spoken: Boolean = false,
     /** 사용자별 설정의 호칭·말투 (U-07, M20) */
     val persona: String? = null,
+    /**
+     * 이미 로컬 데이터를 읽은 흐름에서 온 요청 (팀 나눠 맡기기, M22). 리더가 로컬 데이터를 읽은 뒤 맡긴 할 일에는 그 내용이 들어 있을 수 있어,
+     * 맡은 에이전트도 처음부터 인터넷 도구에 승인을 받는다
+     */
+    val tainted: Boolean = false,
 )
 
 /** 사용자 입력. [images]는 이번 질문에 붙인 이미지 (V-04), [workspace]는 CLI 작업 폴더 (M17) */
