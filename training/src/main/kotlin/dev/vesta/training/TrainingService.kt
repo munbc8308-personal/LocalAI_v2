@@ -152,7 +152,7 @@ class TrainingService(
     }
 
     /**
-     * 메인 모델 QLoRA를 시작한다 (L-24). 결과는 바로 쓰지 않는다: Ollama에 `gemma4-vesta:rN`으로 등록만 하고,
+     * 메인 모델 QLoRA를 시작한다 (L-24). 결과는 바로 쓰지 않는다: Ollama에 `gemma4-vesta:26b-mxfp8-rN`으로 등록만 하고,
      * 주간 점검이 지금 모델과 같은 평가로 재서 통과하면 승인을 받은 뒤에만 바뀐다 (E-05)
      */
     suspend fun startGeneral(): TrainingRun = mutex.withLock {
@@ -171,7 +171,8 @@ class TrainingService(
 
     private suspend fun executeGeneral(run: TrainingRun, rows: List<GeneralData.Row>, base: String) {
         val dir = work.resolve("runs").resolve("r${run.id}")
-        val candidate = "gemma4-vesta:r${run.id}"
+        // 원본 태그를 이름에 남긴다: Ollama가 gemma4 렌더러(빈 생각 칸을 채우는 large / 아닌 small)를 이름으로 고른다 (13.30)
+        val candidate = base.split(':').let { "${it[0]}-vesta:${it.getOrElse(1) { "latest" }}-r${run.id}" }
         try {
             Files.createDirectories(dir)
             runs.progress(run.id, "데이터", 0, 0, null)

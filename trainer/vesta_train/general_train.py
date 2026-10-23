@@ -37,6 +37,7 @@ def main():
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--max-tokens", type=int, default=2048)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--export", choices=["bf16", "int8"], default="bf16", help="합친 층 형식")
     args = p.parse_args()
     random.seed(args.seed)
     mx.random.seed(args.seed)
@@ -91,7 +92,7 @@ def main():
             emit(event="progress", step=step, total=steps, loss=round(sum(recent) / len(recent), 4), elapsed=round(time.time() - started), peak=round(mx.get_peak_memory() / 1e9, 1))
         model.eval()
         emit(event="dev", step=step, epoch=epoch + 1, loss=evaluate(dev))
-    result = export(model, Path(args.models), args.base, args.name, work)
+    result = export(model, Path(args.models), args.base, args.name, work, args.export)
     emit(event="registered", name=args.name, samples=len(examples), **result)
 
 

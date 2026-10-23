@@ -102,11 +102,8 @@ data class TrainingConfig(
     val generalLearningRate: Double = 5e-5,
     /** 메인 모델 학습 메모리 (QLoRA, 2,048토큰에서 약 50GB) */
     val generalMemoryGigabytes: Int = 55,
-    /**
-     * 주간 점검이 재료가 쌓이면 메인 모델 학습을 스스로 시작할지. 기본은 끔: MLX(mlx-lm 0.32.2)의 gemma4 계산이 Ollama와 달라
-     * 학습한 후보가 Ollama에서 나빠진다 (PROJECT.md 13.30). 직접 시작(`vesta train general`)과 후보 평가는 그대로 된다
-     */
-    val generalAutoRetrain: Boolean = false,
+    /** 주간 점검이 재료가 쌓이면 메인 모델 학습을 스스로 시작할지. 후보는 평가 게이트·승인을 거쳐야만 쓰인다 */
+    val generalAutoRetrain: Boolean = true,
 )
 
 /**
