@@ -13,7 +13,7 @@ private val log = KotlinLogging.logger {}
  * 파괴적 명령 0.84~0.97 / 읽기 명령 0.09 — 모두 0.5로 깔끔히 갈린다.
  * 판정 실패 시에는 "문제 없음" 쪽 값을 돌려 기능을 막지 않는다 (판정은 보조 수단).
  */
-class Judge(private val decision: DecisionClient, private val maxStateChars: Int = 6_000) {
+class Judge(private val decision: DecisionClient, private val maxStateChars: Int = MAX_STATE_CHARS) {
 
     /** D6: 근거로 질문에 답할 수 있는가 (0~1). 실패 시 1.0 */
     suspend fun sufficient(question: String, evidence: String): Double =
@@ -63,6 +63,8 @@ class Judge(private val decision: DecisionClient, private val maxStateChars: Int
 
     companion object {
         const val THRESHOLD = 0.5
+        /** 결정 모델 입력 한도 (근거가 길면 앞부분만 본다) */
+        const val MAX_STATE_CHARS = 6_000
         private const val BATCH = 12
     }
 }

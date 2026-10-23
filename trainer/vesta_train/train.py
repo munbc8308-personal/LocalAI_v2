@@ -5,7 +5,6 @@
 import argparse
 import hashlib
 import json
-import math
 import random
 import sys
 import time
@@ -16,7 +15,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx_lm.tuner.utils import linear_to_lora_layers
 
-from .data import replay_examples, routing_examples
+from .data import judge_examples, replay_examples, routing_examples
 from .model import MAX_OPTIONS, Winnow, save_adapter
 
 KEYS = ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj", "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"]
@@ -30,6 +29,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--base", required=True, help="HF 형식 Winnow (convert로 만든 폴더)")
     p.add_argument("--train", required=True, nargs="+", help="라우팅 학습 TSV")
+    p.add_argument("--judge", nargs="*", default=[], help="정답이 붙은 판정 재료 JSONL (D6·D7·D10, L-22)")
     p.add_argument("--replay", help="판정 재연 JSONL (지금 모델 답을 지키게)")
     p.add_argument("--out", required=True)
     p.add_argument("--rank", type=int, default=16)
@@ -41,13 +41,15 @@ def main():
     p.add_argument("--max-steps", type=int, default=0, help="실험용: 이 단계에서 멈춘다 (0이면 끝까지)")
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--batch", type=int, default=8)
+    # L-22: 코드 판정 재료는 2,000토큰이 넘어 8개 묶음(약 2만 토큰)이 메모리를 넘겨 강제 종료됐다(r3, 종료 코드 137)
+    p.add_argument("--batch-tokens", type=int, default=4096, help="묶음 하나의 최대 토큰 수 (가장 긴 문항 길이 × 문항 수)")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--ollaya", default="http://127.0.0.1:11435")
     args = p.parse_args()
     random.seed(args.seed)
     mx.random.seed(args.seed)
 
-    examples = [e for path in args.train for e in routing_examples(path)]
+    examples = [e for path in args.train for e in routing_examples(path)] + [e for path in args.judge for e in judge_examples(path)]
     # 학습 문항의 10%는 손실 확인용 (문항 단위로 나눠 같은 질문이 양쪽에 들어가지 않게)
     dev = [e for e in examples if int(hashlib.sha256(e.source.encode()).hexdigest(), 16) % 10 == 0]
     train = [e for e in examples if e not in dev]
@@ -65,12 +67,32 @@ def main():
     trainable = sum(v.size for _, v in __import__("mlx.utils", fromlist=["tree_flatten"]).tree_flatten(model.trainable_parameters()))
     emit(event="model", trainable=trainable)
 
-    def batches(items, shuffle):
+    lengths = {}
+
+    def length(e):
+        if e.prompt not in lengths:
+            lengths[e.prompt] = len(w.tokens(e.prompt))
+        return lengths[e.prompt]
+
+    def plan(items, shuffle):
+        """문항 수 [batch]개, 채운 길이 [batch_tokens] 안에서 묶는다. 긴 문항은 혼자 한 묶음"""
         order = list(items)
         if shuffle:
             random.shuffle(order)
-        for i in range(0, len(order), args.batch):
-            yield order[i:i + args.batch]
+        out, current, longest = [], [], 0
+        for e in order:
+            n = length(e)
+            if current and (len(current) >= args.batch or max(longest, n) * (len(current) + 1) > args.batch_tokens):
+                out.append(current)
+                current, longest = [], 0
+            current.append(e)
+            longest = max(longest, n)
+        if current:
+            out.append(current)
+        return out
+
+    def batches(items, shuffle):
+        yield from plan(items, shuffle)
 
     def loss_fn(_model, tokens, answers, mask):
         logits = w.option_logits(tokens).astype(mx.float32)
@@ -93,7 +115,7 @@ def main():
             total += len(batch)
         return loss / max(total, 1), right / max(total, 1)
 
-    steps = args.epochs * math.ceil(len(train) / args.batch)
+    steps = args.epochs * len(plan(train, False))
     if args.max_steps:
         steps = min(steps, args.max_steps)
     warmup = min(args.warmup, max(steps // 5, 1))

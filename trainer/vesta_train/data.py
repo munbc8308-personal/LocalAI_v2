@@ -33,6 +33,18 @@ def routing_examples(path: str) -> list[Example]:
     return out
 
 
+def judge_examples(path: str) -> list[Example]:
+    """정답이 붙은 판정 재료 (L-22): {"q": "D6"|"D7"|"D10", "state", "question"|"statement", "label": 0|1}"""
+    out = []
+    for line in open(path, encoding="utf-8"):
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        state, question = judge_question(item["q"], item)
+        out.append(Example(prompt(state, question), int(item["label"]), 2, item["q"], line.strip()))
+    return out
+
+
 def teacher(state: str, question: dict, model: str, url: str) -> list[float]:
     """지금 결정 모델(Ollaya)의 선택지 확률 — 재연 정답"""
     body = {"model": model, "state": state, "questions": {"q": question}}

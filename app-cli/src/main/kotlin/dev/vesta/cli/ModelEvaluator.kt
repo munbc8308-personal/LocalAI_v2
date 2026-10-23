@@ -149,17 +149,16 @@ internal class ModelEvaluator(private val evalDir: Path, private val echo: (Stri
         }
     }
 
-    /** D6 임계값 조정용: 저장소에 답이 있는 질문·없는 질문의 D6 점수 (CodeAgent와 같은 검색·자료 묶기) */
+    /** D6 임계값 조정용: 저장소에 답이 있는 질문·없는 질문의 D6 점수 (CodeAgent와 같은 검색·자료 묶기, [AppContainer.codeContext]) */
     suspend fun codeSufficiency(app: AppContainer): Pair<List<Pair<String, Double>>, List<Pair<String, Double>>>? {
         val judge = app.judge ?: return null
-        val repo = app.knowledge.findCollection(app.owner.userId, app.config.evolution.codeCollection)?.takeIf { it.kind == CollectionKind.CODE } ?: return null
+        app.knowledge.findCollection(app.owner.userId, app.config.evolution.codeCollection)?.takeIf { it.kind == CollectionKind.CODE } ?: return null
         val answerableFile = evalDir.resolve("code-vesta.tsv")
         val absentFile = evalDir.resolve("code-absent-ko.tsv")
         if (!answerableFile.exists() || !absentFile.exists()) return null
         suspend fun score(question: String): Double {
-            val evidence = app.retriever.retrieve(app.owner.userId, listOf(question), RetrieveOptions(listOf(repo.id), 8))
-            if (evidence.isEmpty()) return 0.0
-            return judge.sufficient(question, ContextAssembler.assemble(evidence, 16_000).text)
+            val context = app.codeContext(question) ?: return 0.0
+            return judge.sufficient(question, context.text)
         }
         return readTsv(answerableFile).map { it[0] to score(it[0]) } to readTsv(absentFile).map { it[0] to score(it[0]) }
     }

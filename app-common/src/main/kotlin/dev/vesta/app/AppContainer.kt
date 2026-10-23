@@ -417,6 +417,19 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     }
 
     /**
+     * 주간 점검·학습이 쓰는 D6 코드 판정 자료 (L-22): 저장소 `evolution.codeCollection`을 CodeAgent와 같은 방식(조각 8개, 16,000자 묶음)으로 검색해
+     * 결정 모델이 실제로 보는 앞부분(Judge 입력 한도)과 그 안에 든 파일. 저장소가 없거나 찾은 것이 없으면 null
+     */
+    suspend fun codeContext(question: String): dev.vesta.core.training.CodeContext? {
+        val repo = knowledge.findCollection(owner.userId, config.evolution.codeCollection)?.takeIf { it.kind == CollectionKind.CODE } ?: return null
+        val evidence = retriever.retrieve(owner.userId, listOf(question), dev.vesta.core.knowledge.RetrieveOptions(listOf(repo.id), 8))
+        if (evidence.isEmpty()) return null
+        val context = dev.vesta.retrieval.ContextAssembler.assemble(evidence, 16_000)
+        val text = context.text.take(dev.vesta.decision.Judge.MAX_STATE_CHARS)
+        return dev.vesta.core.training.CodeContext(text, context.evidence.filter { "[${it.citation}] " in text }.map { it.ref })
+    }
+
+    /**
      * 👍·👎·담당 정정 저장 (웹·메신저 공통, C-09·L-20). 동의한 사용자(L-09)면 👍·👎를 바로 학습 재료로 (확실한 신호라 검토 없이).
      * 0(평가 취소)이면 그 재료를 빼고, 바꾸면 고친다
      */

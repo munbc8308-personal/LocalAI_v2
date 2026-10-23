@@ -155,3 +155,9 @@ interface CuratorSource {
     /** [afterMessageId] 뒤에 새 질문이 있는 세션의 턴들 (그 앞 턴 하나 포함, 신호를 찾으려면 앞 턴이 필요하다). [users]의 것만 */
     suspend fun turns(afterMessageId: Long, users: Set<UserId>, limit: Int): List<CuratorTurn>
 }
+
+/**
+ * D6 코드 근거 충분도 재료를 만들 검색 결과 (PROJECT.md L-22): CodeAgent와 같은 검색·자료 묶기로 결정 모델이 실제로 볼 글(앞부분만)과
+ * 그 글에 들어간 파일 경로
+ */
+data class CodeContext(val text: String, val files: List<String>)

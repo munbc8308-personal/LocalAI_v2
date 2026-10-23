@@ -54,6 +54,8 @@ class TrainingService(
     private val makeRoom: suspend (Long) -> Unit = {},
     /** 큐레이터가 모으고 검토를 거친 라우팅 재료 (L-25·L-26). 정정과 함께 학습에 넣는다 */
     private val samples: dev.vesta.core.training.TrainingSampleRepository? = null,
+    /** D6 코드 판정 재료를 만들 저장소 검색 (L-22). 없으면 손으로 쓴 판정 재료만 쓴다 */
+    private val codeContext: (suspend (String) -> dev.vesta.core.training.CodeContext?)? = null,
     private val home: String = System.getProperty("user.home"),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -92,6 +94,9 @@ class TrainingService(
             Files.createDirectories(dir)
             runs.progress(run.id, "데이터", 0, 0, null)
             val corrections = writeCorrections(dir.resolve("corrections.tsv"))
+            // 판정 재료 (L-22): 손으로 쓴 D6·D7·D10 + 지금 저장소로 만든 D6 코드. 시험용 코드 질문은 주간 점검 평가셋(D6 임계값과 같은 것)
+            val codeTrain = codeJudge(listOf(trainer.resolve("data").resolve("code-sufficiency-train-ko.tsv")), dir.resolve("code-judge-train.jsonl"))
+            val codeTest = codeJudge(listOf("code-vesta.tsv", "code-absent-ko.tsv").map { path(config.evalDir).resolve(it) }, dir.resolve("code-judge-test.jsonl"))
             val base = baseGguf(config.decisionBase)
             val hf = work.resolve("base").resolve(config.decisionBase.replace(':', '-') + "-hf")
             if (!hf.resolve("model.safetensors").exists() && !hf.resolve("model.safetensors.index.json").exists()) {
@@ -101,8 +106,9 @@ class TrainingService(
             makeRoom(config.memoryGigabytes * 1024L * 1024 * 1024)
             runs.progress(run.id, "학습", 0, 0, null)
             val trainFiles = listOf(data("routing-train-ko.tsv")) + listOfNotNull(corrections?.toString())
+            val judgeTrain = listOf(data("judge-train-ko.jsonl")) + listOfNotNull(codeTrain?.toString())
             python(
-                dir, "train", "--base", hf.toString(), "--train", *trainFiles.toTypedArray(),
+                dir, "train", "--base", hf.toString(), "--train", *trainFiles.toTypedArray(), "--judge", *judgeTrain.toTypedArray(),
                 "--replay", data("judge-replay.jsonl"), "--out", dir.resolve("adapter").toString(),
                 "--epochs", config.epochs.toString(), "--rank", config.rank.toString(), "--lr", config.learningRate.toString(),
                 "--ollaya", ollayaUrl,
@@ -118,6 +124,7 @@ class TrainingService(
             python(
                 dir, "verify", "--base", config.decisionBase, "--candidate", candidate,
                 "--test", data("routing-test-ko.tsv"), data("routing-eval-m4-ko.tsv"),
+                "--judge-test", data("judge-test-ko.jsonl"), *listOfNotNull(codeTest?.toString()).toTypedArray(),
                 "--replay", data("judge-replay.jsonl"), "--min-replay", config.minReplayAgreement.toString(), "--ollaya", ollayaUrl,
             ) { event -> if (event["event"]?.jsonPrimitive?.contentOrNull == "gate") gate = event }
             val report = gate ?: error("평가 결과가 없습니다")
@@ -158,6 +165,14 @@ class TrainingService(
         if (rows.isEmpty()) return null
         Files.writeString(target, "# 사용자 라우팅 정정 (C-09). 열: 질문<TAB>담당자<TAB>웹(-: 모름)<TAB>로컬(-)\n" + rows.joinToString("\n") { "${it.first}\t${it.second}\t-\t-" } + "\n")
         return target
+    }
+
+    /** 코드 질문 TSV → 실제 저장소 검색으로 정답 붙은 D6 재료 (L-22). 저장소가 없거나 재료가 없으면 null */
+    private suspend fun codeJudge(files: List<Path>, target: Path): Path? {
+        val search = codeContext ?: return null
+        val items = CodeSufficiencyData.build(files.flatMap { CodeSufficiencyData.rows(it) }, search)
+        log.info { "D6 코드 판정 재료 ${items.size}개 (${target.fileName})" }
+        return CodeSufficiencyData.write(items, target)
     }
 
     /** Ollaya 매니페스트에서 모델의 GGUF 파일을 찾는다 */

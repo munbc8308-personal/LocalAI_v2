@@ -824,7 +824,11 @@ private fun gateSummary(report: String?): String? = runCatching {
     val base = right("base"); val cand = right("candidate")
     val total = gate["base"]!!.jsonObject["total"]!!.jsonPrimitive.content
     val replay = gate["replay"]!!.jsonObject
-    listOf("agent" to "담당", "needsWeb" to "웹", "needsLocal" to "로컬").joinToString(" · ") { (k, label) -> "$label ${base[k]}→${cand[k]}/$total" } +
+    // 판정 시험셋(D6·D7·D10, L-22)은 그 뒤 학습부터 있다
+    val judgeTotal = gate["judge"]?.jsonObject?.get("total")?.jsonObject.orEmpty().mapValues { it.value.jsonPrimitive.content }
+    val judges = listOf("D6" to "근거 충분", "D7" to "근거 확인", "D10" to "지시문").filter { it.first in judgeTotal }
+        .joinToString("") { (k, label) -> " · $label ${base[k]}→${cand[k]}/${judgeTotal[k]}" }
+    listOf("agent" to "담당", "needsWeb" to "웹", "needsLocal" to "로컬").joinToString(" · ") { (k, label) -> "$label ${base[k]}→${cand[k]}/$total" } + judges +
         " · 다른 판정 일치 ${replay["same"]!!.jsonPrimitive.content}/${replay["total"]!!.jsonPrimitive.content}"
 }.getOrNull()
 

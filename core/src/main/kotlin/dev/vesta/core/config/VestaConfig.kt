@@ -86,6 +86,8 @@ data class TrainingConfig(
     val memoryGigabytes: Int = 30,
     /** Ollaya 모델 저장소 */
     val ollayaModels: String = "~/.ollaya/models",
+    /** 평가셋 (scripts/install-vesta.sh가 eval/을 복사). D6 코드 판정 시험 질문을 여기서 읽는다 (L-22) */
+    val evalDir: String = "~/.vesta/evalsets",
 )
 
 /**

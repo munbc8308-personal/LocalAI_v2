@@ -6,7 +6,9 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.path
 import dev.vesta.api.ActivateDto
 import dev.vesta.api.ApiJson
 import dev.vesta.api.TrainingRunDto
@@ -36,7 +38,7 @@ class TrainCommand : CliktCommand(name = "train") {
     override fun run() = Unit
 
     companion object {
-        fun create() = TrainCommand().subcommands(TrainDecisionCommand(), TrainStatusCommand(), TrainActivateCommand(), TrainCancelCommand())
+        fun create() = TrainCommand().subcommands(TrainDecisionCommand(), TrainStatusCommand(), TrainActivateCommand(), TrainCancelCommand(), TrainJudgeDataCommand())
     }
 }
 
@@ -134,6 +136,30 @@ class TrainCancelCommand : CliktCommand(name = "cancel") {
     override fun run() = withClient { client ->
         client.post("/api/training/${id.removePrefix("r")}/cancel")
         echo("학습 r${id.removePrefix("r")}을 멈췄습니다.")
+    }
+}
+
+/** 학습이 쓸 D6 코드 판정 재료를 미리 만들어 본다 (L-22). 서버가 아니라 이 Mac에서 직접 검색한다 */
+class TrainJudgeDataCommand : CliktCommand(name = "judge-data") {
+    override fun help(context: Context) = "D6 코드 판정 재료(학습용·시험용 JSONL)를 지금 저장소 검색으로 만들어 본다"
+    private val out by option("--out", "-o", help = "저장할 폴더").path().default(java.nio.file.Path.of("."))
+
+    override fun run() = runBlocking {
+        dev.vesta.app.AppContainer().use { app ->
+            val home = System.getProperty("user.home")
+            fun path(value: String) = java.nio.file.Path.of(value.replaceFirst(Regex("^~"), home))
+            val sets = mapOf(
+                "code-judge-train.jsonl" to listOf(path(app.config.training.trainerDir).resolve("data/code-sufficiency-train-ko.tsv")),
+                "code-judge-test.jsonl" to listOf("code-vesta.tsv", "code-absent-ko.tsv").map { path(app.config.training.evalDir).resolve(it) },
+            )
+            java.nio.file.Files.createDirectories(out)
+            for ((name, files) in sets) {
+                val rows = files.flatMap { dev.vesta.training.CodeSufficiencyData.rows(it) }
+                val items = dev.vesta.training.CodeSufficiencyData.build(rows) { app.codeContext(it) }
+                dev.vesta.training.CodeSufficiencyData.write(items, out.resolve(name))
+                echo("$name: 질문 ${rows.size}개 → 재료 ${items.size}개 (있음 ${items.count { it.label }}, 없음 ${items.count { !it.label }}, 정답 파일을 못 찾아 뺌 ${rows.count { it.second.isNotEmpty() } - items.count { it.label }})")
+            }
+        }
     }
 }
 

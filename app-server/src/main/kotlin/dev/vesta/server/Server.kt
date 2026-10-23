@@ -189,6 +189,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             app.modelManager.reserve(bytes)
         },
         samples = app.trainingSamples,
+        codeContext = { app.codeContext(it) },
     )
     // 학습 재료 큐레이터 (L-25): 쉬는 때만(답하는 중·마지막 대화 뒤 2분 안·학습·주간 점검 중이 아님) 10분마다
     val curator = dev.vesta.training.Curator(
