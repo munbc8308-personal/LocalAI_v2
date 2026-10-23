@@ -54,6 +54,8 @@ data class A2aCard(
     val auth: Boolean,
     val skills: List<String>,
     val version: String?,
+    /** 연결 주소가 내부 주소(이 Mac·사설망·Tailscale)로 해석되는가 */
+    val local: Boolean = false,
 )
 
 /** 원격 에이전트가 보낸 소식 (두 버전을 같은 모양으로) */
@@ -80,6 +82,11 @@ class A2aClient(
     private val maxResponseBytes: Long = 2_000_000,
     private val maxAnswerChars: Int = 20_000,
     private val requestTimeoutMillis: Long = 600_000,
+    private val resolve: suspend (String) -> List<java.net.InetAddress> = { host ->
+        withContext(kotlinx.coroutines.Dispatchers.IO) { java.net.InetAddress.getAllByName(host).toList() }
+    },
+    /** 내부 주소인가 (앱에서는 웹 수집과 같은 UrlGuard.isInternal) */
+    private val internal: (java.net.InetAddress) -> Boolean = { it.isLoopbackAddress || it.isSiteLocalAddress || it.isLinkLocalAddress || it.isAnyLocalAddress },
 ) {
     private val ids = AtomicLong()
 
@@ -96,13 +103,35 @@ class A2aClient(
             val bytes = response.bodyAsChannel().readRemaining(maxCardBytes + 1).readByteArray()
             if (bytes.size > maxCardBytes) throw A2aException("Agent Card가 너무 큽니다")
             val json = runCatching { Json.parseToJsonElement(bytes.decodeToString()).jsonObject }.getOrElse { throw A2aException("Agent Card가 JSON이 아닙니다") }
-            return parseCard(candidate, json)
+            return checkEndpoint(parseCard(candidate, json))
         }
         throw A2aException(lastError)
     }
 
+    /**
+     * 카드가 정한 연결 주소 검사 (SSRF 방지, M22 보안 검토). 바깥 카드가 이 Mac·사설망의 다른 서비스(Ollama 등)로 보내게 만들지 못하게:
+     * 연결 주소가 내부 주소면 카드와 같은 호스트여야 한다 (사용자가 직접 넣은 로컬 에이전트는 된다)
+     */
+    private suspend fun checkEndpoint(card: A2aCard): A2aCard {
+        val endpointHost = Url(card.endpoint).host
+        val local = isInternal(endpointHost) ?: throw A2aException("연결 주소를 찾을 수 없습니다: $endpointHost")
+        if (local && endpointHost != Url(card.cardUrl).host) throw A2aException("카드가 다른 호스트의 내부 주소($endpointHost)로 연결하게 합니다. 이런 에이전트는 붙이지 않습니다")
+        return card.copy(local = local)
+    }
+
+    /** 해석한 IP 중 하나라도 내부면 true, 찾지 못하면 null */
+    private suspend fun isInternal(host: String): Boolean? {
+        val addresses = runCatching { resolve(host) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        return addresses.any(internal)
+    }
+
     /** 할 일을 보내고 소식을 흘린다. 흐름이 취소되면 원격 작업 취소를 한 번 보낸다 */
     fun send(card: A2aCard, text: String, token: String?): Flow<A2aUpdate> = flow {
+        // 등록 때 바깥 주소였는데 지금 내부로 해석되면 보내지 않는다 (DNS rebinding). 확인과 연결 사이의 바뀜은 남은 위험 (UrlGuard와 같음)
+        if (!card.local) {
+            val host = Url(card.endpoint).host
+            if (isInternal(host) != false) throw A2aException("연결 주소 $host 가 등록 때와 달리 내부 주소로 해석되거나 찾을 수 없어 보내지 않았습니다")
+        }
         val v1 = card.protocol == "1.0"
         val method = when {
             v1 && card.streaming -> "SendStreamingMessage"
@@ -175,7 +204,8 @@ class A2aClient(
         val data = StringBuilder()
         var total = 0L
         while (state.finished == null) {
-            val line = channel.readUTF8Line() ?: break
+            // 줄 하나도 한도 안에서만 읽는다 (끝없는 한 줄로 메모리를 채우지 못하게)
+            val line = try { channel.readUTF8Line((maxResponseBytes - total).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { throw A2aException("응답이 너무 큽니다") } ?: break
             total += line.length + 1
             if (total > maxResponseBytes) throw A2aException("응답이 너무 큽니다")
             when {

@@ -62,7 +62,7 @@ class A2aAgent(
             }
         }
         emit(AgentEvent.Status("A2A ${def.name}(${host})에게 보냄 ${text.length}자: ${text.lineSequence().first().take(120)}"))
-        val card = A2aCard(def.cardUrl, def.displayName, def.description, def.endpoint, def.protocol, def.streaming, def.auth, def.skills, null)
+        val card = A2aCard(def.cardUrl, def.displayName, def.description, def.endpoint, def.protocol, def.streaming, def.auth, def.skills, null, def.local)
         var answered = false
         try {
             client.send(card, text, token()).collect { update ->

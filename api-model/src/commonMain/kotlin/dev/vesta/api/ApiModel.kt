@@ -358,7 +358,11 @@ data class A2aAgentDto(
 
 /** A2A 등록 요청 (`POST /api/a2a/preview`, `PUT /api/a2a/{name}`) */
 @Serializable
-data class A2aAddDto(val url: String)
+data class A2aAddDto(
+    val url: String,
+    /** 미리 보기에서 확인한 연결 주소 (등록할 때 카드가 바뀌었으면 거부) */
+    val endpoint: String? = null,
+)
 
 /** 등록 전에 보여 줄 Agent Card 내용과 경고 */
 @Serializable

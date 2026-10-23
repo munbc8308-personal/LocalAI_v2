@@ -150,6 +150,7 @@ class ExposedA2aAgentRepository(private val db: Database, private val clock: Clo
             it[skills] = def.skills.joinToString("\n") { s -> s.replace('\n', ' ') }
             it[streaming] = def.streaming
             it[auth] = def.auth
+            it[local] = def.local
             it[addedAt] = now
         }
         def.copy(addedAt = now)
@@ -170,6 +171,7 @@ class ExposedA2aAgentRepository(private val db: Database, private val clock: Clo
         skills = this[A2aAgents.skills].lines().filter { it.isNotBlank() },
         streaming = this[A2aAgents.streaming],
         auth = this[A2aAgents.auth],
+        local = this[A2aAgents.local],
         addedAt = this[A2aAgents.addedAt],
     )
 }

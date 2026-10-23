@@ -321,7 +321,7 @@ private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
                 onClick {
                     busy = true
                     scope.launch {
-                        runCatching { Http.put("/api/a2a/${name.trim()}", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim()))) }
+                        runCatching { Http.put("/api/a2a/${name.trim()}", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim(), p.endpoint))) }
                             .onSuccess { onSaved() }
                             .onFailure { onError(it.message) }
                         busy = false

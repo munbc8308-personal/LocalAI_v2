@@ -159,7 +159,7 @@ class StudioTest : FunSpec({
         val client = dev.vesta.a2a.A2aClient(io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { request ->
             if (request.url.host == "agent.example") respond(card, HttpStatusCode.OK, io.ktor.http.headersOf(io.ktor.http.HttpHeaders.ContentType, "application/json"))
             else respond("", HttpStatusCode.NotFound)
-        }) { install(io.ktor.client.plugins.HttpTimeout) })
+        }) { install(io.ktor.client.plugins.HttpTimeout) }, resolve = { host -> listOf(java.net.InetAddress.getByAddress(host, byteArrayOf(93, 184.toByte(), 216.toByte(), 34))) })
         val studio = StudioEndpoints(agents, ExposedRunRepository(db.db), emptyFlow(), { emptyList() }, teams, remote, client)
         application { vestaApi(ServerDeps(SilentConversation, EmptySessions, EmptyMessages, owner, token = "secret", version = "t", studio = studio)) }
 
@@ -169,8 +169,11 @@ class StudioTest : FunSpec({
         preview shouldContain "암호화되지 않은 http"
         preview shouldContain "dev.vesta.a2a"
         this.client.post("/api/a2a/preview") { bearerAuth("secret"); setBody("""{"url":"https://nothing.example"}""") }.status shouldBe HttpStatusCode.BadRequest
-        this.client.put("/api/a2a/lead") { bearerAuth("secret"); setBody("""{"url":"https://agent.example"}""") }.bodyAsText() shouldContain "같은 이름"
-        this.client.put("/api/a2a/echo") { bearerAuth("secret"); setBody("""{"url":"https://agent.example"}""") }.status shouldBe HttpStatusCode.OK
+        this.client.put("/api/a2a/lead") { bearerAuth("secret"); setBody("""{"url":"https://agent.example","endpoint":"http://other.example/a2a"}""") }.bodyAsText() shouldContain "같은 이름"
+        // 미리 보기에서 본 연결 주소와 다르면(그사이 카드가 바뀜) 거부
+        this.client.put("/api/a2a/echo") { bearerAuth("secret"); setBody("""{"url":"https://agent.example","endpoint":"https://agent.example/a2a"}""") }.bodyAsText() shouldContain "바뀌었습니다"
+        this.client.put("/api/a2a/echo") { bearerAuth("secret"); setBody("""{"url":"https://agent.example"}""") }.status shouldBe HttpStatusCode.BadRequest
+        this.client.put("/api/a2a/echo") { bearerAuth("secret"); setBody("""{"url":"https://agent.example","endpoint":"http://other.example/a2a"}""") }.status shouldBe HttpStatusCode.OK
         remote.find(owner.userId, "echo")!!.let { it.endpoint shouldBe "http://other.example/a2a"; it.auth shouldBe true; it.protocol shouldBe "1.0" }
         this.client.put("/api/agents/echo") { bearerAuth("secret"); setBody("""{"name":"","description":"x","instructions":"","model":"GENERAL","tools":[]}""") }.bodyAsText() shouldContain "A2A"
         this.client.get("/api/agents") { bearerAuth("secret") }.bodyAsText().let { it shouldContain "\"canA2a\":true"; it shouldContain "\"displayName\":\"Echo Agent\"" }

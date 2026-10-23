@@ -481,7 +481,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     if (user.role != UserRole.OWNER) return@put call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
-                    studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url)?.let { error ->
+                    studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url, dto.endpoint)?.let { error ->
                         return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
                     }
                     call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
@@ -932,13 +932,15 @@ class StudioEndpoints(
     }
 
     /** 등록 (카드를 다시 읽어 저장). 이름은 사용자 정의 에이전트와 겹치면 안 된다 (`/agent 이름`으로 함께 부른다) */
-    suspend fun saveA2a(user: UserContext, name: String, url: String): String? {
+    suspend fun saveA2a(user: UserContext, name: String, url: String, previewed: String?): String? {
         val repo = a2aRepo ?: return "A2A를 쓸 수 없습니다"
         val client = a2aClient ?: return "A2A를 쓸 수 없습니다"
         if (!dev.vesta.core.studio.CustomAgentDef.NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/agent 이름 으로 부릅니다)"
         if (agentRepo.find(user.userId, name) != null) return "같은 이름의 사용자 정의 에이전트가 있습니다"
         val card = try { client.card(url) } catch (e: dev.vesta.a2a.A2aException) { return e.message ?: "카드를 읽지 못했습니다" }
-        repo.save(dev.vesta.core.studio.A2aAgentDef(user.userId, name, card.cardUrl, card.endpoint, card.protocol, card.name, card.description, card.skills, card.streaming, card.auth))
+        // 미리 보기에서 사용자가 본 연결 주소와 같아야 한다 (그사이 카드가 바뀌었으면 다시 확인하게)
+        if (previewed == null || previewed != card.endpoint) return "미리 보기 뒤에 Agent Card의 연결 주소가 바뀌었습니다 (${card.endpoint}). 다시 카드를 읽어 확인해 주세요"
+        repo.save(dev.vesta.core.studio.A2aAgentDef(user.userId, name, card.cardUrl, card.endpoint, card.protocol, card.name, card.description, card.skills, card.streaming, card.auth, card.local))
         return null
     }
 

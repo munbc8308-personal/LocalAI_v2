@@ -174,7 +174,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val teamRepository = dev.vesta.storage.ExposedTeamRepository(database.db)
     val a2aRepository = dev.vesta.storage.ExposedA2aAgentRepository(database.db)
     /** A2A (A-15): 바깥 에이전트. 리다이렉트는 따라가지 않는다 (등록한 주소로만) */
-    val a2aClient = dev.vesta.a2a.A2aClient(HttpClients.web(60))
+    val a2aClient = dev.vesta.a2a.A2aClient(HttpClients.web(60), internal = dev.vesta.web.UrlGuard::isInternal)
     val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
     val journal = StudioJournal(runRepository)
 
