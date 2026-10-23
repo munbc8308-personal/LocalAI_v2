@@ -66,6 +66,7 @@ include(
     "evolution",
     "identity",
     "mcp",
+    "a2a",
     "agents",
     "conversation",
     "channel-core",

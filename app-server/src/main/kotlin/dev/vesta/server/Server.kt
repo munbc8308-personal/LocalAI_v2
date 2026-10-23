@@ -141,7 +141,7 @@ fun main() {
         users = app.users,
         evolution = evolution,
         userSettings = app.userSettings,
-        studio = StudioEndpoints(app.customAgentRepository, app.runRepository, app.journal.updates, { app.toolCatalog(it) }, app.teamRepository),
+        studio = StudioEndpoints(app.customAgentRepository, app.runRepository, app.journal.updates, { app.toolCatalog(it) }, app.teamRepository, app.a2aRepository, app.a2aClient, { app.a2aHasToken(it) }),
         voices = { app.voices },
         messengers = MessengerEndpoints(
             app.channelBindings, enabled = { notifiers.map { it.channel }.toSet() },

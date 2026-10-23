@@ -16,6 +16,7 @@ dependencies {
     api(project(":router"))
     api(project(":tools"))
     api(project(":mcp"))
+    api(project(":a2a"))
     api(project(":media"))
     api(project(":training"))
     api(project(":evolution"))

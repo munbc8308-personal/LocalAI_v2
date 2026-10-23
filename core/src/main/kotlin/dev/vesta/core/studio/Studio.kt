@@ -60,6 +60,36 @@ interface TeamRepository {
     suspend fun delete(owner: UserId, name: String): Boolean
 }
 
+/**
+ * A2A 에이전트 (A-15, M22): 표준 프로토콜(Agent2Agent, JSON-RPC)로 붙는 바깥 에이전트. Mac 주인만 등록·사용한다.
+ * [name]은 이 Mac에서 부르는 이름(`/agent 이름`, 팀 멤버), 나머지는 등록할 때 읽은 Agent Card 내용.
+ * 인증 토큰은 여기 두지 않고 키체인(`dev.vesta.a2a`, 계정 = [name])에 둔다
+ */
+data class A2aAgentDef(
+    val owner: UserId,
+    val name: String,
+    val cardUrl: String,
+    /** JSON-RPC 주소 */
+    val endpoint: String,
+    /** "1.0" 또는 "0.3" */
+    val protocol: String,
+    val displayName: String,
+    val description: String,
+    val skills: List<String> = emptyList(),
+    val streaming: Boolean = false,
+    /** Agent Card가 인증을 요구하는지 */
+    val auth: Boolean = false,
+    val addedAt: Instant = Instant.EPOCH,
+)
+
+interface A2aAgentRepository {
+    suspend fun list(owner: UserId): List<A2aAgentDef>
+    suspend fun find(owner: UserId, name: String): A2aAgentDef?
+    /** 이름이 같으면 고친다 (카드 다시 읽기) */
+    suspend fun save(def: A2aAgentDef): A2aAgentDef
+    suspend fun delete(owner: UserId, name: String): Boolean
+}
+
 enum class RunStatus { RUNNING, DONE, FAILED, CANCELLED }
 
 /** 실행 한 번 (A-12): 질문 하나에 에이전트가 답할 때까지. [customAgent]는 사용자 정의 에이전트 이름 */

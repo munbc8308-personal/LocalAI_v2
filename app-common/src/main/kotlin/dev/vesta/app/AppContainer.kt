@@ -172,6 +172,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 에이전트 스튜디오 (M22): 사용자 정의 에이전트, 실행 기록 */
     val customAgentRepository = dev.vesta.storage.ExposedCustomAgentRepository(database.db)
     val teamRepository = dev.vesta.storage.ExposedTeamRepository(database.db)
+    val a2aRepository = dev.vesta.storage.ExposedA2aAgentRepository(database.db)
+    /** A2A (A-15): 바깥 에이전트. 리다이렉트는 따라가지 않는다 (등록한 주소로만) */
+    val a2aClient = dev.vesta.a2a.A2aClient(HttpClients.web(60))
     val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
     val journal = StudioJournal(runRepository)
 
@@ -265,7 +268,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         media = mediaStore,
         scheduler = scheduler,
         persona = { id -> userSettings.get(id).persona() },
-        customAgents = { user, name -> customAgent(user, name) },
+        customAgents = { user, name -> customAgent(user, name) ?: a2aAgent(user, name) },
         teams = { user, name -> team(user, name) },
         journal = journal,
         agents = mapOf(
@@ -339,8 +342,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      */
     private suspend fun team(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
         val def = teamRepository.find(user.userId, name) ?: return null
-        val members = def.members.mapNotNull { member -> customAgentRepository.find(user.userId, member) }
-            .map { m -> dev.vesta.agents.TeamMember(m.name, m.description) { customAgent(user, m.name) } }
+        // 멤버는 사용자 정의 에이전트 또는 A2A 에이전트 (A2A는 주인만)
+        val a2a = if (user.role == UserRole.OWNER) a2aRepository.list(user.userId).associateBy { it.name } else emptyMap()
+        val members = def.members.mapNotNull { member ->
+            customAgentRepository.find(user.userId, member)?.let { m -> dev.vesta.agents.TeamMember(m.name, m.description) { customAgent(user, m.name) } }
+                ?: a2a[member]?.let { m -> dev.vesta.agents.TeamMember(m.name, "(A2A 바깥 에이전트 ${m.displayName}) ${m.description}".take(300)) { a2aAgent(user, m.name) } }
+        }
         if (members.isEmpty()) return null
         val rules = "\n\n너는 팀 '${def.name}'(${def.description})의 리더다. 멤버:\n" + members.joinToString("\n") { "- ${it.name}: ${it.description}" } +
             "\n- 일을 나눠 delegate 도구로 멤버에게 맡긴다. 한 번에 한 멤버, 앞 멤버의 결과가 필요하면 다음 task에 그 결과를 적어 넘긴다." +
@@ -348,6 +355,16 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             "\n- 멤버의 결과를 그대로 믿지 말고 확인한 뒤, 무엇을 누가 했는지 짧게 밝혀 최종 답을 쓴다."
         return customAgent(user, def.leader, dev.vesta.agents.DelegateTool(members), rules)
     }
+
+    /** A2A 에이전트 (A-15): Mac 주인만. 토큰은 키체인 `dev.vesta.a2a` / 이름 */
+    private suspend fun a2aAgent(user: UserContext, name: String): dev.vesta.core.agent.Agent? {
+        if (user.role != UserRole.OWNER) return null
+        val def = a2aRepository.find(user.userId, name) ?: return null
+        return dev.vesta.a2a.A2aAgent(def, a2aClient, approvals, { BotTokens.keychain(A2A_KEYCHAIN, def.name) }, config.tools.approvalTimeoutSeconds)
+    }
+
+    /** A2A 토큰이 키체인에 있는지 (웹 UI 표시용) */
+    fun a2aHasToken(name: String) = BotTokens.keychain(A2A_KEYCHAIN, name) != null
 
     /** 사용자 정의 에이전트에 줄 수 있는 도구 목록 (이 사용자가 쓸 수 있는 것, 웹 UI 고르기용) */
     suspend fun toolCatalog(user: UserContext): List<dev.vesta.core.tools.Tool> = toolsFor(user)
@@ -362,6 +379,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         /** 설정에 메인 모델이 없을 때 --model과 함께 쓰는 기본 파라미터 (M0 벤치마크: 생각 양 low). */
         val DEFAULT_GENERAL = ModelSpec(name = "", keepAlive = "forever", reasoningEffort = "none")
         const val DEFAULT_EMBEDDING = "bge-m3:567m"
+        /** A2A 에이전트 토큰의 키체인 서비스 (계정 = 에이전트 이름) */
+        const val A2A_KEYCHAIN = "dev.vesta.a2a"
     }
 }
 

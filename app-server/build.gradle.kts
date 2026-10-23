@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.kotlin.logging)
     runtimeOnly(libs.logback.classic)
     testImplementation(libs.ktor.server.test.host)
+    testImplementation(libs.ktor.client.mock)
     testImplementation(testFixtures(project(":channel-core")))
 }
 

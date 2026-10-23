@@ -305,6 +305,23 @@ object AgentTeams : LongIdTable("agent_team") {
     init { uniqueIndex(owner, name) }
 }
 
+/** A2A 에이전트 (M22, v18): 등록할 때 읽은 Agent Card 내용. 토큰은 키체인 */
+object A2aAgents : LongIdTable("a2a_agent") {
+    val owner = reference("owner_user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val name = varchar("name", 40)
+    val cardUrl = varchar("card_url", 1000)
+    val endpoint = varchar("endpoint", 1000)
+    val protocol = varchar("protocol", 8)
+    val displayName = varchar("display_name", 120)
+    val description = text("description")
+    val skills = text("skills")
+    val streaming = bool("streaming")
+    val auth = bool("auth")
+    val addedAt = timestamp("added_at")
+
+    init { uniqueIndex(owner, name) }
+}
+
 /** 실행 (M22, v16) */
 object AgentRuns : LongIdTable("agent_run") {
     val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()

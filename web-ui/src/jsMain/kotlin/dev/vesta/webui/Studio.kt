@@ -9,6 +9,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import dev.vesta.api.A2aAddDto
+import dev.vesta.api.A2aAgentDto
+import dev.vesta.api.A2aPreviewDto
 import dev.vesta.api.AgentsDto
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ChatRequestDto
@@ -52,6 +55,7 @@ fun StudioView() {
     val liveEvents = remember { mutableStateListOf<RunEventDto>() }
     var editing by remember { mutableStateOf<CustomAgentDto?>(null) }
     var editingTeam by remember { mutableStateOf<TeamDto?>(null) }
+    var addingA2a by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf("") }
     var task by remember { mutableStateOf("") }
@@ -94,11 +98,12 @@ fun StudioView() {
         // 일 맡기기: 사용자 정의 에이전트·팀에게 (기본 에이전트는 대화 탭에서 /web·/code·/task). target은 "agent 이름" 또는 "team 이름"
         if (a != null) Div({ classes("card") }) {
             Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일, /team 이름 할 일") } }
-            if (a.custom.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
+            if (a.custom.isEmpty() && a.a2a.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
             else {
                 Select({ onChange { e -> target = e.value.orEmpty() } }) {
                     Option("", { if (target.isEmpty()) selected() }) { Text("에이전트·팀 고르기") }
                     a.custom.forEach { c -> Option("agent ${c.name}", { if ("agent ${c.name}" == target) selected() }) { Text("${c.name} — ${c.description.take(40)}") } }
+                    a.a2a.forEach { r -> Option("agent ${r.name}", { if ("agent ${r.name}" == target) selected() }) { Text("${r.name} (A2A) — ${r.description.take(40)}") } }
                     a.teams.forEach { t -> Option("team ${t.name}", { if ("team ${t.name}" == target) selected() }) { Text("팀 ${t.name} — ${t.description.take(40)}") } }
                 }
                 TextArea(task) { placeholder("할 일"); attr("rows", "3"); onInput { task = it.value } }
@@ -174,7 +179,7 @@ fun StudioView() {
                 Span { B { Text("팀") } }
                 Button({
                     classes("link", "small")
-                    if (a.custom.size < 2) disabled()
+                    if (a.custom.isEmpty() || a.custom.size + a.a2a.size < 2) disabled()
                     onClick { editingTeam = TeamDto("", "", "", emptyList()) }
                 }) { Text("새 팀") }
             }
@@ -194,14 +199,27 @@ fun StudioView() {
                             }) { Text("지우기") }
                         }
                     }
-                    val names = a.custom.map { it.name }.toSet()
+                    val names = (a.custom.map { it.name } + a.a2a.map { it.name }).toSet()
                     val missing = (listOf(t.leader) + t.members).filter { it !in names }
                     Div({ classes("muted", "small") }) { Text("리더 ${t.leader} · 멤버 ${t.members.joinToString()}") }
                     if (missing.isNotEmpty()) Div({ classes("bad", "small") }) { Text("지워진 에이전트: ${missing.joinToString()}") }
                 }
             }
         }
-        editingTeam?.let { t -> TeamEditor(t, a?.custom.orEmpty(), onCancel = { editingTeam = null }) { saved ->
+        // A2A 에이전트: 바깥 에이전트를 표준 프로토콜로 (Mac 주인만)
+        if (a != null && a.canA2a) Div({ classes("card") }) {
+            Div({ classes("row") }) {
+                Span { B { Text("A2A 에이전트") } }
+                Button({ classes("link", "small"); onClick { addingA2a = !addingA2a } }) { Text(if (addingA2a) "닫기" else "붙이기") }
+            }
+            if (a.a2a.isEmpty() && !addingA2a) P({ classes("muted", "small") }) { Text("다른 곳에서 돌아가는 에이전트를 주소(Agent Card)로 붙여 /agent 이름 이나 팀 멤버로 씁니다.") }
+            a.a2a.forEach { r -> A2aRow(r) {
+                if (!window.confirm("${r.name} A2A 에이전트를 지울까요?")) return@A2aRow
+                scope.launch { runCatching { Http.delete("/api/a2a/${r.name}") }.onFailure { error = it.message }; loadAgents() }
+            } }
+            if (addingA2a) A2aAdder(onError = { error = it }) { addingA2a = false; error = null; loadAgents() }
+        }
+        editingTeam?.let { t -> TeamEditor(t, a?.custom.orEmpty(), a?.a2a.orEmpty(), onCancel = { editingTeam = null }) { saved ->
             scope.launch {
                 runCatching { Http.put("/api/teams/${saved.name}", ApiJson.encodeToString(TeamDto.serializer(), saved)) }
                     .onSuccess { editingTeam = null; error = null; loadAgents() }
@@ -252,7 +270,70 @@ private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolI
 }
 
 @Composable
-private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
+private fun A2aRow(r: A2aAgentDto, onDelete: () -> Unit) {
+    Div({ classes("run") }) {
+        Div({ classes("row", "small") }) {
+            Span { B { Text(r.name) }; Text(" · ${r.displayName} — ${r.description.take(80)}") }
+            Button({ classes("link", "small", "bad"); onClick { onDelete() } }) { Text("지우기") }
+        }
+        val host = r.endpoint.substringAfter("://").substringBefore('/')
+        Div({ classes("muted", "small") }) {
+            Text("$host · A2A ${r.protocol}" + (if (r.streaming) " · 실시간" else "") + if (r.auth) (if (r.hasToken) " · 토큰 있음" else "") else "")
+        }
+        if (r.auth && !r.hasToken) Div({ classes("bad", "small") }) {
+            Text("인증이 필요합니다. 터미널에서: security add-generic-password -U -s dev.vesta.a2a -a ${r.name} -w")
+        }
+        if (r.skills.isNotEmpty()) Div({ classes("muted", "small") }) { Text("할 수 있는 일: " + r.skills.take(5).joinToString("; ")) }
+    }
+}
+
+/** 주소 → 카드 읽기(미리 보기·경고) → 이름 정해 등록 */
+@Composable
+private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var url by remember { mutableStateOf("") }
+    var preview by remember { mutableStateOf<A2aPreviewDto?>(null) }
+    var name by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    Div({ classes("stack") }) {
+        Input(InputType.Url) { value(url); placeholder("에이전트 주소 (예: https://agent.example.com 또는 …/agent-card.json)"); onInput { url = it.value; preview = null } }
+        Button({
+            if (url.isBlank() || busy) disabled()
+            onClick {
+                busy = true
+                scope.launch {
+                    runCatching { Http.post("/api/a2a/preview", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim())), A2aPreviewDto.serializer()) }
+                        .onSuccess { preview = it; name = it.suggestedName; onError(null) }
+                        .onFailure { onError(it.message) }
+                    busy = false
+                }
+            }
+        }) { Text(if (busy) "읽는 중…" else "카드 읽기") }
+        preview?.let { p ->
+            Div({ classes("small") }) { B { Text(p.displayName) }; Text(" — ${p.description}") }
+            Div({ classes("muted", "small") }) { Text("연결: ${p.endpoint} · A2A ${p.protocol}" + (if (p.streaming) " · 실시간" else "") + (p.version?.let { " · 버전 $it" } ?: "")) }
+            if (p.skills.isNotEmpty()) Div({ classes("muted", "small") }) { Text("할 수 있는 일: " + p.skills.joinToString("; ")) }
+            p.warnings.forEach { w -> Div({ classes("bad", "small") }) { Text("⚠ $w") } }
+            Input(InputType.Text) { value(name); placeholder("부를 이름 (/agent 이름)"); onInput { name = it.value } }
+            Button({
+                classes("primary")
+                if (name.isBlank() || busy) disabled()
+                onClick {
+                    busy = true
+                    scope.launch {
+                        runCatching { Http.put("/api/a2a/${name.trim()}", ApiJson.encodeToString(A2aAddDto.serializer(), A2aAddDto(url.trim()))) }
+                            .onSuccess { onSaved() }
+                            .onFailure { onError(it.message) }
+                        busy = false
+                    }
+                }
+            }) { Text("경고를 확인했고 붙입니다") }
+        }
+    }
+}
+
+@Composable
+private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: List<A2aAgentDto>, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial.name) }
     var description by remember(initial) { mutableStateOf(initial.description) }
     var leader by remember(initial) { mutableStateOf(initial.leader) }
@@ -267,22 +348,23 @@ private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, onCancel:
             agents.forEach { a -> Option(a.name, { if (a.name == leader) selected() }) { Text("${a.name} — ${a.description.take(40)}") } }
         }
         Div({ classes("small") }) { B { Text("멤버") }; Span({ classes("muted") }) { Text(" (리더가 맡기는 에이전트, 최대 6)") } }
-        agents.filter { it.name != leader }.forEach { a ->
+        val candidates = agents.filter { it.name != leader }.map { it.name to it.description } + remote.map { it.name to "(A2A) ${it.description}" }
+        candidates.forEach { (memberName, memberDescription) ->
             Label(attrs = { classes("row", "small") }) {
                 Span {
                     Input(InputType.Checkbox) {
-                        checked(a.name in members)
-                        onChange { members = if (a.name in members) members - a.name else members + a.name }
+                        checked(memberName in members)
+                        onChange { members = if (memberName in members) members - memberName else members + memberName }
                     }
-                    Text(" ${a.name}")
+                    Text(" $memberName")
                 }
-                Span({ classes("muted") }) { Text(a.description.take(40)) }
+                Span({ classes("muted") }) { Text(memberDescription.take(40)) }
             }
         }
         Button({
             classes("primary")
             if (leader.isEmpty() || members.isEmpty()) disabled()
-            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, agents.map { it.name }.filter { it in members })) }
+            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members })) }
         }) { Text("저장") }
     }
 }

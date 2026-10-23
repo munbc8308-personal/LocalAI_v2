@@ -334,7 +334,46 @@ data class BuiltinAgentDto(val name: String, val label: String, val description:
 
 /** 에이전트 탭 (`GET /api/agents`) */
 @Serializable
-data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<CustomAgentDto>, val tools: List<ToolInfoDto>, val teams: List<TeamDto> = emptyList())
+data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<CustomAgentDto>, val tools: List<ToolInfoDto>, val teams: List<TeamDto> = emptyList(),
+    val a2a: List<A2aAgentDto> = emptyList(),
+    /** A2A 에이전트를 등록·쓸 수 있는가 (Mac 주인만) */
+    val canA2a: Boolean = false,
+)
+
+/** 등록한 A2A 에이전트 (A-15) */
+@Serializable
+data class A2aAgentDto(
+    val name: String,
+    val displayName: String,
+    val description: String,
+    val endpoint: String,
+    val protocol: String,
+    val streaming: Boolean,
+    val auth: Boolean,
+    /** 키체인에 토큰이 있는가 */
+    val hasToken: Boolean,
+    val skills: List<String>,
+    val cardUrl: String,
+)
+
+/** A2A 등록 요청 (`POST /api/a2a/preview`, `PUT /api/a2a/{name}`) */
+@Serializable
+data class A2aAddDto(val url: String)
+
+/** 등록 전에 보여 줄 Agent Card 내용과 경고 */
+@Serializable
+data class A2aPreviewDto(
+    val suggestedName: String,
+    val displayName: String,
+    val description: String,
+    val endpoint: String,
+    val protocol: String,
+    val streaming: Boolean,
+    val auth: Boolean,
+    val skills: List<String>,
+    val version: String?,
+    val warnings: List<String>,
+)
 
 /** 팀 (A-14): 리더·멤버는 사용자 정의 에이전트 이름 (`PUT /api/teams/{name}`) */
 @Serializable

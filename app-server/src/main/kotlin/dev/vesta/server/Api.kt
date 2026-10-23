@@ -31,6 +31,7 @@ import dev.vesta.api.toDto
 import dev.vesta.core.ChannelType
 import dev.vesta.core.SessionId
 import dev.vesta.core.UserContext
+import dev.vesta.core.UserRole
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.UserInput
 import dev.vesta.core.config.MediaConfig
@@ -461,7 +462,39 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
                 }
             }
-            // 팀 (A-14): 리더·멤버는 내 사용자 정의 에이전트
+            // A2A 에이전트 (A-15): Mac 주인만. 미리 보기(카드 읽기·경고) → 등록, 지우기
+            route("/a2a") {
+                post("/preview") {
+                    val user = call.principal(deps) ?: return@post
+                    val studio = deps.studio ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    if (user.role != UserRole.OWNER) return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    studio.previewA2a(dto.url).fold(
+                        { call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.A2aPreviewDto.serializer(), it)) },
+                        { call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it.message ?: "카드를 읽지 못했습니다") }.toString()) },
+                    )
+                }
+                put("/{name}") {
+                    val user = call.principal(deps) ?: return@put
+                    val studio = deps.studio ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    if (user.role != UserRole.OWNER) return@put call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url)?.let { error ->
+                        return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", error) }.toString())
+                    }
+                    call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+                delete("/{name}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val repo = deps.studio?.a2aRepo ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    if (user.role != UserRole.OWNER) return@delete call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만"}""")
+                    val removed = repo.delete(user.userId, call.parameters["name"].orEmpty())
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
+            // 팀 (A-14): 리더는 내 사용자 정의 에이전트, 멤버는 사용자 정의·A2A 에이전트
             route("/teams") {
                 put("/{name}") {
                     val user = call.principal(deps) ?: return@put
@@ -862,6 +895,10 @@ class StudioEndpoints(
     /** 이 사용자가 쓸 수 있는 도구 */
     val toolCatalog: suspend (UserContext) -> List<dev.vesta.core.tools.Tool>,
     val teamRepo: dev.vesta.core.studio.TeamRepository? = null,
+    /** A2A (A-15). 없으면 A2A 에이전트를 쓰지 않는다 */
+    val a2aRepo: dev.vesta.core.studio.A2aAgentRepository? = null,
+    val a2aClient: dev.vesta.a2a.A2aClient? = null,
+    val a2aHasToken: (String) -> Boolean = { false },
 ) {
     suspend fun agents(user: UserContext): dev.vesta.api.AgentsDto {
         val builtin = BUILTIN.filter { (type, _, _) -> type in dev.vesta.identity.RolePolicy.agents(user.role) }
@@ -869,7 +906,40 @@ class StudioEndpoints(
         val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString()) }
         val tools = toolCatalog(user).map { dev.vesta.api.ToolInfoDto(it.spec.name, it.risk.name, it.spec.description) }
         val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString()) }
-        return dev.vesta.api.AgentsDto(builtin, custom, tools, teams)
+        val owner = user.role == UserRole.OWNER && a2aRepo != null && a2aClient != null
+        val a2a = if (owner) a2aRepo!!.list(user.userId).map {
+            dev.vesta.api.A2aAgentDto(it.name, it.displayName, it.description, it.endpoint, it.protocol, it.streaming, it.auth, it.auth && a2aHasToken(it.name), it.skills, it.cardUrl)
+        } else emptyList()
+        return dev.vesta.api.AgentsDto(builtin, custom, tools, teams, a2a, owner)
+    }
+
+    /** Agent Card를 읽어 등록 전에 보여 줄 내용과 경고 */
+    suspend fun previewA2a(url: String): Result<dev.vesta.api.A2aPreviewDto> = runCatching {
+        val client = a2aClient ?: error("A2A를 쓸 수 없습니다")
+        val card = try { client.card(url) } catch (e: dev.vesta.a2a.A2aException) { error(e.message ?: "카드를 읽지 못했습니다") }
+        val cardHost = runCatching { java.net.URI(card.cardUrl).host }.getOrNull()
+        val endpoint = java.net.URI(card.endpoint)
+        val local = endpoint.host == "localhost" || endpoint.host == "127.0.0.1" || endpoint.host.endsWith(".ts.net")
+        val warnings = listOfNotNull(
+            "맡기는 할 일 내용이 이 에이전트(${endpoint.host})로 나갑니다. 대화 기록·파일은 보내지 않지만, 할 일에 적힌 내용은 그대로 보냅니다",
+            "카드 주소(${cardHost})와 연결 주소(${endpoint.host})의 호스트가 다릅니다".takeIf { cardHost != null && cardHost != endpoint.host },
+            "암호화되지 않은 http 연결입니다".takeIf { endpoint.scheme == "http" && !local },
+            "인증이 필요한 에이전트입니다. 등록한 뒤 키체인에 토큰을 넣으세요: security add-generic-password -U -s dev.vesta.a2a -a <이름> -w".takeIf { card.auth },
+        )
+        val suggested = card.name.lowercase().replace(Regex("[^\\p{L}\\p{N}_-]+"), "-").trim('-', '_').take(32)
+            .takeIf { dev.vesta.core.studio.CustomAgentDef.NAME.matches(it) } ?: "remote"
+        dev.vesta.api.A2aPreviewDto(suggested, card.name, card.description, card.endpoint, card.protocol, card.streaming, card.auth, card.skills, card.version, warnings)
+    }
+
+    /** 등록 (카드를 다시 읽어 저장). 이름은 사용자 정의 에이전트와 겹치면 안 된다 (`/agent 이름`으로 함께 부른다) */
+    suspend fun saveA2a(user: UserContext, name: String, url: String): String? {
+        val repo = a2aRepo ?: return "A2A를 쓸 수 없습니다"
+        val client = a2aClient ?: return "A2A를 쓸 수 없습니다"
+        if (!dev.vesta.core.studio.CustomAgentDef.NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/agent 이름 으로 부릅니다)"
+        if (agentRepo.find(user.userId, name) != null) return "같은 이름의 사용자 정의 에이전트가 있습니다"
+        val card = try { client.card(url) } catch (e: dev.vesta.a2a.A2aException) { return e.message ?: "카드를 읽지 못했습니다" }
+        repo.save(dev.vesta.core.studio.A2aAgentDef(user.userId, name, card.cardUrl, card.endpoint, card.protocol, card.name, card.description, card.skills, card.streaming, card.auth))
+        return null
     }
 
     /** 팀 저장. 리더·멤버는 이 사용자의 사용자 정의 에이전트, 리더는 멤버가 아니다. 문제가 있으면 그 이유 */
@@ -883,7 +953,10 @@ class StudioEndpoints(
         if (members.isEmpty() || members.size > dev.vesta.core.studio.TeamDef.MAX_MEMBERS) return "멤버는 1~${dev.vesta.core.studio.TeamDef.MAX_MEMBERS}명입니다"
         if (dto.leader in members) return "리더는 멤버가 될 수 없습니다"
         val mine = agentRepo.list(user.userId).map { it.name }.toSet()
-        val unknown = (listOf(dto.leader) + members).filter { it !in mine }
+        // 멤버로는 A2A 에이전트도 (Mac 주인만). 리더는 delegate 도구를 받아야 하므로 사용자 정의 에이전트만
+        val remote = if (user.role == UserRole.OWNER) a2aRepo?.list(user.userId).orEmpty().map { it.name }.toSet() else emptySet()
+        if (dto.leader !in mine) return if (dto.leader in remote) "리더는 사용자 정의 에이전트여야 합니다 (A2A 에이전트는 멤버로)" else "없는 에이전트: ${dto.leader}"
+        val unknown = members.filter { it !in mine && it !in remote }
         if (unknown.isNotEmpty()) return "없는 에이전트: ${unknown.joinToString()}"
         repo.save(dev.vesta.core.studio.TeamDef(user.userId, dto.name, dto.description.trim(), dto.leader, members))
         return null
@@ -902,6 +975,7 @@ class StudioEndpoints(
         val allowed = toolCatalog(user).map { it.spec.name }.toSet()
         val unknown = dto.tools.filter { it !in allowed }
         if (unknown.isNotEmpty()) return "쓸 수 없는 도구: ${unknown.joinToString()}"
+        if (a2aRepo?.find(user.userId, dto.name) != null) return "같은 이름의 A2A 에이전트가 있습니다"
         agentRepo.save(dev.vesta.core.studio.CustomAgentDef(user.userId, dto.name, dto.description.trim(), dto.instructions, model, dto.tools.distinct()))
         return null
     }

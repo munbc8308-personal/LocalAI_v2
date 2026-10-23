@@ -27,6 +27,10 @@ object BotTokens {
     fun delete(channel: String, account: String = BOT): Boolean =
         run(listOf("/usr/bin/security", "delete-generic-password", "-s", service(channel), "-a", account)) != null
 
+    /** 키체인 비밀 하나 (A2A 토큰 등: 서비스 `dev.vesta.a2a`, 계정 = 에이전트 이름). 없으면 null */
+    fun keychain(service: String, account: String): String? =
+        run(listOf("/usr/bin/security", "find-generic-password", "-s", service, "-a", account, "-w"))?.trim()?.takeIf { it.isNotEmpty() }
+
     private fun envName(channel: String, account: String) =
         "VESTA_${channel.uppercase()}_" + if (account == APP) "APP_TOKEN" else "TOKEN"
 

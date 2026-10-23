@@ -3,6 +3,8 @@ package dev.vesta.storage
 import dev.vesta.core.ModelRole
 import dev.vesta.core.SessionId
 import dev.vesta.core.UserId
+import dev.vesta.core.studio.A2aAgentDef
+import dev.vesta.core.studio.A2aAgentRepository
 import dev.vesta.core.studio.AgentRun
 import dev.vesta.core.studio.CustomAgentDef
 import dev.vesta.core.studio.CustomAgentRepository
@@ -121,6 +123,54 @@ class ExposedTeamRepository(private val db: Database, private val clock: Clock =
         leader = this[AgentTeams.leader],
         members = this[AgentTeams.members].lines().filter { it.isNotBlank() },
         updatedAt = this[AgentTeams.updatedAt],
+    )
+}
+
+/** A2A 에이전트 (M22) */
+class ExposedA2aAgentRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : A2aAgentRepository {
+    override suspend fun list(owner: UserId): List<A2aAgentDef> = db.tx {
+        A2aAgents.selectAll().where { A2aAgents.owner eq owner.value }.orderBy(A2aAgents.name).map { it.toDef() }
+    }
+
+    override suspend fun find(owner: UserId, name: String): A2aAgentDef? = db.tx {
+        A2aAgents.selectAll().where { (A2aAgents.owner eq owner.value) and (A2aAgents.name eq name) }.firstOrNull()?.toDef()
+    }
+
+    override suspend fun save(def: A2aAgentDef): A2aAgentDef = db.tx {
+        val now = clock.instant()
+        A2aAgents.deleteWhere { (A2aAgents.owner eq def.owner.value) and (A2aAgents.name eq def.name) }
+        A2aAgents.insert {
+            it[owner] = def.owner.value
+            it[name] = def.name
+            it[cardUrl] = def.cardUrl.take(1000)
+            it[endpoint] = def.endpoint.take(1000)
+            it[protocol] = def.protocol
+            it[displayName] = def.displayName.take(120)
+            it[description] = def.description
+            it[skills] = def.skills.joinToString("\n") { s -> s.replace('\n', ' ') }
+            it[streaming] = def.streaming
+            it[auth] = def.auth
+            it[addedAt] = now
+        }
+        def.copy(addedAt = now)
+    }
+
+    override suspend fun delete(owner: UserId, name: String): Boolean = db.tx {
+        A2aAgents.deleteWhere { (A2aAgents.owner eq owner.value) and (A2aAgents.name eq name) } > 0
+    }
+
+    private fun ResultRow.toDef() = A2aAgentDef(
+        owner = UserId(this[A2aAgents.owner].value),
+        name = this[A2aAgents.name],
+        cardUrl = this[A2aAgents.cardUrl],
+        endpoint = this[A2aAgents.endpoint],
+        protocol = this[A2aAgents.protocol],
+        displayName = this[A2aAgents.displayName],
+        description = this[A2aAgents.description],
+        skills = this[A2aAgents.skills].lines().filter { it.isNotBlank() },
+        streaming = this[A2aAgents.streaming],
+        auth = this[A2aAgents.auth],
+        addedAt = this[A2aAgents.addedAt],
     )
 }
 
