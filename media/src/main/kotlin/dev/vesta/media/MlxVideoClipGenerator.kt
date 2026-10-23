@@ -23,7 +23,8 @@ class MlxVideoClipGenerator(
     private val projectDir: Path,
     private val modelDir: Path,
     override val model: String = "Wan2.2-TI2V-5B",
-    private val steps: Int? = null,
+    /** 12단계: 576×1024 2초 클립 107초·최대 48GB, 화질 유지 (20단계 244초). 384×672로 낮추면 화질이 무너진다 (13.32) */
+    private val steps: Int? = 12,
     private val fps: Int = 24,
     private val timeoutSeconds: Long = 900,
 ) : ClipGenerator {
@@ -35,7 +36,8 @@ class MlxVideoClipGenerator(
             val output = dir.resolve("clip.mp4")
             val log = dir.resolve("clip.log")
             val command = listOf(
-                uv, "run", "--project", projectDir.toString(), "--frozen", "python", "-m", "mlx_video.models.wan_2.generate",
+                // 캐시 한도를 거는 래퍼 (video/vesta_clip.py): 없으면 MLX 캐시가 100GB 가까이 남는다
+                uv, "run", "--project", projectDir.toString(), "--frozen", "python", projectDir.resolve("vesta_clip.py").toString(),
                 "--model-dir", modelDir.toString(), "--prompt", prompt.take(1_000), "--image", input.toString(),
                 "--width", align(width).toString(), "--height", align(height).toString(), "--num-frames", frames(seconds).toString(),
                 "--output-path", output.toString(), "--seed", "42",

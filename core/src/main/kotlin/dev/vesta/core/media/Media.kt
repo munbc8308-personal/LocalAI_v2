@@ -108,6 +108,8 @@ class VideoScene(
     val motion: Motion = Motion.ZOOM_IN,
     val speed: Double = 1.0,
     val clip: ByteArray? = null,
+    /** [clip]의 길이 (초). 장면이 더 길면 최대 두 배까지 천천히 재생한다 */
+    val clipSeconds: Double = 0.0,
 )
 
 /** 생성형 짧은 클립 (G-03): 장면 그림을 움직이는 몇 초짜리 영상(mp4)으로. 준비가 안 됐거나 실패하면 [MediaException] */

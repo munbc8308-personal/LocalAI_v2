@@ -132,7 +132,7 @@ class VideoAgent(
                         .getOrNull()
                 }
                 val clipAsset = oldClip?.clipAsset ?: clipBytes?.let { media.save(user, MediaKind.SCENE, "video/mp4", it, scene.image).id }
-                scenes += VideoScene(image, voice, scene.narration, scene.motion, plan.speed, clipBytes)
+                scenes += VideoScene(image, voice, scene.narration, scene.motion, plan.speed, clipBytes, if (clipBytes != null) CLIP_SECONDS else 0.0)
                 saved += ProjectScene(scene.narration, scene.image, scene.motion, imageAsset, voiceAsset, clipAsset, clipBytes != null)
             }
             emit(AgentEvent.Status(if (base != null) "장면 합치는 중 (그림 ${drawn}개·내레이션 ${spoken}개만 새로)" else "장면 합치는 중"))
@@ -232,8 +232,8 @@ class VideoAgent(
 
     companion object {
         const val MAX_SCENES = 12
-        /** 움직이는 클립 길이 (내레이션이 더 길면 마지막 프레임을 늘린다) */
-        const val CLIP_SECONDS = 4.0
+        /** 움직이는 클립 길이: 2초(49프레임). 장면이 더 길면 합칠 때 두 배까지 천천히, 그래도 남으면 마지막 프레임 (13.32 측정) */
+        const val CLIP_SECONDS = 2.0
         private val SECONDS = Regex("(\\d{1,3})\\s*초")
         private val MINUTES = Regex("(\\d{1,2})\\s*분")
 

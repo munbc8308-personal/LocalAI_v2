@@ -5,4 +5,6 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@87db56a517",
     "huggingface_hub>=0.30",
+    # Wan 원본(.pth)을 MLX로 변환할 때만 쓴다
+    "torch>=2.14.1",
 ]

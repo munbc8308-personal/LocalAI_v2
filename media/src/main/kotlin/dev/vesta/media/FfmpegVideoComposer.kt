@@ -35,7 +35,7 @@ class FfmpegVideoComposer(
                 // Path는 Iterable<Path>라 += 가 목록 더하기로 읽힌다: add로
                 val clips = mutableListOf<Path>()
                 scenes.forEachIndexed { i, scene ->
-                    clips.add(clip(dir, "s$i", scene.image, scene.narration, SubtitleRenderer.subtitle(scene.subtitle, width, height), scene.motion, width, height, speed = scene.speed, moving = scene.clip))
+                    clips.add(clip(dir, "s$i", scene.image, scene.narration, SubtitleRenderer.subtitle(scene.subtitle, width, height), scene.motion, width, height, speed = scene.speed, moving = scene.clip, movingSeconds = scene.clipSeconds))
                     onScene(i + 1)
                 }
                 val card = SubtitleRenderer.endCard(title, "AI 생성 · Vesta", width, height)
@@ -67,7 +67,7 @@ class FfmpegVideoComposer(
      */
     private fun clip(
         dir: Path, name: String, image: ByteArray, narration: ByteArray?, subtitle: ByteArray?, motion: Motion?, width: Int, height: Int,
-        fixed: Double? = null, speed: Double = 1.0, moving: ByteArray? = null,
+        fixed: Double? = null, speed: Double = 1.0, moving: ByteArray? = null, movingSeconds: Double = 0.0,
     ): Path {
         val img = dir.resolve("$name.png").also { it.writeBytes(image) }
         val audio = narration?.let { wav(dir, name, it) }
@@ -92,7 +92,9 @@ class FfmpegVideoComposer(
         val num = { v: Double -> String.format(Locale.ROOT, "%.3f", v) }
         // 확대할 때 떨림이 덜하게 두 배로 키운 뒤 zoompan
         var video = if (movie != null) {
-            "[0:v]scale=$width:$height:force_original_aspect_ratio=increase,crop=$width:$height,setsar=1,fps=$fps," +
+            // 클립보다 장면이 길면 두 배까지 천천히 (물결·구름은 느린 화면이 자연스럽다), 그래도 남으면 마지막 프레임
+            val slow = if (movingSeconds > 0) (seconds / movingSeconds).coerceIn(1.0, 2.0) else 1.0
+            "[0:v]setpts=${num(slow)}*PTS,scale=$width:$height:force_original_aspect_ratio=increase,crop=$width:$height,setsar=1,fps=$fps," +
                 "tpad=stop_mode=clone:stop_duration=${num(seconds)},trim=duration=${num(seconds)},setpts=PTS-STARTPTS,format=yuv420p[base]"
         } else {
             "[0:v]scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},setsar=1," +

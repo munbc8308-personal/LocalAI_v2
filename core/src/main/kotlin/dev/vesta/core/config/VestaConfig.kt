@@ -140,12 +140,12 @@ data class ClipConfig(
     val projectDir: String = "~/.vesta/video",
     val modelDir: String = "~/.vesta/video/models/Wan2.2-TI2V-5B-MLX",
     val model: String = "Wan2.2-TI2V-5B",
-    /** 확산 단계 (없으면 모델 기본). 줄이면 빠르고 거칠다 */
-    val steps: Int? = null,
+    /** 확산 단계. 12: 576×1024 2초 클립 약 107초 (20단계 244초, 화질 차이 작음) */
+    val steps: Int? = 12,
     /** 영상 하나에서 움직이는 클립으로 만들 장면 수 상한 */
     val maxPerVideo: Int = 2,
-    /** 클립 모델이 쓰는 메모리 (만들기 전에 이만큼 자리를 비운다) */
-    val memoryGigabytes: Int = 40,
+    /** 클립 모델이 쓰는 메모리 (만들기 전에 이만큼 자리를 비운다). 측정 최대 48GB */
+    val memoryGigabytes: Int = 50,
     val timeoutSeconds: Long = 900,
 )
 
