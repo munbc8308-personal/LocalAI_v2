@@ -160,10 +160,11 @@ class A2aClientTest : FunSpec({
         answers["agent.example"] = byteArrayOf(127, 0, 0, 1) // rebinding
         shouldThrow<java.net.UnknownHostException> { dns.lookup("agent.example") }
         shouldThrow<java.net.UnknownHostException> { dns.lookup("localhost") }
-        // IP 주소는 DNS를 거치지 않으므로 글자로 판정한다
-        A2aHttp.literal("127.0.0.1")!!.isLoopbackAddress shouldBe true
-        A2aHttp.literal("[::1]")!!.isLoopbackAddress shouldBe true
-        A2aHttp.literal("agent.example") shouldBe null
+        // 실제로 거는 주소를 소켓에서 막는다 (IP 글자·10진수 표기 등 해석 방식과 상관없이)
+        val sockets = A2aHttp.GuardedSocketFactory { it.isLoopbackAddress }
+        shouldThrow<java.io.IOException> { sockets.createSocket().connect(java.net.InetSocketAddress(java.net.InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 9)) }
+            .message shouldContain "내부 주소"
+        shouldThrow<java.io.IOException> { sockets.createSocket("2130706433", 9) } // 127.0.0.1의 10진수 표기
 
         // 내부 에이전트는 내부용 클라이언트로만 보낸다
         val hits = mutableListOf<String>()

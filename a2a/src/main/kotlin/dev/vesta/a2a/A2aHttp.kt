@@ -12,17 +12,17 @@ import java.net.UnknownHostException
  * 내부 에이전트용은 사용자가 "이 Mac·내 네트워크의 에이전트"라고 직접 고른 경우에만 쓴다. 둘 다 리다이렉트는 따라가지 않는다
  */
 object A2aHttp {
-    fun external(internal: (InetAddress) -> Boolean, timeoutSeconds: Long = 60): HttpClient = client(PinnedDns(internal), LiteralGuard(internal), timeoutSeconds)
+    fun external(internal: (InetAddress) -> Boolean, timeoutSeconds: Long = 60): HttpClient = client(PinnedDns(internal), GuardedSocketFactory(internal), timeoutSeconds)
 
     fun local(timeoutSeconds: Long = 60): HttpClient = client(okhttp3.Dns.SYSTEM, null, timeoutSeconds)
 
-    private fun client(dns: okhttp3.Dns, guard: okhttp3.Interceptor?, timeoutSeconds: Long) = HttpClient(OkHttp) {
+    private fun client(dns: okhttp3.Dns, sockets: javax.net.SocketFactory?, timeoutSeconds: Long) = HttpClient(OkHttp) {
         expectSuccess = false
         followRedirects = false
         engine {
             config {
                 dns(dns)
-                guard?.let { addInterceptor(it) }
+                sockets?.let { socketFactory(it) }
                 followRedirects(false)
                 followSslRedirects(false)
             }
@@ -34,19 +34,26 @@ object A2aHttp {
         }
     }
 
-    /** OkHttp는 IP 주소(`http://127.0.0.1:…`)에는 DNS를 부르지 않으므로 따로 막는다 */
-    class LiteralGuard(private val internal: (InetAddress) -> Boolean) : okhttp3.Interceptor {
-        override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
-            literal(chain.request().url.host)?.let { if (internal(it)) throw java.io.IOException("내부 주소라 연결하지 않음: ${chain.request().url.host}") }
-            return chain.proceed(chain.request())
-        }
-    }
+    /**
+     * 실제로 연결하는 주소를 소켓에서 검사한다 (M22 보안 검토). 호스트 글자를 어떻게 해석하든(IP 글자·10진수·8진수 표기, DNS) 마지막에 거는 주소가 내부면 막는다.
+     * [PinnedDns]는 이름일 때 먼저 알기 쉬운 오류를 내는 용도이고, 막는 것은 이 소켓이다
+     */
+    class GuardedSocketFactory(private val internal: (InetAddress) -> Boolean) : javax.net.SocketFactory() {
+        override fun createSocket(): java.net.Socket = Guarded(internal)
+        override fun createSocket(host: String, port: Int) = createSocket().apply { connect(java.net.InetSocketAddress(host, port)) }
+        override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int) =
+            createSocket().apply { bind(java.net.InetSocketAddress(localHost, localPort)); connect(java.net.InetSocketAddress(host, port)) }
+        override fun createSocket(host: InetAddress, port: Int) = createSocket().apply { connect(java.net.InetSocketAddress(host, port)) }
+        override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int) =
+            createSocket().apply { bind(java.net.InetSocketAddress(localAddress, localPort)); connect(java.net.InetSocketAddress(address, port)) }
 
-    /** IP 주소 글자면 그 주소 (DNS를 부르지 않는다), 이름이면 null */
-    fun literal(host: String): InetAddress? {
-        val h = host.removePrefix("[").removeSuffix("]")
-        val v4 = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
-        return if (v4.matches(h) || (':' in h && h.all { it.isLetterOrDigit() || it == ':' || it == '.' || it == '%' })) runCatching { InetAddress.getByName(h) }.getOrNull() else null
+        private class Guarded(private val internal: (InetAddress) -> Boolean) : java.net.Socket() {
+            override fun connect(endpoint: java.net.SocketAddress, timeout: Int) {
+                val address = (endpoint as? java.net.InetSocketAddress)?.address
+                if (address == null || internal(address)) throw java.io.IOException("내부 주소라 연결하지 않음: $endpoint")
+                super.connect(endpoint, timeout)
+            }
+        }
     }
 
     /** 해석한 주소 중 하나라도 내부면 연결하지 않는다 */
