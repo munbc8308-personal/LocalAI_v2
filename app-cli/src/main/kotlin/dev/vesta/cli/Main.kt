@@ -45,8 +45,8 @@ fun main(args: Array<String>) = Vesta()
         RepoCommand().subcommands(RepoAddCommand(), RepoUpdateCommand()),
         SearchCommand(),
         EvalCommand().subcommands(EvalRoutingCommand(), EvalRetrievalCommand(), EvalGroundingCommand(), EvalAllCommand()),
-        StatusCommand(), PasswdCommand(), UserCommand.create(),
+        StatusCommand(), DoctorCommand(), SetupCommand(), PasswdCommand(), UserCommand.create(),
         *messengerCommands().toTypedArray(),
         TrainCommand.create(), EvolveCommand.create(),
-        ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand())
+        ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand(), ModelsCommand.create())
     .main(args)

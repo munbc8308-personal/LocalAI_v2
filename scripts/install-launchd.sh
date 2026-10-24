@@ -11,7 +11,8 @@ mkdir -p "$AGENTS" "$HOME/.vesta/logs"
 
 TEMPLATES="$ROOT/infra/launchd/*.plist"
 case "${1:-}" in
-    dev.vesta.*) TEMPLATES="$ROOT/infra/launchd/optional/$1.plist" ;;
+    # 이름을 주면 그 서비스만 (기본 묶음에 있으면 거기서, 아니면 선택 서비스)
+    dev.vesta.*) if [ -f "$ROOT/infra/launchd/$1.plist" ]; then TEMPLATES="$ROOT/infra/launchd/$1.plist"; else TEMPLATES="$ROOT/infra/launchd/optional/$1.plist"; fi ;;
 esac
 for template in $TEMPLATES; do
     label=$(basename "$template" .plist)

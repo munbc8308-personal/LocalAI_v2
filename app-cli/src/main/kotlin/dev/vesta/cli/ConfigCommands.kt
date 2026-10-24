@@ -18,19 +18,23 @@ class ConfigCommand : CliktCommand(name = "config") {
 }
 
 class ConfigInitCommand : CliktCommand(name = "init") {
-    override fun help(context: Context) = "기본 설정 파일(~/.vesta/config.yaml)을 만든다"
+    override fun help(context: Context) = "기본 설정 파일(~/.vesta/config.yaml)을 만든다. 메인 모델은 이 Mac의 메모리에 맞춰 고른다 (N-02)"
     private val force by option("--force", help = "이미 있으면 덮어쓴다").flag()
+    private val keep by option("--keep", help = "이미 있으면 그대로 두고 성공으로 끝낸다 (설치 스크립트용)").flag()
 
     override fun run() {
         val paths = VestaPaths.default()
         val file = paths.configFile
         if (file.exists() && !force) {
+            if (keep) { echo("설정 그대로 둠: $file"); return }
             echo("이미 있습니다: $file (덮어쓰려면 --force)", err = true)
             throw ProgramResult(1)
         }
+        val plan = dev.vesta.app.HardwareProfile.recommend(dev.vesta.app.MacSystem.totalMemoryBytes())
         paths.home.createDirectories()
-        file.writeText(ConfigLoader.defaultTemplate())
+        file.writeText(dev.vesta.app.HardwareProfile.apply(ConfigLoader.defaultTemplate(), plan))
         echo("만들었습니다: $file")
+        echo("메모리 ${plan.tier} → 메인 모델 ${plan.general} (${plan.note}). 받을 모델 약 ${plan.downloadGigabytes}GB: vesta models pull")
     }
 }
 

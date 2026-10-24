@@ -11,7 +11,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 step() { printf '\n==> %s\n' "$*"; }
 
 step "Homebrew 패키지"
-brew install ollama colima docker docker-compose zstd ffmpeg llama.cpp uv
+brew install ollama colima docker docker-compose zstd ffmpeg llama.cpp uv opus
 
 # brew로 설치한 docker-compose를 `docker compose` 플러그인으로 쓰기 위한 설정
 DOCKER_CONFIG_FILE="$HOME/.docker/config.json"
@@ -51,7 +51,8 @@ if [ ! -f "$RERANKER" ]; then
     fi
     mv "$RERANKER.part" "$RERANKER"
 fi
-"$ROOT/scripts/install-launchd.sh"
+# Ollaya만 먼저 (서버·미디어 워커는 빌드한 뒤 install-vesta.sh가 등록한다. 새 Mac에서 실행 파일 없이 등록하면 계속 실패한다)
+"$ROOT/scripts/install-launchd.sh" dev.vesta.ollaya
 
 step "SearXNG"
 ENV_FILE="$ROOT/infra/searxng/.env"
@@ -61,4 +62,4 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 docker compose -f "$ROOT/infra/searxng/compose.yaml" up -d
 
-step "완료. 상태 확인: ./gradlew :app-cli:installDist && app-cli/build/install/vesta/bin/vesta status"
+step "인프라 완료 (Vesta 빌드·서비스는 scripts/install-vesta.sh, 한 번에 하려면 install.sh)"
