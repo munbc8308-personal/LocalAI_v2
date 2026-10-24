@@ -235,6 +235,13 @@ class PublicAccessTest : FunSpec({
         // 같은 IP의 로그인 시도는 3번까지 (다른 IP는 따로)
         client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"wrong-password-x"}""") }.status shouldBe HttpStatusCode.Unauthorized
         client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        // 경로 꼴을 바꿔도(//·끝 /·%) 비켜 가지 못한다
+        client.post("/api//login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.post("/api/login/") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.BadRequest
+        client.get("/%761/models") { ip(1)() }.status shouldBe HttpStatusCode.BadRequest
+        listOf("//v1/models", "/v1//models", "/api/sessions/", "/a/../v1", "/a\\b", "v1").forEach { PublicGate.plainPath(it) shouldBe false }
+        listOf("/", "/api/login", "/assets/app.js", "/api/media/abc-1").forEach { PublicGate.plainPath(it) shouldBe true }
+        client.get("/api/./health") { ip(1)() }.status shouldBe HttpStatusCode.BadRequest
         // 직접 모드에서는 꾸민 Cf-Connecting-IP로 제한을 피할 수 없다
         client.post("/api/login") { ip(1)(); header("Cf-Connecting-IP", "198.51.100.7"); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.TooManyRequests
         client.post("/api/login") { ip(2)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.OK

@@ -210,10 +210,9 @@ fun Application.vestaApi(deps: ServerDeps) {
         val gate = deps.publicGate
         if (gate != null && call.request.local.localPort == gate.port) {
             // 바깥 입구로 온 요청 (M26): 공개 주소·Access 토큰 확인, 토큰 API 막기, IP별 제한
-            val path = call.request.path()
-            val login = path == "/api/login" && call.request.httpMethod == HttpMethod.Post
-            when (val result = gate.check(call.request.host(), path, call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER), call.clientIp(gate.direct), login)) {
-                is PublicGate.Result.Pass -> call.attributes.put(PUBLIC_REQUEST, PublicRequest(result.email))
+            val ip = call.clientIp(gate.direct)
+            when (val result = gate.check(call.request.host(), call.request.path(), call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER), ip)) {
+                is PublicGate.Result.Pass -> call.attributes.put(PUBLIC_REQUEST, PublicRequest(result.email, ip))
                 is PublicGate.Result.Reject -> {
                     call.respondJson(HttpStatusCode.fromValue(result.status), buildJsonObject { put("error", result.message) }.toString())
                     finish()
@@ -236,12 +235,18 @@ fun Application.vestaApi(deps: ServerDeps) {
     routing {
         // 상태만 알려 준다 (인증 불필요: launchd·CLI가 서버가 떠 있는지 확인)
         get("/api/health") {
+            // 상태(버전·구성 요소)는 바깥에 알리지 않는다
+            if (call.attributes.contains(PUBLIC_REQUEST)) return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
             call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(HealthDto.serializer(), HealthDto("ok", deps.version, deps.health())))
         }
 
         route("/api") {
             post("/login") {
                 val auth = deps.auth ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"웹 로그인이 꺼져 있음"}""")
+                // 바깥 로그인 시도는 IP별로 센다 (라우트 안에서: 경로를 어떻게 적어도 여기로 오면 센다)
+                call.attributes.getOrNull(PUBLIC_REQUEST)?.let { public ->
+                    if (deps.publicGate?.allowLogin(public.ip) == false) return@post call.respondJson(HttpStatusCode.TooManyRequests, """{"error":"로그인 시도가 너무 많습니다. 10분 뒤에 다시 시도하세요"}""")
+                }
                 val dto = ApiJson.decodeFromString(LoginDto.serializer(), call.receiveText())
                 // 바깥에서는 비밀번호를 보기 전에 계정 이메일이 Access 이메일과 같은지 본다: 다르면 틀린 비밀번호와 같은 답.
                 // 비밀번호가 맞는지 알려 주지 않고, 남의 계정 잠금 횟수도 올리지 않는다 (보안 검토)
@@ -979,7 +984,7 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
 }
 
 /** 바깥 입구로 온 요청 (M26). [email]은 Cloudflare Access 이메일 (직접 모드는 null) */
-private class PublicRequest(val email: String?)
+private class PublicRequest(val email: String?, val ip: String)
 private val PUBLIC_REQUEST = io.ktor.util.AttributeKey<PublicRequest>("vesta-public")
 internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
 

@@ -54,9 +54,11 @@ class PublicGate(
         data class Reject(val status: Int, val message: String) : Result
     }
 
-    suspend fun check(host: String, path: String, authorization: String?, assertion: String?, ip: String = "?", login: Boolean = false): Result {
+    suspend fun check(host: String, path: String, authorization: String?, assertion: String?, ip: String = "?"): Result {
         if (!requests.allow(ip)) return Result.Reject(429, "요청이 너무 많습니다. 잠시 뒤에 다시 시도하세요")
         if (!host.equals(hostname, ignoreCase = true)) return Result.Reject(403, "허용되지 않은 Host")
+        // 경로 문자열 비교(/v1)를 비켜 가는 꼴(//·%·./..·끝 /)은 라우팅 전에 거부한다 (보안 검토)
+        if (!plainPath(path)) return Result.Reject(400, "잘못된 경로")
         if (path == "/v1" || path.startsWith("/v1/")) return Result.Reject(404, "OpenAI 호환 API는 바깥에 열지 않습니다")
         if (authorization != null) return Result.Reject(401, "토큰 API는 바깥에 열지 않습니다 (웹 로그인을 쓰세요)")
         val email = if (verifier == null) null else {
@@ -69,9 +71,20 @@ class PublicGate(
                 }
             }
         }
-        if (path == "/api/health") return Result.Reject(404, "없음")
-        if (login && !logins.allow(ip)) return Result.Reject(429, "로그인 시도가 너무 많습니다. 10분 뒤에 다시 시도하세요")
         return Result.Pass(email)
+    }
+
+    /** 로그인 시도 제한 (로그인 라우트 안에서 부른다: 경로 꼴과 상관없이 세도록) */
+    fun allowLogin(ip: String): Boolean = logins.allow(ip)
+
+    companion object {
+        /** `/`로 시작하고, 빈 칸·`.`·`..` 조각, `%`, 끝 `/`(루트 제외), 제어 문자가 없는 경로 */
+        internal fun plainPath(path: String): Boolean {
+            if (!path.startsWith("/") || '%' in path || '\\' in path || path.any { it.code < 0x20 || it.code == 0x7f }) return false
+            if (path == "/") return true
+            if (path.endsWith("/")) return false
+            return path.substring(1).split('/').none { it.isEmpty() || it == "." || it == ".." }
+        }
     }
 
 }
