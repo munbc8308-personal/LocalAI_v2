@@ -42,6 +42,9 @@ class PublicGate(
     private val requests: IpLimiter = IpLimiter(limit = 600, window = Duration.ofMinutes(1)),
     private val logins: IpLimiter = IpLimiter(limit = 10, window = Duration.ofMinutes(10)),
 ) {
+    /** 직접 모드 (Cloudflare 없이 공유기 + Caddy) */
+    val direct: Boolean get() = verifier == null
+
     /** 직접 모드: 바깥 로그인 비밀번호 최소 길이 */
     val minPassword: Int? = if (verifier == null) dev.vesta.core.config.PublicAccessConfig.DIRECT_MIN_PASSWORD else null
 

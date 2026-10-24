@@ -50,8 +50,10 @@ $HOST {
 		Strict-Transport-Security "max-age=31536000"
 		-Server
 	}
-	# X-Forwarded-For는 받은 값을 버리고 실제 접속 IP로 넘긴다 (Vesta가 IP별로 제한)
+	# X-Forwarded-For는 받은 값을 버리고 실제 접속 IP로 넘긴다 (Vesta가 IP별로 제한). Cloudflare 헤더는 꾸민 것이니 지운다
 	reverse_proxy 127.0.0.1:$PORT {
+		header_up -Cf-Connecting-IP
+		header_up -Cf-Access-Jwt-Assertion
 		flush_interval -1
 	}
 	log {

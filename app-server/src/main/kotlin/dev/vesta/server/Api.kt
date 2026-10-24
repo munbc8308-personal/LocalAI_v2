@@ -212,7 +212,7 @@ fun Application.vestaApi(deps: ServerDeps) {
             // 바깥 입구로 온 요청 (M26): 공개 주소·Access 토큰 확인, 토큰 API 막기, IP별 제한
             val path = call.request.path()
             val login = path == "/api/login" && call.request.httpMethod == HttpMethod.Post
-            when (val result = gate.check(call.request.host(), path, call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER), call.clientIp(), login)) {
+            when (val result = gate.check(call.request.host(), path, call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER), call.clientIp(gate.direct), login)) {
                 is PublicGate.Result.Pass -> call.attributes.put(PUBLIC_REQUEST, PublicRequest(result.email))
                 is PublicGate.Result.Reject -> {
                     call.respondJson(HttpStatusCode.fromValue(result.status), buildJsonObject { put("error", result.message) }.toString())
@@ -984,12 +984,13 @@ private val PUBLIC_REQUEST = io.ktor.util.AttributeKey<PublicRequest>("vesta-pub
 internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
 
 /**
- * 바깥 요청의 IP. 입구는 127.0.0.1에만 열려 앞단(cloudflared·Caddy)만 붙으므로 앞단이 적은 값을 믿는다:
- * Cloudflare는 `Cf-Connecting-IP`, Caddy는 `X-Forwarded-For`(받은 값을 버리고 실제 접속 IP로 쓴다)
+ * 바깥 요청의 IP. 입구는 127.0.0.1에만 열려 앞단(cloudflared·Caddy)만 붙는다. 그 모드의 앞단이 직접 적는 헤더 하나만 믿는다:
+ * - 직접 모드: Caddy의 `X-Forwarded-For` (Caddy는 받은 값을 버리고 실제 접속 IP를 적는다). `Cf-Connecting-IP`는 바깥에서 꾸밀 수 있어 보지 않는다
+ * - cloudflare 모드: `Cf-Connecting-IP` (Cloudflare가 덮어쓴다). `X-Forwarded-For`는 보지 않는다
+ * 둘 다 바꿔 가며 보내 IP 제한을 피하지 못하게 (보안 검토)
  */
-private fun ApplicationCall.clientIp(): String =
-    request.header("Cf-Connecting-IP")?.trim()?.takeIf { it.isNotEmpty() }
-        ?: request.header("X-Forwarded-For")?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+private fun ApplicationCall.clientIp(direct: Boolean): String =
+    request.header(if (direct) "X-Forwarded-For" else "Cf-Connecting-IP")?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
         ?: request.origin.remoteAddress
 
 /** 바깥에서 로그인한 계정의 이메일이 Access 이메일과 다르면 안내 글. 이 Mac·Tailscale에서 온 요청이면 null */
