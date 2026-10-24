@@ -113,6 +113,7 @@ class ExposedUserSettingsRepository(private val db: org.jetbrains.exposed.v1.jdb
                         voiceReply = it[UserSettingsTable.voiceReply],
                         voice = it[UserSettingsTable.voice],
                         memoryAuto = it[UserSettingsTable.memoryAuto],
+                        skillAuto = it[UserSettingsTable.skillAuto],
                     )
                 } ?: dev.vesta.core.identity.UserSettings()
             }
@@ -128,6 +129,7 @@ class ExposedUserSettingsRepository(private val db: org.jetbrains.exposed.v1.jdb
                     it[voiceReply] = settings.voiceReply
                     it[voice] = settings.voice
                     it[memoryAuto] = settings.memoryAuto
+                    it[skillAuto] = settings.skillAuto
                 }
             }
             Unit

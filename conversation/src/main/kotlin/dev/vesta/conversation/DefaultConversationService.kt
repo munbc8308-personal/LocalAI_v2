@@ -77,6 +77,8 @@ class DefaultConversationService(
     private val memoryCommand: suspend (UserContext, String) -> String? = { _, _ -> null },
     /** 이 질문과 관련 있는 기억 문장 (MEM-04) */
     private val recall: suspend (UserContext, String) -> List<String> = { _, _ -> emptyList() },
+    /** 스킬 초안 명령 (`/skillify`·`/skills approve|drop 이름`, M28): 그 명령이면 답할 글 */
+    private val skillCommand: suspend (UserContext, dev.vesta.core.SessionId, String) -> String? = { _, _, _ -> null },
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -127,7 +129,11 @@ class DefaultConversationService(
             media?.let { runCatching { it.save(user.userId, MediaKind.IMAGE, image.mime, image.bytes) }.onFailure { e -> log.warn(e) { "이미지 저장 실패" } }.getOrNull() }
         }
         val current = messages.append(session.id, NewMessage(ChatRole.USER, input.text, attachments = saved.map { it.id }))
-        val stored = messages.list(session.id).filter { it.content.isNotBlank() || it.attachments.isNotEmpty() || it.id == current.id }
+        // 모델 없이 답한 턴(기억·스킬 명령, 목록, 정책 안내)은 대화 맥락에서 뺀다: 명령과 안내 글이 다음 질문을 흐리지 않게 (M28)
+        val all = messages.list(session.id)
+        val commands = all.withIndex().filter { (_, m) -> m.role == ChatRole.ASSISTANT && m.model == POLICY_MODEL }
+            .flatMap { (i, m) -> listOfNotNull(m.id, all.getOrNull(i - 1)?.takeIf { it.role == ChatRole.USER }?.id) }.toSet()
+        val stored = all.filter { (it.content.isNotBlank() || it.attachments.isNotEmpty() || it.id == current.id) && it.id !in commands }
         // 이미지는 가장 최근에 이미지를 붙인 질문 것만 다시 보낸다 (후속 질문 "그럼 두 번째 줄은?"용, 문맥·메모리 절약)
         val lastWithImages = stored.lastOrNull { it.role == ChatRole.USER && it.attachments.isNotEmpty() }?.id
         val history = stored.map { message ->
@@ -154,6 +160,11 @@ class DefaultConversationService(
         }
         // 기억 명령 (M27): 모델 없이 바로 저장·지우기·목록
         if (input.images.isEmpty()) runCatching { memoryCommand(user, input.text) }.onFailure { log.warn(it) { "기억 명령 실패" } }.getOrNull()?.let {
+            notice(it)
+            return@flow
+        }
+        // 스킬 초안 (M28 K-11·K-12): 모델 없이 승인·버리기, `/skillify`는 이 대화의 마지막 도구 실행으로 초안을
+        if (input.images.isEmpty()) runCatching { skillCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "스킬 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
         }

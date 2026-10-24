@@ -36,6 +36,8 @@ vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 vesta memory list    # 나에 대해 기억하는 것 (대화에서 "기억해: …", /forget, /memory)
 ```
 
+대화에서 도구로 여러 번 일해 끝낸 작업은 쉬는 때 "제안된 스킬"(초안)이 됩니다. `/skillify`는 방금 한 일로 바로 만들고, `/skills`로 보고 `/skills approve 이름`(또는 웹 UI 에이전트 탭)으로 승인해야 `/이름 할 일`로 부를 수 있습니다.
+
 웹 UI: http://127.0.0.1:8787 (휴대폰은 Tailscale, `vesta setup`).
 
 ## 지인에게 공개 (선택)

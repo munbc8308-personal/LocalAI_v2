@@ -58,12 +58,15 @@ fun StudioView() {
     var editingTeam by remember { mutableStateOf<TeamDto?>(null) }
     var addingA2a by remember { mutableStateOf(false) }
     var editingSkill by remember { mutableStateOf<SkillDto?>(null) }
+    // 스킬 제안 켜기·끄기 (M28): 내 설정에 함께 둔다
+    var settings by remember { mutableStateOf<dev.vesta.api.SettingsDto?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var target by remember { mutableStateOf("") }
     var task by remember { mutableStateOf("") }
 
     fun loadAgents() = scope.launch {
         runCatching { Http.get("/api/agents", AgentsDto.serializer()) }.onSuccess { agents = it; error = null }.onFailure { error = it.message }
+        runCatching { Http.get("/api/me/settings", dev.vesta.api.SettingsDto.serializer()) }.onSuccess { settings = it }
     }
     fun loadRuns() = scope.launch {
         runCatching { Http.get("/api/runs?limit=50", ListSerializer(RunDto.serializer())) }.onSuccess { runs.clear(); runs.addAll(it) }
@@ -260,7 +263,54 @@ fun StudioView() {
                             }) { Text("지우기") }
                         } else Span({ classes("muted") }) { Text(if (k.source == "PERSONAL") "내 파일" else "작업 폴더") }
                     }
-                    Div({ classes("muted", "small") }) { Text(agentLabel(k.agent) + if (k.tools.isNotEmpty()) " · 도구 ${k.tools.joinToString()}" else "") }
+                    Div({ classes("muted", "small") }) { Text(agentLabel(k.agent) + (if (k.tools.isNotEmpty()) " · 도구 ${k.tools.joinToString()}" else "") + if (k.auto) " · 실행에서 만듦" else "") }
+                }
+            }
+            // 제안된 스킬 (M28 K-11): 도구로 끝낸 실행에서 만든 초안. 쓰기(저장)해야 /이름 으로 부를 수 있다
+            if (a.drafts.isNotEmpty()) {
+                Div({ classes("small") }) { B { Text("제안된 스킬 ${a.drafts.size}개") }; Span({ classes("muted") }) { Text(" · 승인하기 전에는 부를 수 없습니다") } }
+                a.drafts.forEach { k ->
+                    Div({ classes("run") }) {
+                        Div({ classes("row", "small") }) {
+                            Span { B { Text("/${k.name}") }; Text(" · ${k.description}") }
+                            Span {
+                                Button({
+                                    classes("link", "small")
+                                    onClick {
+                                        scope.launch {
+                                            runCatching { Http.put("/api/skills/${k.name}", ApiJson.encodeToString(SkillDto.serializer(), k)) }
+                                                .onSuccess { error = null }.onFailure { error = it.message }
+                                            loadAgents()
+                                        }
+                                    }
+                                }) { Text("쓰기") }
+                                Button({ classes("link", "small"); onClick { editingSkill = k } }) { Text("고쳐서 쓰기") }
+                                k.run?.let { id -> Button({ classes("link", "small"); onClick { open(id) } }) { Text("만든 실행") } }
+                                Button({
+                                    classes("link", "small", "bad")
+                                    onClick { scope.launch { runCatching { Http.delete("/api/skills/${k.name}") }.onFailure { error = it.message }; loadAgents() } }
+                                }) { Text("버리기") }
+                            }
+                        }
+                        Div({ classes("muted", "small") }) { Text(if (k.tools.isNotEmpty()) "도구 ${k.tools.joinToString()}" else "도구 없음") }
+                        Pre({ classes("small") }) { Text(k.body) }
+                    }
+                }
+            }
+            settings?.let { s ->
+                Div({ classes("row", "small") }) {
+                    Span { Text("스킬 제안") }
+                    Select({
+                        onChange { e ->
+                            val next = s.copy(skillAuto = e.value == "on", voices = emptyList())
+                            settings = next
+                            scope.launch { runCatching { Http.put("/api/me/settings", ApiJson.encodeToString(dev.vesta.api.SettingsDto.serializer(), next)) }.onFailure { error = it.message ?: "저장 실패" } }
+                        }
+                    }) {
+                        val on = s.skillAuto != false
+                        Option("on", { if (on) selected() }) { Text("켬: 도구로 여러 번 일한 실행을 쉬는 때 초안으로") }
+                        Option("off", { if (!on) selected() }) { Text("끔: /skillify 로 직접 만들 때만") }
+                    }
                 }
             }
         }
@@ -364,7 +414,7 @@ private fun SkillEditor(initial: SkillDto, tools: List<dev.vesta.api.ToolInfoDto
                 }
             }
         }
-        Button({ classes("primary"); onClick { onSave(SkillDto(name.trim(), description.trim(), body, agent, if (agent == "TASK") chosen.toList() else emptyList())) } }) { Text("저장") }
+        Button({ classes("primary"); onClick { onSave(SkillDto(name.trim(), description.trim(), body, agent, if (agent == "TASK") chosen.toList() else emptyList(), auto = initial.auto, run = initial.run)) } }) { Text("저장") }
     }
 }
 

@@ -46,6 +46,10 @@ data class SkillDto(
     val agent: String = "CHAT",
     val tools: List<String> = emptyList(),
     val source: String = "WEB",
+    /** 실행에서 자동으로 만든 것 (M28) */
+    val auto: Boolean = false,
+    /** 만든 실행 ID (스튜디오에서 열어 보기) */
+    val run: Long? = null,
 )
 
 /** 메시지에 붙인 미디어. 내용은 `GET /api/media/{id}` */
@@ -375,6 +379,8 @@ data class SettingsDto(
     val voices: List<String> = emptyList(),
     /** 자동 기억 (M27). null이면 기본(켬) */
     val memoryAuto: Boolean? = null,
+    /** 스킬 제안 (M28). null이면 기본(켬) */
+    val skillAuto: Boolean? = null,
 )
 
 /** 장기 기억 하나 (`/api/memories`, M27) */
@@ -412,6 +418,8 @@ data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<Custom
     /** A2A 에이전트를 등록·쓸 수 있는가 (Mac 주인만) */
     val canA2a: Boolean = false,
     val skills: List<SkillDto> = emptyList(),
+    /** 제안된 스킬 초안 (M28 K-11): 저장(PUT)하면 쓰는 스킬이 되고, 지우면(DELETE) 버린다 */
+    val drafts: List<SkillDto> = emptyList(),
 )
 
 /** 등록한 A2A 에이전트 (A-15) */

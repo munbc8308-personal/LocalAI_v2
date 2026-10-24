@@ -28,6 +28,7 @@ import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.select
+import org.jetbrains.exposed.v1.jdbc.upsert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
@@ -177,19 +178,45 @@ class ExposedA2aAgentRepository(private val db: Database, private val clock: Clo
     )
 }
 
-/** 웹에서 만든 스킬 (M22) */
+/** 웹에서 만든 스킬 (M22). 초안(M28)도 같은 표에 둔다: 이름은 쓰는 스킬·초안을 통틀어 하나 */
 class ExposedSkillRepository(private val db: Database, private val clock: Clock = Clock.systemUTC()) : dev.vesta.core.skill.SkillRepository {
     override suspend fun list(owner: UserId): List<dev.vesta.core.skill.Skill> = db.tx {
-        Skills.selectAll().where { Skills.owner eq owner.value }.orderBy(Skills.name).map { it.toSkill() }
+        Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.status eq Skills.ACTIVE) }.orderBy(Skills.name).map { it.toSkill() }
     }
 
     override suspend fun find(owner: UserId, name: String): dev.vesta.core.skill.Skill? = db.tx {
-        Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.name eq name) }.firstOrNull()?.toSkill()
+        Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.name eq name) and (Skills.status eq Skills.ACTIVE) }.firstOrNull()?.toSkill()
     }
 
-    override suspend fun save(owner: UserId, skill: dev.vesta.core.skill.Skill): dev.vesta.core.skill.Skill = db.tx {
-        val now = clock.instant()
+    override suspend fun save(owner: UserId, skill: dev.vesta.core.skill.Skill): dev.vesta.core.skill.Skill = put(owner, skill.copy(draft = false))
+
+    override suspend fun saveDraft(owner: UserId, skill: dev.vesta.core.skill.Skill): dev.vesta.core.skill.Skill = db.tx {
+        check(Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.name eq skill.name) }.empty()) { "이미 있는 이름입니다: ${skill.name}" }
+        insert(owner, skill.copy(draft = true))
+    }
+
+    override suspend fun drafts(owner: UserId): List<dev.vesta.core.skill.Skill> = db.tx {
+        Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.status eq Skills.DRAFT) }
+            .orderBy(Skills.updatedAt to SortOrder.DESC, Skills.id to SortOrder.DESC).map { it.toSkill() }
+    }
+
+    override suspend fun delete(owner: UserId, name: String): Boolean = db.tx {
+        Skills.deleteWhere { (Skills.owner eq owner.value) and (Skills.name eq name) } > 0
+    }
+
+    override suspend fun cursor(): Long = db.tx { CuratorState.selectAll().where { CuratorState.key eq CURSOR }.firstOrNull()?.get(CuratorState.value) ?: 0L }
+
+    override suspend fun setCursor(at: Long) = db.tx { CuratorState.upsert { it[key] = CURSOR; it[value] = at }; Unit }
+
+    // 같은 이름(초안 포함)을 바꾼다. 초안을 승인하면 만든 실행·자동 표시는 그대로 둔다
+    private suspend fun put(owner: UserId, skill: dev.vesta.core.skill.Skill) = db.tx {
+        val old = Skills.selectAll().where { (Skills.owner eq owner.value) and (Skills.name eq skill.name) }.firstOrNull()
         Skills.deleteWhere { (Skills.owner eq owner.value) and (Skills.name eq skill.name) }
+        insert(owner, skill.copy(auto = skill.auto || old?.get(Skills.origin) == Skills.AUTO, run = skill.run ?: old?.get(Skills.runId)))
+    }
+
+    private fun JdbcTransaction.insert(owner: UserId, skill: dev.vesta.core.skill.Skill): dev.vesta.core.skill.Skill {
+        val now = clock.instant()
         Skills.insert {
             it[Skills.owner] = owner.value
             it[name] = skill.name
@@ -198,12 +225,11 @@ class ExposedSkillRepository(private val db: Database, private val clock: Clock 
             it[tools] = skill.tools.joinToString("\n")
             it[body] = skill.body
             it[updatedAt] = now
+            it[status] = if (skill.draft) Skills.DRAFT else Skills.ACTIVE
+            it[origin] = if (skill.auto) Skills.AUTO else Skills.MANUAL
+            it[runId] = skill.run
         }
-        skill.copy(updatedAt = now, source = dev.vesta.core.skill.SkillSource.WEB)
-    }
-
-    override suspend fun delete(owner: UserId, name: String): Boolean = db.tx {
-        Skills.deleteWhere { (Skills.owner eq owner.value) and (Skills.name eq name) } > 0
+        return skill.copy(updatedAt = now, source = dev.vesta.core.skill.SkillSource.WEB)
     }
 
     private fun ResultRow.toSkill() = dev.vesta.core.skill.Skill(
@@ -214,7 +240,14 @@ class ExposedSkillRepository(private val db: Database, private val clock: Clock 
         tools = this[Skills.tools].lines().filter { it.isNotBlank() },
         source = dev.vesta.core.skill.SkillSource.WEB,
         updatedAt = this[Skills.updatedAt],
+        draft = this[Skills.status] == Skills.DRAFT,
+        auto = this[Skills.origin] == Skills.AUTO,
+        run = this[Skills.runId],
     )
+
+    private companion object {
+        const val CURSOR = "skill_cursor"
+    }
 }
 
 /** 실행 기록 (M22) */
@@ -281,6 +314,10 @@ class ExposedRunRepository(private val db: Database, private val clock: Clock = 
 
     override suspend fun deleteFinished(user: UserId): Int = db.tx {
         AgentRuns.deleteWhere { (AgentRuns.userId eq user.value) and (AgentRuns.status neq RunStatus.RUNNING.name) }
+    }
+
+    override suspend fun after(after: Long, limit: Int): List<AgentRun> = db.tx {
+        AgentRuns.selectAll().where { AgentRuns.id greater after }.orderBy(AgentRuns.id).limit(limit).map { it.toRun() }
     }
 
     override suspend fun abandonRunning(): Int = db.tx {

@@ -93,6 +93,27 @@ class ExposedStudioRepositoriesTest : FunSpec({
         repo.delete(owner, "요약") shouldBe true
     }
 
+    test("스킬 초안 (M28): 목록·부르기에 안 보이고, 이름은 하나, 승인하면 쓰는 스킬로 (자동 표시·실행 유지), 커서, 실행 차례로") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val repo = ExposedSkillRepository(db.db)
+        val runs = ExposedRunRepository(db.db)
+        val run = runs.start(owner, null, "TASK", null, "할 일")
+        repo.saveDraft(owner, dev.vesta.core.skill.Skill("count", "파일 세기", "센다 \$ARGUMENTS", dev.vesta.core.AgentType.TASK, listOf("list_files"), auto = true, run = run.id))
+        repo.list(owner) shouldBe emptyList()
+        repo.find(owner, "count") shouldBe null
+        repo.drafts(owner).single().let { it.draft shouldBe true; it.auto shouldBe true; it.run shouldBe run.id; it.tools shouldBe listOf("list_files") }
+        runCatching { repo.saveDraft(owner, dev.vesta.core.skill.Skill("count", "또", "또")) }.isFailure shouldBe true
+        repo.save(owner, repo.drafts(owner).single().copy(draft = false, auto = false, run = null))
+        repo.drafts(owner) shouldBe emptyList()
+        repo.find(owner, "count")!!.let { it.draft shouldBe false; it.auto shouldBe true; it.run shouldBe run.id }
+        repo.cursor() shouldBe 0L
+        repo.setCursor(7)
+        repo.cursor() shouldBe 7L
+        val second = runs.start(owner, null, "CHAT", null, "둘")
+        runs.after(run.id, 10).map { it.id } shouldBe listOf(second.id)
+    }
+
     test("학습 재료 (M25): 중복 제외, 피드백은 답마다 하나로 고침, 검토·개수·동의한 사용자 것만, 커서") {
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
         val owner = db.ensureOwner("owner")

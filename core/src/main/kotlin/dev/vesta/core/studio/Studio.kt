@@ -126,6 +126,8 @@ interface RunRepository {
     suspend fun delete(user: UserId, id: Long): Boolean = false
     /** [user]의 끝난 실행을 모두 지운다. 지운 수 */
     suspend fun deleteFinished(user: UserId): Int = 0
+    /** ID가 [after]보다 큰 실행, 오래된 것부터 (스킬 제안이 차례로 볼 때, M28). 아직 도는 것도 포함 */
+    suspend fun after(after: Long, limit: Int): List<AgentRun> = emptyList()
 }
 
 /**

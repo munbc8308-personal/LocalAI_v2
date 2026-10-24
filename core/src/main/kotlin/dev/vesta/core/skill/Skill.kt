@@ -19,6 +19,12 @@ data class Skill(
     val tools: List<String> = emptyList(),
     val source: SkillSource = SkillSource.WEB,
     val updatedAt: Instant = Instant.EPOCH,
+    /** 제안된 초안 (M28 K-11): 승인하기 전에는 부를 수 없다 */
+    val draft: Boolean = false,
+    /** 실행에서 자동으로 만든 것 (K-09) */
+    val auto: Boolean = false,
+    /** 만든 실행 ID (자동으로 만든 것) */
+    val run: Long? = null,
 ) {
     /** 이번 턴에 에이전트에게 줄 글: `$ARGUMENTS`를 할 일로, 없으면 지침 뒤에 할 일을 붙인다 */
     fun expand(arguments: String): String {
@@ -49,8 +55,25 @@ data class Skill(
         /** 이미 쓰는 명령: 라우팅(/web …), 스튜디오(/agent·/team·/skills·/agents), 메신저 연결(/start), CLI 명령(/exit …) */
         val RESERVED = setOf(
             "web", "docs", "chat", "image", "video", "code", "task", "agent", "team", "skills", "agents", "start",
-            "exit", "quit", "help", "new", "sessions", "resume", "history", "accept",
+            "exit", "quit", "help", "new", "sessions", "resume", "history", "accept", "skillify",
         )
+
+        /**
+         * 웹 저장·초안 승인 때의 검사 (K-06·K-11): 이름 규칙·예약어, 길이, 숨은 문자, 그 역할이 쓸 수 있는 에이전트, 쓸 수 있는 도구만.
+         * 문제가 있으면 그 이유, 없으면 null. TASK가 아니면 도구는 버린다
+         */
+        fun problem(name: String, description: String, body: String, agent: String, tools: List<String>, agents: Set<AgentType>, allowedTools: Set<String>): String? {
+            if (!NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/이름 으로 부릅니다)"
+            if (name.lowercase() in RESERVED) return "이미 쓰는 명령 이름입니다: /$name"
+            if (description.isBlank() || description.length > MAX_DESCRIPTION) return "설명은 1~${MAX_DESCRIPTION}자입니다"
+            if (body.isBlank() || body.length > MAX_BODY) return "지침은 1~${MAX_BODY}자입니다"
+            if (dev.vesta.core.text.HiddenChars.has(name + description + body)) return "보이지 않는 문자가 들어 있습니다"
+            val type = runCatching { AgentType.valueOf(agent) }.getOrNull()?.takeIf { it in AGENTS } ?: return "에이전트는 ${AGENTS.joinToString { it.name }} 중 하나입니다"
+            if (type !in agents) return "이 계정은 ${type.name} 에이전트를 쓸 수 없습니다"
+            val unknown = if (type == AgentType.TASK) tools.distinct().filter { it !in allowedTools } else emptyList()
+            if (unknown.isNotEmpty()) return "쓸 수 없는 도구: ${unknown.joinToString()}"
+            return null
+        }
 
         /**
          * SKILL.md 읽기 (Claude Code와 같은 꼴): `---` 사이의 머리말(`name`·`description`·`agent`·`tools` 또는 `allowed-tools`) + 본문.
@@ -85,12 +108,21 @@ data class Skill(
     }
 }
 
-/** 웹에서 만든 스킬 (사용자별) */
+/** 웹에서 만든 스킬 (사용자별). [list]·[find]는 쓰는 것만, 초안(M28)은 [drafts] */
 interface SkillRepository {
     suspend fun list(owner: UserId): List<Skill>
     suspend fun find(owner: UserId, name: String): Skill?
+    /** 쓰는 스킬로 저장한다. 같은 이름의 초안이 있으면 그것을 바꾼다 (승인) */
     suspend fun save(owner: UserId, skill: Skill): Skill
+    /** 초안도 지운다 */
     suspend fun delete(owner: UserId, name: String): Boolean
+    /** 제안된 초안, 새것부터 */
+    suspend fun drafts(owner: UserId): List<Skill> = emptyList()
+    /** 초안으로 저장한다 ([skill]의 이름이 쓰는 스킬·초안과 겹치지 않아야 한다) */
+    suspend fun saveDraft(owner: UserId, skill: Skill): Skill = error("초안을 저장할 수 없습니다")
+    /** 스킬 제안이 어느 실행까지 봤는지 (K-08) */
+    suspend fun cursor(): Long = 0L
+    suspend fun setCursor(at: Long) {}
 }
 
 /** `/이름 할 일` (메신저는 `!이름`) */

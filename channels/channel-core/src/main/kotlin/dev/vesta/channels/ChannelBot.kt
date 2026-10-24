@@ -702,7 +702,7 @@ class ChannelBot(
             }
         }
 
-        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "team", "code", "task", "skills", "agents", "remember", "forget", "memory", "memories")
+        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "team", "code", "task", "skills", "agents", "remember", "forget", "memory", "memories", "skillify")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */
         private val CODE = Regex("^[A-Za-z0-9]{4}[- ]?[A-Za-z0-9]{4}$")
@@ -720,6 +720,8 @@ class ChannelBot(
             "remember" to "기억하기 (예: /remember 나는 차를 좋아해)",
             "forget" to "기억 지우기",
             "memory" to "기억 목록",
+            "skills" to "스킬 목록·제안된 스킬",
+            "skillify" to "방금 한 일을 스킬 초안으로",
             "cancel" to "답변 멈추기",
             "status" to "Vesta 상태",
             "voice" to "음성으로 물으면 음성으로도 답하기 (켜기/끄기)",
@@ -734,6 +736,7 @@ class ChannelBot(
             • ${prefix}chat 질문 — 일반 대화
             • ${prefix}image 그릴 것 — 이미지 만들기 ("더 밝게"처럼 이어서 고칠 수 있음)
             • "기억해: 나는 차를 좋아해" — 기억하기 · ${prefix}memory 목록 · ${prefix}forget 내용 또는 번호 — 지우기
+            • ${prefix}skills 스킬 목록 · ${prefix}skillify 방금 도구로 한 일을 스킬 초안으로 · ${prefix}skills approve 이름 — 제안된 스킬 쓰기
             • 문서 파일(.txt .md .pdf)을 보내면 그 파일에 대해 묻거나 컬렉션에 추가할 수 있습니다.
             • 음성 메시지로 물어도 됩니다. 사진·스크린샷에 설명을 붙여 보내면 그 이미지에 대해 답합니다.
             • ${prefix}new 새 대화 · ${prefix}cancel 답변 멈춤 · ${prefix}status 상태

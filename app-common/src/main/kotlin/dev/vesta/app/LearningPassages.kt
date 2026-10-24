@@ -123,3 +123,13 @@ class EmbeddingSwitcher(
         return chunks
     }
 }
+
+/** 스킬 초안 쓰기 (M28 K-09): 메인 모델이 실행 하나를 보고 JSON 초안을 낸다 */
+class SkillWriter(private val inference: InferenceClient, private val models: ModelManager) {
+    suspend fun write(prompt: String): String {
+        val spec = models.acquire(ModelRole.GENERAL)
+        return inference.chat(
+            ChatRequest(spec.name, listOf(ChatMessage(ChatRole.USER, prompt)), temperature = 0.2, maxTokens = 1_500, reasoningEffort = spec.reasoningEffort, keepAlive = spec.keepAlive),
+        ).filterIsInstance<ChatChunk.Delta>().fold(StringBuilder()) { acc, c -> acc.append(c.text) }.toString()
+    }
+}

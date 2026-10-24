@@ -290,6 +290,8 @@ object UserSettingsTable : org.jetbrains.exposed.v1.core.Table("user_settings") 
     val voice = varchar("voice", 80).nullable()
     /** 자동 기억 (M27, v24). null이면 기본(GUEST만 끔) */
     val memoryAuto = bool("memory_auto").nullable()
+    /** 스킬 제안 (M28, v25) */
+    val skillAuto = bool("skill_auto").nullable()
     override val primaryKey = PrimaryKey(userId)
 }
 
@@ -347,8 +349,19 @@ object Skills : LongIdTable("skill") {
     val tools = text("tools")
     val body = text("body")
     val updatedAt = timestamp("updated_at")
+    /** ACTIVE·DRAFT (M28, v25): 초안은 승인하기 전에는 부를 수 없다 */
+    val status = varchar("status", 8).default(ACTIVE)
+    /** MANUAL·AUTO (v25) */
+    val origin = varchar("origin", 8).default(MANUAL)
+    /** 만든 실행 (자동으로 만든 것, v25) */
+    val runId = long("run_id").nullable()
 
     init { uniqueIndex(owner, name) }
+
+    const val ACTIVE = "ACTIVE"
+    const val DRAFT = "DRAFT"
+    const val MANUAL = "MANUAL"
+    const val AUTO = "AUTO"
 }
 
 /** 학습 재료 (M25 L-25, v21). [dedupe]는 종류·라벨·질문을 정규화한 키 (같은 재료를 두 번 넣지 않게) */

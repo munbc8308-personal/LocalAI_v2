@@ -103,6 +103,25 @@ class DefaultConversationServiceTest : FunSpec({
         agent.requests.last().persona shouldBe "사용자를 '민아'라고 부른다."
     }
 
+    test("스킬 초안 명령 (M28): 모델·목록보다 먼저, 이 대화 ID를 넘긴다") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val seen = mutableListOf<SessionId>()
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent),
+            skillCommand = { _, session, text -> if (text.startsWith("/skills approve")) { seen += session; "이제 부를 수 있습니다" } else null },
+            directory = { _, _, _ -> "목록" },
+        )
+        val events = service.send(user, ChannelType.WEB, null, UserInput("/skills approve count")).toList()
+        events.filterIsInstance<AgentEvent.Token>().single().text shouldBe "이제 부를 수 있습니다"
+        seen.single() shouldBe events.filterIsInstance<AgentEvent.SessionReady>().single().sessionId
+        service.send(user, ChannelType.WEB, null, UserInput("/skills")).toList().filterIsInstance<AgentEvent.Token>().single().text shouldBe "목록"
+        agent.requests.size shouldBe 0
+        // 명령 턴은 다음 질문의 맥락에 넣지 않는다
+        val session = events.filterIsInstance<AgentEvent.SessionReady>().single().sessionId
+        service.send(user, ChannelType.WEB, session, UserInput("/chat 안녕")).toList()
+        agent.requests.single().history.map { it.content } shouldBe listOf("안녕")
+    }
+
     test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {
         val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val messages = MemoryMessages()

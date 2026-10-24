@@ -220,6 +220,32 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val a2aClient = dev.vesta.a2a.A2aClient(dev.vesta.a2a.A2aHttp.external(dev.vesta.web.UrlGuard::isInternal), dev.vesta.a2a.A2aHttp.local())
     val runRepository = dev.vesta.storage.ExposedRunRepository(database.db)
     val journal = StudioJournal(runRepository)
+    /** 스킬 자동 생성 (M28): 끝낸 도구 실행 → 초안. 승인해야 쓴다. 쉬는 때 돌리기는 서버가 [SkillSmith.start]로 */
+    val skillWriter by lazy { SkillWriter(inference, modelManager) }
+    val skillSmith = dev.vesta.memory.SkillSmith(
+        runs = runRepository,
+        skills = skillRepository,
+        draft = { skillWriter.write(it) },
+        embed = { texts -> embeddingModel().let { m -> m to inference.embed(m, texts) } },
+        existing = { id -> userRepository.get(id)?.let { skillsFor(UserContext(id, it.role)) }.orEmpty() },
+        enabled = { skillAuto(it) },
+        check = { user, skill -> skillProblem(user, skill) },
+        record = { user, skill ->
+            journal.background(user, "SKILL", "스킬 제안", listOf(Triple("sources", "초안 /${skill.name}", "${skill.description}\n도구: ${skill.tools.joinToString()}\n\n${skill.body}")))
+        },
+    )
+
+    /** 스킬 제안을 쓸지 (K-13): GUEST·없는 사용자는 안 씀, 사용자가 끄면 안 씀 */
+    suspend fun skillAuto(user: dev.vesta.core.UserId): Boolean {
+        val u = userRepository.get(user) ?: return false
+        return u.role != UserRole.GUEST && userSettings.get(user).skillAuto != false
+    }
+
+    /** 스킬 저장·승인 검사 (K-06): 그 역할이 쓸 수 있는 에이전트·도구만 */
+    suspend fun skillProblem(user: UserContext, skill: dev.vesta.core.skill.Skill): String? = dev.vesta.core.skill.Skill.problem(
+        skill.name, skill.description, skill.body, skill.agent.name, skill.tools,
+        dev.vesta.identity.RolePolicy.agents(user.role), toolCatalog(user).map { it.spec.name }.toSet(),
+    )
 
     /** 고를 수 있는 읽어 주기 목소리: 이 Mac의 한국어 `say` 음성 (처음 물을 때 한 번 읽는다) */
     val voices: List<String> by lazy {
@@ -323,6 +349,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         quota = { user -> questionLimit(user) },
         memoryCommand = { user, text -> memories.command(user, text) },
         recall = { user, question -> if (user.role == UserRole.GUEST) emptyList() else memories.recall(user.userId, question).map { it.text } },
+        skillCommand = { user, session, text -> skillSmith.command(user, session, text) },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
@@ -470,10 +497,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
 
     /** `/skills`·`/agents` 목록 */
     private suspend fun directory(user: UserContext, kind: String, workspace: dev.vesta.core.agent.Workspace?): String = when (kind) {
-        "skills" -> skillsFor(user, workspace).takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "부를 수 있는 스킬 (`/이름 할 일`):\n") { s ->
+        "skills" -> (skillsFor(user, workspace).takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "부를 수 있는 스킬 (`/이름 할 일`):\n") { s ->
             val from = when (s.source) { dev.vesta.core.skill.SkillSource.PROJECT -> "작업 폴더"; dev.vesta.core.skill.SkillSource.PERSONAL -> "내 파일"; else -> "웹" }
             "- /${s.name} — ${s.description} (${from} · ${s.agent.name.lowercase()}" + (if (s.tools.isNotEmpty()) " · 도구 ${s.tools.joinToString()}" else "") + ")"
-        } ?: "스킬이 없습니다. 웹 UI 에이전트 탭에서 만들거나, ~/.vesta/skills/<이름>/SKILL.md 파일로 둘 수 있습니다."
+        } ?: "스킬이 없습니다. 웹 UI 에이전트 탭에서 만들거나, ~/.vesta/skills/<이름>/SKILL.md 파일로 둘 수 있습니다.") +
+            // 제안된 초안 (M28 K-11): 부를 수는 없고 승인·버리기만
+            skillRepository.drafts(user.userId).takeIf { it.isNotEmpty() }?.let { d -> d.joinToString("\n", prefix = "\n\n제안된 스킬 ${d.size}개 (승인해야 부를 수 있음: `/skills approve 이름`, 버리기 `/skills drop 이름`):\n") { "- ${it.name} — ${it.description}" } }.orEmpty()
         else -> buildString {
             val custom = customAgentRepository.list(user.userId)
             val teams = teamRepository.list(user.userId)
