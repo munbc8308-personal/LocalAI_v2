@@ -183,6 +183,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             add(ReadFileTool(sandbox, config.tools.maxOutputChars))
             add(SearchFilesTool(sandbox))
             add(SearchDocsTool(knowledge, retriever))
+            add(dev.vesta.tools.SearchConversationsTool { user, query -> pastTalk.find(user, query) })
             // 웹 검색이 꺼져 있으면 외부로 나가는 도구 자체를 주지 않는다 (5.4)
             if (config.web.mode != WebMode.OFF) {
                 add(WebSearchTool(searxng))
@@ -244,6 +245,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 실행기 시작은 서버가 [dev.vesta.scheduler.Scheduler.start]로
      */
     val scheduleRepository = dev.vesta.storage.ExposedScheduleRepository(database.db)
+    /** 지난 대화 검색 (M30) */
+    val conversationSearch = dev.vesta.storage.ExposedConversationSearch(database.db)
+    val pastTalk = dev.vesta.memory.PastTalk(conversationSearch)
     @Volatile var scheduleDeliver: suspend (dev.vesta.core.schedule.Schedule, String) -> Int = { _, _ -> 0 }
     val schedules: dev.vesta.scheduler.Scheduler by lazy {
         dev.vesta.scheduler.Scheduler(
@@ -373,6 +377,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         recall = { user, question -> if (user.role == UserRole.GUEST) emptyList() else memories.recall(user.userId, question).map { it.text } },
         skillCommand = { user, session, text -> skillSmith.command(user, session, text) },
         scheduleCommand = { user, channel, text -> schedules.command(user, channel, text) },
+        pastCommand = { user, session, text -> pastTalk.command(user, session, text) },
+        pastTalk = { user, session, text -> pastTalk.recall(user, session, text)?.let { it.size to dev.vesta.memory.PastTalk.prompt(it)!! } },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),

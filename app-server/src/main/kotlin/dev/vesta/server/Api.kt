@@ -140,6 +140,8 @@ class ServerDeps(
     val memories: dev.vesta.memory.MemoryService? = null,
     /** 자동 기억 지금 돌리기 (Mac 주인): 새로 기억한 문장들 */
     val memoryScan: (suspend () -> List<String>)? = null,
+    /** 지난 대화 검색 (M30) */
+    val pastTalk: dev.vesta.memory.PastTalk? = null,
     /** 예약 작업 (M29) */
     val schedules: dev.vesta.scheduler.Scheduler? = null,
     val scheduleRepo: dev.vesta.core.schedule.ScheduleRepository? = null,
@@ -333,6 +335,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 20
                 val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(SessionDto.serializer()), list))
+            }
+            // 지난 대화 찾기 (M30 H-05): 본인 대화만, 손님은 안 됨
+            get("/sessions/search") {
+                val user = call.principal(deps) ?: return@get
+                val past = deps.pastTalk ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"검색을 쓸 수 없습니다"}""")
+                if (user.role == UserRole.GUEST) return@get call.respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 지난 대화를 찾을 수 없습니다"}""")
+                val q = call.request.queryParameters["q"].orEmpty().trim().take(200)
+                val hits = if (q.isEmpty()) emptyList() else past.find(user, q, limit = 30).map { dev.vesta.api.SessionHitDto(it.session.value, it.title, it.at.toString(), it.snippet) }
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(dev.vesta.api.SessionHitDto.serializer()), hits))
             }
             // 대화 지우기: 메시지·라우팅 기록과 이 대화에 붙은 이미지·영상까지 (본인 것만)
             delete("/sessions/{id}") {

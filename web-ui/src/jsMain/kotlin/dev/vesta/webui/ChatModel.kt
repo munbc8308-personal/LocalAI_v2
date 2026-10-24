@@ -70,6 +70,24 @@ class ChatController(private val scope: CoroutineScope) {
     val pendingImages = mutableStateListOf<PendingImage>()
     private var job: Job? = null
 
+    /** 지난 대화 찾기 (M30): 검색어가 있으면 목록 대신 맞은 대화 */
+    var query by mutableStateOf("")
+    val hits = mutableStateListOf<dev.vesta.api.SessionHitDto>()
+    private var searching: Job? = null
+
+    fun search(text: String) {
+        query = text
+        searching?.cancel()
+        val q = text.trim()
+        if (q.length < 2) { hits.clear(); return }
+        searching = scope.launch {
+            kotlinx.coroutines.delay(250)
+            runCatching { Http.get("/api/sessions/search?q=" + js("encodeURIComponent")(q) as String, ListSerializer(dev.vesta.api.SessionHitDto.serializer())) }
+                .onSuccess { hits.clear(); hits.addAll(it) }
+                .onFailure { loadError = "찾지 못했습니다: ${it.message}" }
+        }
+    }
+
     fun refreshSessions() = scope.launch {
         runCatching { Http.get("/api/sessions?limit=50", ListSerializer(SessionDto.serializer())) }
             .onSuccess { sessions.clear(); sessions.addAll(it) }

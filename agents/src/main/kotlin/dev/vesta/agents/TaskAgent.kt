@@ -90,6 +90,7 @@ class TaskAgent(
             val text = StringBuilder()
             var calls = emptyList<ToolCall>()
             val filter = ArtifactFilter()
+            val leak = LeakedToolCall(available.keys)
             inference.chat(
                 ChatRequest(
                     model = spec.name,
@@ -102,13 +103,15 @@ class TaskAgent(
                 ),
             ).collect { chunk ->
                 when (chunk) {
-                    is ChatChunk.Delta -> filter.accept(chunk.text).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+                    is ChatChunk.Delta -> leak.accept(filter.accept(chunk.text)).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
                     is ChatChunk.Reasoning -> emit(AgentEvent.Reasoning(chunk.text))
                     is ChatChunk.ToolCalls -> calls = chunk.calls
                     is ChatChunk.Done -> usage = chunk.usage
                 }
             }
-            filter.flush().takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+            (leak.accept(filter.flush()) + leak.flush()).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+            // 글로 새어 나온 호출이면 실제 호출로 (gemma4가 가끔 그런다)
+            if (calls.isEmpty()) leak.call?.let { calls = listOf(it) }
             if (calls.isEmpty()) {
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))

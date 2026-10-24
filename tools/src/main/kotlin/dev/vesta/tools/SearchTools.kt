@@ -84,3 +84,27 @@ class ReadUrlTool(private val fetcher: PageFetcher, private val maxChars: Int) :
         }
     }
 }
+
+/** 지난 대화 찾기 (M30 H-04): 본인 대화에서 낱말이 나온 질문·답. 로컬 데이터라 이 뒤 인터넷 도구는 승인을 받는다 */
+class SearchConversationsTool(private val find: suspend (dev.vesta.core.UserContext, String) -> List<dev.vesta.core.session.PastHit>) : Tool {
+    override val readsLocalData = true
+    override val spec = ToolSpec(
+        "search_conversations",
+        "사용자와 예전에 나눈 대화에서 낱말이 나온 질문·답을 찾는다 (날짜·대화 제목·질문·답 앞부분). \"지난번에 얘기한 …\"을 찾을 때 쓴다. 낱말 2~4개를 공백으로.",
+        schema("query" to prop("string", "찾을 낱말 (예: 파이썬 정렬)"), required = listOf("query")),
+    )
+    override val risk = RiskLevel.READ
+
+    override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult {
+        val query = arguments.string("query") ?: return fail("query가 필요함")
+        val hits = find(context.user, query)
+        if (hits.isEmpty()) return ToolResult("찾은 대화 없음", summary = "결과 없음")
+        return ToolResult(
+            hits.mapIndexed { i, h ->
+                "[${i + 1}] ${h.at.atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().toString().take(16).replace('T', ' ')} · ${h.title ?: "제목 없음"}\n" +
+                    "질문: ${h.question.orEmpty().take(300)}\n답: ${h.answer.orEmpty().take(800)}"
+            }.joinToString("\n\n"),
+            summary = "대화 ${hits.size}곳",
+        )
+    }
+}

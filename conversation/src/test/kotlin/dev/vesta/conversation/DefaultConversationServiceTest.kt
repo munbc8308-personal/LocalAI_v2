@@ -137,6 +137,22 @@ class DefaultConversationServiceTest : FunSpec({
         agent.requests.single().unattended shouldBe true
     }
 
+    test("지난 대화 (M30): /recall은 모델 없이, \"지난번에\" 질문은 찾은 것을 시스템 프롬프트에 넣고 상태로 알린다") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent),
+            pastCommand = { _, _, text -> if (text.startsWith("/recall")) "지난 대화 1곳" else null },
+            pastTalk = { _, _, text -> if ("지난번" in text) 1 to "지난 대화에서 찾은 것:\n- [10월 20일] 질문: 정렬 / 답: sorted" else null },
+        )
+        service.send(user, ChannelType.WEB, null, UserInput("/recall 정렬")).toList().filterIsInstance<AgentEvent.Token>().single().text shouldBe "지난 대화 1곳"
+        agent.requests.size shouldBe 0
+        service.send(user, ChannelType.WEB, null, UserInput("/chat 지난번에 얘기한 정렬 뭐였지?")).toList()
+            .filterIsInstance<AgentEvent.Status>().map { it.text } shouldBe listOf("지난 대화 1곳을 참고합니다")
+        agent.requests.single().persona!! shouldBe "지난 대화에서 찾은 것:\n- [10월 20일] 질문: 정렬 / 답: sorted"
+        service.send(user, ChannelType.WEB, null, UserInput("/chat 안녕")).toList()
+        agent.requests.last().persona shouldBe null
+    }
+
     test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {
         val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val messages = MemoryMessages()

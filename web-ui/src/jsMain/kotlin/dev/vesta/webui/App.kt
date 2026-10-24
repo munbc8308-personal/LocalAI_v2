@@ -156,7 +156,28 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
     Div({ classes("chat") }) {
         Div({ classes("sidebar"); if (drawer) classes("open") }) {
             Button({ classes("primary", "wide"); onClick { chat.newChat(); setDrawer(false) } }) { Text("+ 새 대화") }
-            Ul({ classes("sessions") }) {
+            // 지난 대화 찾기 (M30): 2글자 이상이면 맞은 대화와 맞은 부분
+            Input(InputType.Search) {
+                classes("session-search")
+                value(chat.query)
+                placeholder("지난 대화 찾기")
+                attr("aria-label", "지난 대화 찾기")
+                onInput { chat.search(it.value) }
+            }
+            if (chat.query.trim().length >= 2) Ul({ classes("sessions") }) {
+                if (chat.hits.isEmpty()) Li({ classes("muted", "small") }) { Text("맞는 대화가 없습니다") }
+                chat.hits.forEach { h ->
+                    Li({
+                        classes("session")
+                        if (h.id == chat.sessionId) classes("active")
+                        onClick { chat.open(h.id); setDrawer(false) }
+                    }) {
+                        Div({ classes("session-title") }) { Text(h.title ?: "(제목 없음)") }
+                        Div({ classes("muted", "small") }) { Text(localTime(h.at)) }
+                        Div({ classes("small") }) { Text(h.snippet) }
+                    }
+                }
+            } else Ul({ classes("sessions") }) {
                 chat.sessions.forEach { s ->
                     Li({
                         classes("session")
@@ -179,7 +200,7 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
                     }
                 }
             }
-            if (chat.sessions.isNotEmpty()) Button({
+            if (chat.sessions.isNotEmpty() && chat.query.trim().length < 2) Button({
                 classes("link", "small", "danger")
                 onClick {
                     if (window.confirm("대화 ${chat.sessions.size}개를 모두 지울까요? 붙은 이미지·영상도 함께 지워지고 되돌릴 수 없습니다.")) chat.deleteAllSessions()

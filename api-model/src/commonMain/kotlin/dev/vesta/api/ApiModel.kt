@@ -190,6 +190,10 @@ data class ApprovalDto(
 @Serializable
 data class SessionDto(val id: String, val title: String?, val channel: String, val updatedAt: String)
 
+/** 지난 대화 찾기 결과 하나 (`/api/sessions/search`, M30 H-05): 맞은 부분 앞뒤 */
+@Serializable
+data class SessionHitDto(val id: String, val title: String?, val at: String, val snippet: String)
+
 @Serializable
 data class MessageDto(
     val id: Long = 0,

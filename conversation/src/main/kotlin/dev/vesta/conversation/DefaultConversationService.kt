@@ -81,6 +81,10 @@ class DefaultConversationService(
     private val skillCommand: suspend (UserContext, dev.vesta.core.SessionId, String) -> String? = { _, _, _ -> null },
     /** 예약 명령 (`/schedule …`·`/schedules`, M29): 그 명령이면 답할 글. 채널은 결과를 보낼 곳 */
     private val scheduleCommand: suspend (UserContext, ChannelType, String) -> String? = { _, _, _ -> null },
+    /** `/recall 검색어` (M30 H-04): 그 명령이면 답할 글 */
+    private val pastCommand: suspend (UserContext, dev.vesta.core.SessionId, String) -> String? = { _, _, _ -> null },
+    /** "지난번에 … 얘기한" 질문이면 (찾은 수, 시스템 프롬프트에 붙일 글) (M30 H-03). 신호가 없으면 null */
+    private val pastTalk: suspend (UserContext, dev.vesta.core.SessionId, String) -> Pair<Int, String>? = { _, _, _ -> null },
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -170,6 +174,11 @@ class DefaultConversationService(
             notice(it)
             return@flow
         }
+        // 지난 대화 찾기 (M30 H-04): 모델 없이 맞은 대화 목록
+        if (input.images.isEmpty()) runCatching { pastCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()?.let {
+            notice(it)
+            return@flow
+        }
         // 예약 (M29 S-01·S-04): 모델 없이 만들기·목록·멈춤·지우기. 예약 실행 안에서는 받지 않는다
         if (input.images.isEmpty() && !input.unattended) runCatching { scheduleCommand(user, channel, input.text) }.onFailure { log.warn(it) { "예약 명령 실패" } }.getOrNull()?.let {
             notice(it)
@@ -243,7 +252,11 @@ class DefaultConversationService(
         val remembered = if (decision.agent in setOf(AgentType.IMAGE, AgentType.VIDEO)) emptyList()
             else runCatching { recall(user, route.question.ifBlank { input.text }) }.onFailure { log.warn(it) { "기억 꺼내기 실패" } }.getOrDefault(emptyList())
         if (remembered.isNotEmpty()) emit(AgentEvent.Status("기억 ${remembered.size}개를 참고합니다"))
-        val personaText = listOfNotNull(runCatching { persona(user.userId) }.getOrNull(), memoryPrompt(remembered)).joinToString("\n").ifBlank { null }
+        // 지난 대화 (M30 H-03): "지난번에 …" 질문이면 찾은 것(또는 못 찾았다는 것)을 함께 넣는다
+        val past = if (decision.agent in setOf(AgentType.IMAGE, AgentType.VIDEO)) null
+            else runCatching { pastTalk(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()
+        past?.let { (n, _) -> emit(AgentEvent.Status(if (n > 0) "지난 대화 ${n}곳을 참고합니다" else "관련된 지난 대화를 찾지 못했습니다")) }
+        val personaText = listOfNotNull(runCatching { persona(user.userId) }.getOrNull(), memoryPrompt(remembered), past?.second).joinToString("\n").ifBlank { null }
         suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
                 workspace = workspace,

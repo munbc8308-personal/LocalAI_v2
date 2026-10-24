@@ -156,6 +156,7 @@ fun main() {
         memories = app.memories,
         memoryScan = { memoryKeeper?.runOnce(force = true)?.saved.orEmpty() },
         schedules = app.schedules,
+        pastTalk = app.pastTalk,
         scheduleRepo = app.scheduleRepository,
         userEmail = { app.userRepository.get(it)?.email },
     )

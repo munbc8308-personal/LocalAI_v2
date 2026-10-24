@@ -710,7 +710,7 @@ class ChannelBot(
             }
         }
 
-        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "team", "code", "task", "skills", "agents", "remember", "forget", "memory", "memories", "skillify", "schedule", "schedules")
+        private val ROUTE_COMMANDS = setOf("web", "docs", "chat", "image", "agent", "team", "code", "task", "skills", "agents", "remember", "forget", "memory", "memories", "skillify", "schedule", "schedules", "recall")
         private val START = Regex("^[/!]start\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** [PairingCode] 8자 (가운데 하이픈·공백 허용) */
         private val CODE = Regex("^[A-Za-z0-9]{4}[- ]?[A-Za-z0-9]{4}$")
@@ -732,6 +732,7 @@ class ChannelBot(
             "skillify" to "방금 한 일을 스킬 초안으로",
             "schedule" to "예약 (예: /schedule 매일 8시 오늘 날씨 알려 줘)",
             "schedules" to "예약 목록",
+            "recall" to "지난 대화 찾기 (예: /recall 파이썬 정렬)",
             "cancel" to "답변 멈추기",
             "status" to "Vesta 상태",
             "voice" to "음성으로 물으면 음성으로도 답하기 (켜기/끄기)",
@@ -746,6 +747,7 @@ class ChannelBot(
             • ${prefix}chat 질문 — 일반 대화
             • ${prefix}image 그릴 것 — 이미지 만들기 ("더 밝게"처럼 이어서 고칠 수 있음)
             • "기억해: 나는 차를 좋아해" — 기억하기 · ${prefix}memory 목록 · ${prefix}forget 내용 또는 번호 — 지우기
+            • ${prefix}recall 검색어 — 지난 대화 찾기 ("지난번에 얘기한 …"처럼 물어도 찾아 답합니다)
             • ${prefix}schedule 매일 8시 오늘 날씨 알려 줘 — 예약 (결과가 이 대화방으로) · ${prefix}schedules 목록
             • ${prefix}skills 스킬 목록 · ${prefix}skillify 방금 도구로 한 일을 스킬 초안으로 · ${prefix}skills approve 이름 — 제안된 스킬 쓰기
             • 문서 파일(.txt .md .pdf)을 보내면 그 파일에 대해 묻거나 컬렉션에 추가할 수 있습니다.
