@@ -10,8 +10,11 @@ import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.isNull
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.nio.file.Files
@@ -68,6 +71,40 @@ class FileMediaStore(private val db: Database, private val dir: Path, private va
         val file = Path.of(row[MediaAssets.path])
         if (!file.exists()) return@withContext null
         row.toAsset() to file.readBytes()
+    }
+
+    override suspend fun delete(userId: UserId, id: String): Boolean = withContext(Dispatchers.IO) {
+        transaction(db) { deleteLocked(userId, id) }
+    }
+
+    override suspend fun deleteSession(userId: UserId, sessionId: String): Int = withContext(Dispatchers.IO) {
+        transaction(db) {
+            val attached = (MediaAssets innerJoin Messages).select(MediaAssets.id)
+                .where { (MediaAssets.userId eq userId.value) and (Messages.sessionId eq sessionId) }.map { it[MediaAssets.id] }
+            val videos = VideoProjects.select(VideoProjects.videoAsset)
+                .where { (VideoProjects.userId eq userId.value) and (VideoProjects.sessionId eq sessionId) }.map { it[VideoProjects.videoAsset] }
+            (attached + videos).distinct().count { deleteLocked(userId, it) }
+        }
+    }
+
+    /** 한 트랜잭션 안에서: 파일·기록, 영상이면 고치기 기록과 다른 영상이 쓰지 않는 장면 재료(그림·내레이션·클립)까지 */
+    private fun org.jetbrains.exposed.v1.jdbc.JdbcTransaction.deleteLocked(userId: UserId, id: String): Boolean {
+        val row = MediaAssets.selectAll().where { (MediaAssets.id eq id) and (MediaAssets.userId eq userId.value) }.firstOrNull() ?: return false
+        runCatching { Files.deleteIfExists(Path.of(row[MediaAssets.path])) }
+        MediaAssets.deleteWhere { (MediaAssets.id eq id) and (MediaAssets.userId eq userId.value) }
+        val plans = VideoProjects.select(VideoProjects.plan).where { (VideoProjects.userId eq userId.value) and (VideoProjects.videoAsset eq id) }.map { it[VideoProjects.plan] }
+        if (plans.isNotEmpty()) {
+            VideoProjects.deleteWhere { (VideoProjects.userId eq userId.value) and (VideoProjects.videoAsset eq id) }
+            val remaining = VideoProjects.select(VideoProjects.plan).where { VideoProjects.userId eq userId.value }.map { it[VideoProjects.plan] }
+            // 장면 그림·내레이션·클립: 메시지에 붙지 않았고 남은 영상 계획에 없는 것
+            MediaAssets.selectAll().where { (MediaAssets.userId eq userId.value) and MediaAssets.messageId.isNull() }
+                .filter { scene -> val sid = scene[MediaAssets.id]; plans.any { sid in it } && remaining.none { sid in it } }
+                .forEach { scene ->
+                    runCatching { Files.deleteIfExists(Path.of(scene[MediaAssets.path])) }
+                    MediaAssets.deleteWhere { MediaAssets.id eq scene[MediaAssets.id] }
+                }
+        }
+        return true
     }
 
     private fun extension(mime: String) = when (mime) {

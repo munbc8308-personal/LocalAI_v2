@@ -327,6 +327,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(SessionDto.serializer()), list))
             }
+            // 대화 지우기: 메시지·라우팅 기록과 이 대화에 붙은 이미지·영상까지 (본인 것만)
+            delete("/sessions/{id}") {
+                val user = call.principal(deps) ?: return@delete
+                val id = SessionId(call.parameters["id"].orEmpty())
+                if (deps.sessions.find(user.userId, id) == null) return@delete call.respondJson(HttpStatusCode.NotFound, """{"error":"세션 없음"}""")
+                val media = deps.media?.deleteSession(user.userId, id.value) ?: 0
+                val removed = deps.sessions.delete(user.userId, id)
+                call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed,"media":$media}""")
+            }
             get("/sessions/{id}/messages") {
                 val user = call.principal(deps) ?: return@get
                 val id = SessionId(call.parameters["id"].orEmpty())
@@ -387,6 +396,12 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 100
                 val list = deps.media?.list(user.userId, kind, limit).orEmpty().map { MediaItemDto(it.id, it.mime, it.caption, it.createdAt?.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(MediaItemDto.serializer()), list))
+            }
+            // 갤러리에서 지우기 (본인 것만). 대화의 답에서도 사라진다
+            delete("/media/{id}") {
+                val user = call.principal(deps) ?: return@delete
+                val removed = deps.media?.delete(user.userId, call.parameters["id"].orEmpty()) ?: false
+                call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
             }
             // 메시지에 붙인 이미지 (본인 것만)
             get("/media/{id}") {

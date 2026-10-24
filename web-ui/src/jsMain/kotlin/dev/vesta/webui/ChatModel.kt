@@ -75,6 +75,24 @@ class ChatController(private val scope: CoroutineScope) {
             .onSuccess { sessions.clear(); sessions.addAll(it) }
     }
 
+    /** 대화 하나 지우기 (붙은 이미지·영상까지). 지금 보던 대화면 새 대화로 */
+    fun deleteSession(id: String) = scope.launch {
+        runCatching { Http.delete("/api/sessions/$id") }
+            .onSuccess {
+                if (id == sessionId) newChat()
+                sessions.removeAll { it.id == id }
+            }
+            .onFailure { loadError = "지우지 못했습니다: ${it.message}" }
+    }
+
+    /** 목록에 보이는 대화를 모두 지우기 */
+    fun deleteAllSessions() = scope.launch {
+        newChat()
+        val failed = sessions.toList().count { s -> runCatching { Http.delete("/api/sessions/${s.id}") }.isFailure }
+        if (failed > 0) loadError = "${failed}개를 지우지 못했습니다"
+        refreshSessions()
+    }
+
     fun newChat() {
         stop()
         sessionId = null

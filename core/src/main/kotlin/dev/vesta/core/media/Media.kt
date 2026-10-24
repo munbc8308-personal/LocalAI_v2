@@ -45,6 +45,10 @@ interface MediaStore {
     suspend fun load(userId: UserId, id: String): Pair<MediaAsset, ByteArray>?
     /** 최근 것부터 */
     suspend fun list(userId: UserId, kind: MediaKind, limit: Int): List<MediaAsset> = emptyList()
+    /** 파일과 기록을 지운다 (영상이면 그 장면 그림·고치기 기록도). 본인 것이 아니거나 없으면 false */
+    suspend fun delete(userId: UserId, id: String): Boolean = false
+    /** 이 대화에 붙은 미디어(질문 이미지·만든 이미지·영상)를 모두 지운다. 지운 수 */
+    suspend fun deleteSession(userId: UserId, sessionId: String): Int = 0
 }
 
 /** 생성한 이미지 (PNG, 메타데이터에 "AI 생성") */

@@ -42,6 +42,41 @@ class FileMediaStoreTest : FunSpec({
         Path(file.toString()).toFile().exists() shouldBe true
     }
 
+    test("지우기: 본인 것만, 파일까지. 대화를 지우면 붙은 미디어와 영상·장면 재료도") {
+        val home = createTempDirectory("vesta")
+        val db = VestaDatabase.open(home.resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val other = transaction(db.db) { Users.insertAndGetId { it[name] = "guest"; it[role] = dev.vesta.core.UserRole.GUEST } }.value.let(::UserId)
+        val store = FileMediaStore(db.db, home.resolve("media"))
+        val image = store.save(owner, MediaKind.GENERATED, "image/png", byteArrayOf(1), "cat")
+        store.delete(other, image.id) shouldBe false
+        store.delete(owner, image.id) shouldBe true
+        store.load(owner, image.id) shouldBe null
+        Files.list(home.resolve("media").resolve(owner.value.toString())).count() shouldBe 0L
+
+        val sessions = ExposedSessionRepository(db.db)
+        val messages = ExposedMessageRepository(db.db)
+        val chat = sessions.create(owner, ChannelType.WEB, "영상")
+        val keep = sessions.create(owner, ChannelType.WEB, "다른")
+        val upload = store.save(owner, MediaKind.IMAGE, "image/png", byteArrayOf(2))
+        messages.append(chat.id, NewMessage(ChatRole.USER, "이걸로", attachments = listOf(upload.id)))
+        val scene = store.save(owner, MediaKind.SCENE, "image/png", byteArrayOf(3))
+        val voice = store.save(owner, MediaKind.AUDIO, "audio/mp4", byteArrayOf(4))
+        val video = store.save(owner, MediaKind.VIDEO, "video/mp4", byteArrayOf(5))
+        messages.append(chat.id, NewMessage(ChatRole.ASSISTANT, "영상", attachments = listOf(video.id)))
+        val other1 = store.save(owner, MediaKind.GENERATED, "image/png", byteArrayOf(6))
+        messages.append(keep.id, NewMessage(ChatRole.ASSISTANT, "그림", attachments = listOf(other1.id)))
+        ExposedVideoProjectRepository(db.db).save(owner, chat.id.value, dev.vesta.core.media.VideoProject(video.id, "t", "9:16", 1.0,
+            listOf(dev.vesta.core.media.ProjectScene("n", "i", dev.vesta.core.media.Motion.entries.first(), scene.id, voice.id))))
+
+        store.deleteSession(other, chat.id.value) shouldBe 0
+        store.deleteSession(owner, chat.id.value) shouldBe 2
+        listOf(upload, scene, voice, video).forEach { store.load(owner, it.id) shouldBe null }
+        store.load(owner, other1.id)!!.first.id shouldBe other1.id
+        ExposedVideoProjectRepository(db.db).latest(owner, chat.id.value) shouldBe null
+        Files.list(home.resolve("media").resolve(owner.value.toString())).count() shouldBe 1L
+    }
+
     test("갤러리: 만든 이미지만 최근 것부터, 프롬프트와 함께") {
         val home = createTempDirectory("vesta")
         val db = VestaDatabase.open(home.resolve("vesta.db")).also { it.migrate() }

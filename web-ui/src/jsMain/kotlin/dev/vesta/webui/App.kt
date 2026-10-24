@@ -163,11 +163,28 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
                         if (s.id == chat.sessionId) classes("active")
                         onClick { chat.open(s.id); setDrawer(false) }
                     }) {
-                        Div { Text(s.title ?: "(제목 없음)") }
+                        Div({ classes("session-head") }) {
+                            Div({ classes("session-title") }) { Text(s.title ?: "(제목 없음)") }
+                            Button({
+                                classes("link", "small", "remove")
+                                attr("aria-label", "대화 지우기")
+                                attr("title", "지우기")
+                                onClick { event ->
+                                    event.stopPropagation()
+                                    if (window.confirm("'${s.title ?: "제목 없음"}' 대화를 지울까요? 붙은 이미지·영상도 함께 지워지고 되돌릴 수 없습니다.")) chat.deleteSession(s.id)
+                                }
+                            }) { Text("🗑") }
+                        }
                         Div({ classes("muted", "small") }) { Text("${channelName(s.channel)} · ${localTime(s.updatedAt)}") }
                     }
                 }
             }
+            if (chat.sessions.isNotEmpty()) Button({
+                classes("link", "small", "danger")
+                onClick {
+                    if (window.confirm("대화 ${chat.sessions.size}개를 모두 지울까요? 붙은 이미지·영상도 함께 지워지고 되돌릴 수 없습니다.")) chat.deleteAllSessions()
+                }
+            }) { Text("목록의 대화 모두 지우기") }
         }
         if (drawer) Div({ classes("scrim"); onClick { setDrawer(false) } })
         Div({ classes("conversation") }) {
@@ -426,6 +443,12 @@ private fun VideoPlayer(src: String) {
 private fun GalleryView() {
     var items by remember { mutableStateOf<List<MediaItemDto>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    fun remove(ids: List<String>) = scope.launch {
+        val gone = ids.filter { id -> runCatching { Http.delete("/api/media/$id") }.isSuccess }.toSet()
+        items = items?.filterNot { it.id in gone }
+        if (gone.size < ids.size) error = "${ids.size - gone.size}개를 지우지 못했습니다"
+    }
     LaunchedEffect(Unit) {
         runCatching {
             val list = ListSerializer(MediaItemDto.serializer())
@@ -438,6 +461,10 @@ private fun GalleryView() {
         H2 { Text("갤러리") }
         error?.let { P({ classes("error") }) { Text(it) } }
         val list = items
+        if (!list.isNullOrEmpty()) Button({
+            classes("link", "small", "danger")
+            onClick { if (window.confirm("이미지·영상 ${list.size}개를 모두 지울까요? 대화의 답에서도 사라지고 되돌릴 수 없습니다.")) remove(list.map { it.id }) }
+        }) { Text("모두 지우기") }
         when {
             list == null && error == null -> P({ classes("muted") }) { Text("불러오는 중…") }
             list != null && list.isEmpty() -> P({ classes("muted") }) { Text("아직 만든 이미지·영상이 없습니다. 대화에서 /image 고양이 수채화, /video 가을 산책 30초 처럼 요청해 보세요.") }
@@ -447,7 +474,14 @@ private fun GalleryView() {
                         if (item.mime == "video/mp4") VideoPlayer("/api/media/${item.id}")
                         else A("/api/media/${item.id}", { target(ATarget.Blank); attr("rel", "noopener") }) { Img("/api/media/${item.id}", item.caption ?: "만든 이미지") }
                         item.caption?.let { P({ classes("muted", "small") }) { Text(it) } }
-                        item.createdAt?.let { P({ classes("muted", "small") }) { Text(localTime(it)) } }
+                        Div({ classes("card-foot") }) {
+                            item.createdAt?.let { Span({ classes("muted", "small") }) { Text(localTime(it)) } }
+                            Button({
+                                classes("link", "small", "remove")
+                                attr("aria-label", "지우기")
+                                onClick { if (window.confirm("이 ${if (item.mime == "video/mp4") "영상" else "이미지"}을 지울까요? 대화의 답에서도 사라지고 되돌릴 수 없습니다.")) remove(listOf(item.id)) }
+                            }) { Text("🗑") }
+                        }
                     }
                 }
             }
