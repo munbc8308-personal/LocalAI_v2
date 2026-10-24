@@ -491,3 +491,27 @@ data class RunDetailDto(val run: RunDto, val events: List<RunEventDto>, val answ
 /** 실시간 소식 (`GET /api/runs/stream`, SSE): 새 단계([event]) 또는 실행 상태([run]) */
 @Serializable
 data class RunUpdateDto(val run: RunDto? = null, val event: RunEventDto? = null)
+
+/** 예약 작업 (`/api/schedules`, M29). [number]는 `/schedule rm 번호`의 번호, [when]은 사람 말 */
+@Serializable
+data class ScheduleDto(
+    val id: Long,
+    val number: Int,
+    val task: String,
+    val spec: String,
+    @kotlinx.serialization.SerialName("when") val whenText: String,
+    val channel: String,
+    val enabled: Boolean,
+    val nextAt: String? = null,
+    val lastAt: String? = null,
+    val lastStatus: String? = null,
+)
+
+/** 예약 만들기: `/schedule` 뒤와 같은 글 (예: "매일 8시 오늘 날씨 알려 줘") */
+@Serializable
+data class ScheduleNewDto(val text: String)
+
+/** 예약 켜기·끄기 */
+@Serializable
+data class ScheduleEditDto(val enabled: Boolean)
+

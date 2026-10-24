@@ -66,14 +66,20 @@ class TaskAgent(
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val spec = models.acquire(modelRole)
-        val available = toolsFor(request).associateBy { it.spec.name }
+        // 예약 실행(M29)은 지켜보는 사람이 없어 승인이 필요한 도구를 주지 않는다: 읽기·네트워크만
+        val available = toolsFor(request).filter { !request.unattended || it.risk == dev.vesta.core.RiskLevel.READ || it.risk == dev.vesta.core.RiskLevel.NETWORK }
+            .associateBy { it.spec.name }
         // 셸을 주지 않은 사용자(역할 정책, U-06)에게는 셸 규칙 대신 "쓸 수 없다"를 알려 준다
         val effectiveRules = if (available.values.any { it is ShellTool } || "run_shell" !in rules) rules
             else rules.lineSequence().filterNot { "run_shell" in it }.joinToString("\n") + "\n- 이 사용자는 셸 명령을 쓸 수 없다. 셸이 꼭 필요한 요청이면 할 수 없다고 짧게 알리고, 있는 도구로 할 수 있는 것만 한다."
-        val system = Prompts.system(request, clock, zone) + "\n" + effectiveRules
+        // 예약 실행: 없는 쓰기 도구를 설명하는 규칙은 빼고, 한 척하지 말라고 질문 자체에도 붙인다 (시스템 프롬프트만으로는 "만들었다"고 지어냈다)
+        val rulesNow = if (request.unattended) effectiveRules.lineSequence().filterNot { "파일을 쓰거나" in it }.joinToString("\n") + "\n- $UNATTENDED" else effectiveRules
+        val system = Prompts.system(request, clock, zone) + "\n" + rulesNow
         if (available.isNotEmpty()) emit(AgentEvent.Status("도구: ${available.keys.joinToString()}"))
         val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, system))
-        messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS)
+        messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS).let { h ->
+            if (!request.unattended || h.isEmpty()) h else h.dropLast(1) + h.last().copy(content = h.last().content + "\n\n[$UNATTENDED]")
+        }
         val context = ToolContext(request.user)
         var usage: Usage? = null
         val taint = Taint(request.tainted)
@@ -122,6 +128,8 @@ class TaskAgent(
     }
 
     private companion object {
+        /** 예약 실행 안내 (M29 S-05) */
+        const val UNATTENDED = "예약 실행: 지켜보는 사람이 없어 파일 쓰기·옮기기·셸·보내기 도구가 없다. 그런 일은 하지 않았으면 했다고 말하지 말고, \"예약 실행에서는 할 수 없으니 직접 대화에서 시켜 달라\"고 알린다. 읽기·검색으로 할 수 있는 것만 한다."
         const val DENIED = "거부됨"
     }
 

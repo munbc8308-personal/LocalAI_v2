@@ -140,6 +140,9 @@ class ServerDeps(
     val memories: dev.vesta.memory.MemoryService? = null,
     /** 자동 기억 지금 돌리기 (Mac 주인): 새로 기억한 문장들 */
     val memoryScan: (suspend () -> List<String>)? = null,
+    /** 예약 작업 (M29) */
+    val schedules: dev.vesta.scheduler.Scheduler? = null,
+    val scheduleRepo: dev.vesta.core.schedule.ScheduleRepository? = null,
     /** 지인 공개 (M26): 터널 포트로 온 요청 거르기. null이면 터널 포트를 열지 않는다 */
     val publicGate: PublicGate? = null,
     /** 사용자의 바깥 접속 이메일 (M26) */
@@ -734,6 +737,49 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 장기 기억 (M27 MEM-05): 내 기억 보기·더하기·고치기·지우기
+            // 예약 작업 (M29 S-04): 본인 것만, 손님은 안 됨. 웹에서 만든 예약은 결과가 웹 대화 목록에 남는다
+            route("/schedules") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val (scheduler, repo) = call.schedulesFor(user, deps) ?: return@get
+                    val list = repo.list(user.userId).mapIndexed { i, s ->
+                        dev.vesta.api.ScheduleDto(s.id, i + 1, s.task, s.spec, scheduler.describe(s), s.channel.name, s.enabled, s.nextAt?.toString(), s.lastAt?.toString(), s.lastStatus)
+                    }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(dev.vesta.api.ScheduleDto.serializer()), list))
+                }
+                post {
+                    val user = call.principal(deps) ?: return@post
+                    val (scheduler, _) = call.schedulesFor(user, deps) ?: return@post
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.ScheduleNewDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    scheduler.add(user.userId, ChannelType.WEB, dto.text).fold(
+                        { call.respondJson(HttpStatusCode.OK, buildJsonObject { put("id", it.id); put("nextAt", it.nextAt?.toString()) }.toString()) },
+                        { call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it.message ?: "예약하지 못했습니다") }.toString()) },
+                    )
+                }
+                put("/{id}") {
+                    val user = call.principal(deps) ?: return@put
+                    val (scheduler, _) = call.schedulesFor(user, deps) ?: return@put
+                    val id = call.parameters["id"]?.toLongOrNull() ?: return@put call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.ScheduleEditDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    if (scheduler.setEnabled(user.userId, id, dto.enabled)) call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                    else call.respondJson(HttpStatusCode.BadRequest, """{"error":"없는 예약이거나 다시 돌 때가 없습니다"}""")
+                }
+                post("/{id}/run") {
+                    val user = call.principal(deps) ?: return@post
+                    val (scheduler, _) = call.schedulesFor(user, deps) ?: return@post
+                    val id = call.parameters["id"]?.toLongOrNull() ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
+                    if (scheduler.runNow(user, id)) call.respondJson(HttpStatusCode.Accepted, """{"started":true}""")
+                    else call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
+                }
+                delete("/{id}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val (_, repo) = call.schedulesFor(user, deps) ?: return@delete
+                    val removed = call.parameters["id"]?.toLongOrNull()?.let { repo.delete(user.userId, it) } ?: false
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+            }
             route("/memories") {
                 get {
                     val user = call.principal(deps) ?: return@get
@@ -1121,6 +1167,14 @@ private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
 }
 
 /** 기억은 GUEST가 아닌 사용자 본인 것만 (MEM-06). 없거나 손님이면 응답을 보내고 null */
+private suspend fun ApplicationCall.schedulesFor(user: UserContext, deps: ServerDeps): Pair<dev.vesta.scheduler.Scheduler, dev.vesta.core.schedule.ScheduleRepository>? {
+    val s = deps.schedules
+    val r = deps.scheduleRepo
+    if (s == null || r == null) { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"예약을 쓸 수 없습니다"}"""); return null }
+    if (user.role == UserRole.GUEST) { respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 예약을 쓸 수 없습니다"}"""); return null }
+    return s to r
+}
+
 private suspend fun ApplicationCall.memoriesFor(user: UserContext, deps: ServerDeps): dev.vesta.memory.MemoryService? {
     val m = deps.memories ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"기억 기능을 쓸 수 없습니다"}"""); return null }
     if (user.role == UserRole.GUEST) { respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 기억 기능을 쓰지 않습니다"}"""); return null }

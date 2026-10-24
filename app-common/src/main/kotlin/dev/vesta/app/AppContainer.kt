@@ -239,6 +239,24 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         },
     )
 
+    /**
+     * 예약 작업 (M29): 때가 되면 새 대화로 그 사용자 질문을 보낸다(사람 없는 실행). 메신저로 보내기는 서버가 [scheduleDeliver]에 넣는다.
+     * 실행기 시작은 서버가 [dev.vesta.scheduler.Scheduler.start]로
+     */
+    val scheduleRepository = dev.vesta.storage.ExposedScheduleRepository(database.db)
+    @Volatile var scheduleDeliver: suspend (dev.vesta.core.schedule.Schedule, String) -> Int = { _, _ -> 0 }
+    val schedules: dev.vesta.scheduler.Scheduler by lazy {
+        dev.vesta.scheduler.Scheduler(
+            repo = scheduleRepository,
+            conversation = conversation,
+            sessions = sessions,
+            roleOf = { userRepository.get(it)?.role },
+            deliver = { s, text -> scheduleDeliver(s, text) },
+            deleteSession = { user, id -> mediaStore.deleteSession(user, id.value); sessions.delete(user, id) },
+            background = jobScope,
+        )
+    }
+
     /** 스킬 제안을 쓸지 (K-13): GUEST·없는 사용자는 안 씀, 사용자가 끄면 안 씀 */
     suspend fun skillAuto(user: dev.vesta.core.UserId): Boolean {
         val u = userRepository.get(user) ?: return false
@@ -354,6 +372,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         memoryCommand = { user, text -> memories.command(user, text) },
         recall = { user, question -> if (user.role == UserRole.GUEST) emptyList() else memories.recall(user.userId, question).map { it.text } },
         skillCommand = { user, session, text -> skillSmith.command(user, session, text) },
+        scheduleCommand = { user, channel, text -> schedules.command(user, channel, text) },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),

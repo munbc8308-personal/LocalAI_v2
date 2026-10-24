@@ -32,6 +32,8 @@ data class AgentRequest(
      * 맡은 에이전트도 처음부터 인터넷 도구에 승인을 받는다
      */
     val tainted: Boolean = false,
+    /** 사람이 없는 실행 (예약 작업, M29 S-05): 승인이 필요한 도구(쓰기·셸·보내기)를 주지 않는다 */
+    val unattended: Boolean = false,
 )
 
 /** 사용자 입력. [images]는 이번 질문에 붙인 이미지 (V-04), [workspace]는 CLI 작업 폴더 (M17) */
@@ -41,6 +43,8 @@ data class UserInput(
     val workspace: Workspace? = null,
     /** 답을 소리로 들려준다 (Discord 음성 채널·웹 음성 대화, M19) */
     val spoken: Boolean = false,
+    /** 사람이 없는 실행 (예약 작업, M29) */
+    val unattended: Boolean = false,
 )
 
 /**

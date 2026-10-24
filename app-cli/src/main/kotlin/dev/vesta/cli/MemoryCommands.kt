@@ -39,7 +39,8 @@ class MemoryCommand : CliktCommand(name = "memory") {
     }
 }
 
-private fun CliktCommand.memoryApi(method: HttpMethod, path: String, body: String? = null): String = runBlocking {
+/** 서버 API 부르기 (Bearer). 실패면 이유를 알리고 끝낸다 */
+internal fun CliktCommand.memoryApi(method: HttpMethod, path: String, body: String? = null): String = runBlocking {
     val base = ConfigLoader.load(VestaPaths.default().configFile).server.baseUrl
     HttpClient(CIO) { expectSuccess = false }.use { http ->
         val response = runCatching {

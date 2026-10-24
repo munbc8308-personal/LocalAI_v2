@@ -122,6 +122,21 @@ class DefaultConversationServiceTest : FunSpec({
         agent.requests.single().history.map { it.content } shouldBe listOf("안녕")
     }
 
+    test("예약 명령 (M29): 채널을 넘기고, 사람 없는 실행 안에서는 받지 않으며, 사람 없는 실행 표시를 에이전트에 넘긴다") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val channels = mutableListOf<ChannelType>()
+        val service = DefaultConversationService(
+            MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent),
+            scheduleCommand = { _, channel, text -> if (text.startsWith("/schedule")) { channels += channel; "예약했습니다" } else null },
+        )
+        service.send(user, ChannelType.TELEGRAM, null, UserInput("/schedule 매일 8시 날씨")).toList()
+            .filterIsInstance<AgentEvent.Token>().single().text shouldBe "예약했습니다"
+        channels shouldBe listOf(ChannelType.TELEGRAM)
+        service.send(user, ChannelType.WEB, null, UserInput("/schedule 매일 8시 날씨", unattended = true)).toList()
+        channels.size shouldBe 1
+        agent.requests.single().unattended shouldBe true
+    }
+
     test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {
         val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val messages = MemoryMessages()

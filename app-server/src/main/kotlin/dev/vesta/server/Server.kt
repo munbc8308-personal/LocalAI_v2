@@ -155,6 +155,8 @@ fun main() {
         publicGate = publicGate(app.config.publicAccess, app.config.server.port),
         memories = app.memories,
         memoryScan = { memoryKeeper?.runOnce(force = true)?.saved.orEmpty() },
+        schedules = app.schedules,
+        scheduleRepo = app.scheduleRepository,
         userEmail = { app.userRepository.get(it)?.email },
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
@@ -180,6 +182,13 @@ fun main() {
             Triple(if (media != null) "media" else "status", if (media != null) "영상 만듦" else "만들지 못함", job.title),
         ))
     }
+    // 예약 작업 (M29): 메신저에서 만든 예약은 그 메신저 대화방으로 결과를 보낸다. 웹·CLI는 대화 목록에 남는다
+    app.scheduleDeliver = { schedule, text ->
+        if (schedule.channel !in MESSENGERS) 0
+        else notifiers.filter { it.channel == schedule.channel }.sumOf { it.deliver(schedule.user, text) }
+            .also { if (it == 0) log.warn { "예약 결과를 ${schedule.channel}로 보내지 못함 (연결된 대화방 없음): ${schedule.id}" } }
+    }
+    app.schedules.start(background)
     evolution.start(background)
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }

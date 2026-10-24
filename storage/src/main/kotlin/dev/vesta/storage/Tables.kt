@@ -425,3 +425,23 @@ object RunEvents : LongIdTable("run_event") {
     val title = varchar("title", 300)
     val detail = text("detail").nullable()
 }
+
+/** 예약 작업 (M29 S-01, v26). [spec]은 `When.canonical`, [channel]은 결과를 보낼 곳 */
+object Schedules : LongIdTable("schedule") {
+    val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val task = text("task")
+    val spec = varchar("spec", 64)
+    val channel = varchar("channel", 16)
+    val enabled = bool("enabled")
+    val nextAt = timestamp("next_at").nullable().index()
+    val lastAt = timestamp("last_at").nullable()
+    val lastStatus = varchar("last_status", 300).nullable()
+    val createdAt = timestamp("created_at")
+}
+
+/** 예약 실행이 만든 대화 (v26): 예약마다 최근 것만 남길 때 */
+object ScheduleRuns : LongIdTable("schedule_run") {
+    val schedule = reference("schedule_id", Schedules, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val sessionId = varchar("session_id", 36)
+    val at = timestamp("at")
+}

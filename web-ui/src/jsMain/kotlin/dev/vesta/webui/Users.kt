@@ -306,6 +306,69 @@ fun MemoriesCard() {
     }
 }
 
+/**
+ * 예약 작업 (M29 S-04): 만들기·켜기/끄기·지금 실행·지우기. 대화에서는 /schedule …·/schedules
+ * 여기서 만든 예약은 결과가 웹 대화 목록(⏰)에 남는다. 메신저로 받으려면 메신저에서 /schedule
+ */
+@Composable
+fun SchedulesCard() {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<dev.vesta.api.ScheduleDto>?>(null) }
+    var adding by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    fun load() = scope.launch {
+        runCatching { Http.get("/api/schedules", ListSerializer(dev.vesta.api.ScheduleDto.serializer())) }.onSuccess { items = it }.onFailure { message = false to (it.message ?: "불러오지 못했습니다") }
+    }
+    LaunchedEffect(Unit) { load() }
+    fun act(done: String? = null, block: suspend () -> Unit) = scope.launch {
+        runCatching { block() }.onSuccess { message = done?.let { true to it }; load() }.onFailure { message = false to (it.message ?: "실패") }
+    }
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span { B { Text("예약") }; Text(" "); Span({ classes("muted", "small") }) { Text("${items?.size ?: 0}개 · 정한 때에 스스로 일하고 결과를 남긴다 (쓰기·셸 같은 승인 단계는 하지 않음)") } }
+        }
+        message?.let { (ok, text) -> P({ classes(if (ok) "good" else "error", "small") }) { Text(text) } }
+        Form(attrs = {
+            classes("row", "small")
+            addEventListener("submit") { e ->
+                e.preventDefault()
+                val text = adding.trim()
+                if (text.isNotEmpty()) act("예약했습니다") { Http.post("/api/schedules", ApiJson.encodeToString(dev.vesta.api.ScheduleNewDto.serializer(), dev.vesta.api.ScheduleNewDto(text))); adding = "" }
+            }
+        }) {
+            Input(InputType.Text) { value(adding); placeholder("예: 매일 8시 오늘 날씨와 일정 알려 줘"); attr("maxlength", "1100"); onInput { adding = it.value } }
+            Button({ type(ButtonType.Submit); if (adding.isBlank()) disabled() }) { Text("예약하기") }
+        }
+        P({ classes("muted", "small") }) { Text("언제: 매일 8시 · 평일 7시 · 주말 10시 · 매주 월,수 9시 · 매달 1일 9시 · 3시간마다 · 내일 9시 · 10월 30일 14시") }
+        items?.forEach { s ->
+            Div({ classes("row", "small", "memory") }) {
+                Span {
+                    B { Text("${s.number}. ${s.whenText}") }; Text(" · ${s.task}")
+                    Span({ classes("muted") }) {
+                        Text(" · " + (if (!s.enabled) "멈춤" else s.nextAt?.let { "다음 ${localTime(it)}" } ?: "끝남") +
+                            (if (s.channel != "WEB" && s.channel != "CLI") " · ${messengerName(s.channel)}로" else "") +
+                            (s.lastStatus?.let { " · 마지막: $it" } ?: ""))
+                    }
+                }
+                Span {
+                    Button({ classes("link", "small"); onClick { act("돌리기 시작했습니다. 결과는 대화 목록(⏰)에") { Http.post("/api/schedules/${s.id}/run", "{}") } } }) { Text("지금") }
+                    Button({
+                        classes("link", "small")
+                        onClick { act { Http.put("/api/schedules/${s.id}", ApiJson.encodeToString(dev.vesta.api.ScheduleEditDto.serializer(), dev.vesta.api.ScheduleEditDto(!s.enabled))) } }
+                    }) { Text(if (s.enabled) "멈춤" else "켜기") }
+                    Button({ classes("link", "small", "remove"); attr("aria-label", "지우기"); onClick { if (window.confirm("${s.number}번 예약을 지울까요?")) act { Http.delete("/api/schedules/${s.id}") } } }) { Text("🗑") }
+                }
+            }
+        }
+    }
+}
+
+/** ISO 시각 → "10월 26일 08:00" (이 브라우저 시간대) */
+private fun localTime(iso: String): String {
+    val d = kotlin.js.Date(iso)
+    return "${d.getMonth() + 1}월 ${d.getDate()}일 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}"
+}
+
 private fun memoryKindName(kind: String) = when (kind) {
     "PROFILE" -> "나에 대해"
     "PREFERENCE" -> "좋아함·싫어함"

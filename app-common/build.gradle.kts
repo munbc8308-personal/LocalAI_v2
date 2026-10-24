@@ -22,6 +22,7 @@ dependencies {
     api(project(":evolution"))
     api(project(":identity"))
     api(project(":memory"))
+    api(project(":scheduler"))
     api(project(":api-model"))
     implementation(libs.kotlin.logging)
 }

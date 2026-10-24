@@ -55,7 +55,7 @@ data class Skill(
         /** 이미 쓰는 명령: 라우팅(/web …), 스튜디오(/agent·/team·/skills·/agents), 메신저 연결(/start), CLI 명령(/exit …) */
         val RESERVED = setOf(
             "web", "docs", "chat", "image", "video", "code", "task", "agent", "team", "skills", "agents", "start",
-            "exit", "quit", "help", "new", "sessions", "resume", "history", "accept", "skillify",
+            "exit", "quit", "help", "new", "sessions", "resume", "history", "accept", "skillify", "schedule", "schedules",
         )
 
         /**

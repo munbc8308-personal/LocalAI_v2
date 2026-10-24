@@ -183,6 +183,9 @@ interface ChannelNotifier {
      * 보낸 대화방 수
      */
     suspend fun sendMedia(user: dev.vesta.core.UserId, text: String, bytes: ByteArray, mime: String, caption: String?): Int = 0
+
+    /** 긴 글 전체를 [user]와 연결된 대화방으로 (예약 결과, M29): 메신저 한도에 맞게 나눠 보낸다. 보낸 대화방 수 */
+    suspend fun deliver(user: dev.vesta.core.UserId, text: String): Int = notify(user, "deliver", text, emptyList())
 }
 
 /** 여러 버튼 처리기를 하나로 (주간 점검 "ev", 셸 승인 넘기기 "sh" 등, M20) */

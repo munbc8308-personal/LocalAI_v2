@@ -79,6 +79,8 @@ class DefaultConversationService(
     private val recall: suspend (UserContext, String) -> List<String> = { _, _ -> emptyList() },
     /** 스킬 초안 명령 (`/skillify`·`/skills approve|drop 이름`, M28): 그 명령이면 답할 글 */
     private val skillCommand: suspend (UserContext, dev.vesta.core.SessionId, String) -> String? = { _, _, _ -> null },
+    /** 예약 명령 (`/schedule …`·`/schedules`, M29): 그 명령이면 답할 글. 채널은 결과를 보낼 곳 */
+    private val scheduleCommand: suspend (UserContext, ChannelType, String) -> String? = { _, _, _ -> null },
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -168,6 +170,11 @@ class DefaultConversationService(
             notice(it)
             return@flow
         }
+        // 예약 (M29 S-01·S-04): 모델 없이 만들기·목록·멈춤·지우기. 예약 실행 안에서는 받지 않는다
+        if (input.images.isEmpty() && !input.unattended) runCatching { scheduleCommand(user, channel, input.text) }.onFailure { log.warn(it) { "예약 명령 실패" } }.getOrNull()?.let {
+            notice(it)
+            return@flow
+        }
         // `/skills`·`/agents`: 부를 수 있는 것 목록 (메신저는 `!skills`)
         LISTING.find(input.text.trim())?.let { match ->
             notice(directory(user, match.groupValues[1].lowercase(), workspace) ?: "목록을 볼 수 없습니다.")
@@ -240,7 +247,7 @@ class DefaultConversationService(
         suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
                 workspace = workspace,
-                spoken = input.spoken, persona = personaText))
+                spoken = input.spoken, persona = personaText, unattended = input.unattended))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))

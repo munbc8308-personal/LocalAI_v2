@@ -66,6 +66,7 @@ include(
     "evolution",
     "identity",
     "memory",
+    "scheduler",
     "mcp",
     "a2a",
     "agents",

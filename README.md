@@ -34,9 +34,12 @@ vesta update         # 새 버전으로 (설정·데이터 그대로)
 vesta export         # 다른 Mac으로 옮길 파일 (새 Mac에서 vesta import 파일)
 vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 vesta memory list    # 나에 대해 기억하는 것 (대화에서 "기억해: …", /forget, /memory)
+vesta schedule list  # 예약 작업 (대화에서 /schedule 매일 8시 오늘 날씨 알려 줘, /schedules)
 ```
 
 대화에서 도구로 여러 번 일해 끝낸 작업은 쉬는 때 "제안된 스킬"(초안)이 됩니다. `/skillify`는 방금 한 일로 바로 만들고, `/skills`로 보고 `/skills approve 이름`(또는 웹 UI 에이전트 탭)으로 승인해야 `/이름 할 일`로 부를 수 있습니다.
+
+예약 작업: `/schedule 매일 8시 오늘 날씨와 일정 알려 줘`처럼 만들면 그 시각에 새 대화로 돌고, 메신저에서 만들었으면 결과가 그 대화방으로 옵니다. 지켜보는 사람이 없으므로 쓰기·셸 같은 승인 단계는 하지 않습니다.
 
 웹 UI: http://127.0.0.1:8787 (휴대폰은 Tailscale, `vesta setup`).
 
