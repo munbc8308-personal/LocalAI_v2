@@ -112,9 +112,12 @@ class ExportCommand : CliktCommand(name = "export") {
             stage.resolve("manifest.json").writeText(json.encodeToString(MoveManifest.serializer(),
                 MoveManifest(created = java.time.Instant.now().toString(), home = home.toString(), schema = database.schemaVersion(), media = !noMedia, models = models)))
             Files.createDirectories(target.parent)
-            val process = ProcessBuilder("/usr/bin/tar", "-czf", target.toString(), "-C", stage.toString(), ".").inheritIO().start()
-            if (process.waitFor() != 0) { echo("묶지 못했습니다 (tar)", err = true); throw ProgramResult(1) }
-            Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"))
+            // 대화·문서가 든 파일이라 처음부터 본인만 읽게(600) 만든 뒤 tar 출력을 그 안에 쓴다 (tar가 만들게 하면 잠깐 644로 열려 있다, 보안 검토)
+            Files.deleteIfExists(target)
+            Files.createFile(target, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+            val process = ProcessBuilder("/usr/bin/tar", "-czf", "-", "-C", stage.toString(), ".")
+                .redirectOutput(ProcessBuilder.Redirect.to(target.toFile())).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+            if (process.waitFor() != 0) { Files.deleteIfExists(target); echo("묶지 못했습니다 (tar)", err = true); throw ProgramResult(1) }
             echo("만들었습니다: $target (${gb(Files.size(target))})")
             echo("대화·문서 내용이 들어 있습니다. 안전한 곳에만 두세요. 토큰·비밀번호(키체인)는 들어 있지 않아 새 Mac에서 vesta setup으로 다시 넣습니다.")
         } finally {
