@@ -54,6 +54,8 @@ data class UserSettings(
     val tone: Tone = Tone.DEFAULT,
     val voiceReply: Boolean? = null,
     val voice: String? = null,
+    /** 자동 기억 (M27 MEM-03). null이면 기본: 켬 (GUEST는 늘 끔) */
+    val memoryAuto: Boolean? = null,
 ) {
     /** 시스템 프롬프트에 붙일 말. 아무것도 정하지 않았으면 null */
     fun persona(): String? = buildList {

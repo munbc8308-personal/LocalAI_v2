@@ -33,6 +33,7 @@ vesta models pull    # 설정의 모델 받기
 vesta update         # 새 버전으로 (설정·데이터 그대로)
 vesta export         # 다른 Mac으로 옮길 파일 (새 Mac에서 vesta import 파일)
 vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
+vesta memory list    # 나에 대해 기억하는 것 (대화에서 "기억해: …", /forget, /memory)
 ```
 
 웹 UI: http://127.0.0.1:8787 (휴대폰은 Tailscale, `vesta setup`).

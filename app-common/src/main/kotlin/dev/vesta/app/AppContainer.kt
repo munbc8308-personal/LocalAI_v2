@@ -201,6 +201,16 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val userRepository = dev.vesta.storage.ExposedUserRepository(database.db)
     /** 사용자별 설정 (U-07, M20) */
     val userSettings = dev.vesta.storage.ExposedUserSettingsRepository(database.db)
+    /** 장기 기억 (M27). 벡터는 지금 임베딩 모델(학습한 것이면 그것)로 만든다 */
+    val memoryRepository = dev.vesta.storage.ExposedMemoryRepository(database.db)
+    val memories = dev.vesta.memory.MemoryService(memoryRepository, embed = { texts -> embeddingModel().let { m -> m to inference.embed(m, texts) } })
+    val memoryExtractor by lazy { MemoryExtractor(inference, modelManager) }
+
+    /** 자동 기억을 쓸지 (MEM-03·06): GUEST·없는 사용자는 안 씀, 사용자가 끄면 안 씀 */
+    suspend fun memoryAuto(user: dev.vesta.core.UserId): Boolean {
+        val u = userRepository.get(user) ?: return false
+        return u.role != UserRole.GUEST && userSettings.get(user).memoryAuto != false
+    }
     /** 에이전트 스튜디오 (M22): 사용자 정의 에이전트, 실행 기록 */
     val customAgentRepository = dev.vesta.storage.ExposedCustomAgentRepository(database.db)
     val teamRepository = dev.vesta.storage.ExposedTeamRepository(database.db)
@@ -311,6 +321,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         directory = { user, kind, workspace -> directory(user, kind, workspace) },
         journal = journal,
         quota = { user -> questionLimit(user) },
+        memoryCommand = { user, text -> memories.command(user, text) },
+        recall = { user, question -> if (user.role == UserRole.GUEST) emptyList() else memories.recall(user.userId, question).map { it.text } },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),

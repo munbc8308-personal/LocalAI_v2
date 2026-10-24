@@ -65,6 +65,7 @@ include(
     "training",
     "evolution",
     "identity",
+    "memory",
     "mcp",
     "a2a",
     "agents",

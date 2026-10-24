@@ -112,6 +112,7 @@ class ExposedUserSettingsRepository(private val db: org.jetbrains.exposed.v1.jdb
                         tone = runCatching { dev.vesta.core.identity.Tone.valueOf(it[UserSettingsTable.tone]) }.getOrDefault(dev.vesta.core.identity.Tone.DEFAULT),
                         voiceReply = it[UserSettingsTable.voiceReply],
                         voice = it[UserSettingsTable.voice],
+                        memoryAuto = it[UserSettingsTable.memoryAuto],
                     )
                 } ?: dev.vesta.core.identity.UserSettings()
             }
@@ -126,6 +127,7 @@ class ExposedUserSettingsRepository(private val db: org.jetbrains.exposed.v1.jdb
                     it[tone] = settings.tone.name
                     it[voiceReply] = settings.voiceReply
                     it[voice] = settings.voice
+                    it[memoryAuto] = settings.memoryAuto
                 }
             }
             Unit

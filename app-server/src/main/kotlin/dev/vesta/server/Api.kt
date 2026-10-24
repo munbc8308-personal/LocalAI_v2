@@ -136,6 +136,10 @@ class ServerDeps(
     /** 사용자별 설정 (U-07, M20)과 고를 수 있는 목소리 */
     val userSettings: dev.vesta.core.identity.UserSettingsRepository? = null,
     val voices: () -> List<String> = { emptyList() },
+    /** 장기 기억 (M27). GUEST는 쓰지 않는다 */
+    val memories: dev.vesta.memory.MemoryService? = null,
+    /** 자동 기억 지금 돌리기 (Mac 주인): 새로 기억한 문장들 */
+    val memoryScan: (suspend () -> List<String>)? = null,
     /** 지인 공개 (M26): 터널 포트로 온 요청 거르기. null이면 터널 포트를 열지 않는다 */
     val publicGate: PublicGate? = null,
     /** 사용자의 바깥 접속 이메일 (M26) */
@@ -709,7 +713,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@get
                     val repo = deps.userSettings ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"설정을 쓸 수 없습니다"}""")
                     val s = repo.get(user.userId)
-                    val dto = dev.vesta.api.SettingsDto(s.nickname, s.tone.name, s.voiceReply, s.voice, deps.voices())
+                    val dto = dev.vesta.api.SettingsDto(s.nickname, s.tone.name, s.voiceReply, s.voice, deps.voices(), s.memoryAuto)
                     call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.SettingsDto.serializer(), dto))
                 }
                 put {
@@ -725,8 +729,49 @@ fun Application.vestaApi(deps: ServerDeps) {
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"말투는 DEFAULT·FORMAL·CASUAL 중 하나입니다"}""")
                     val voice = dto.voice?.ifBlank { null }
                     if (voice != null && voice !in deps.voices()) return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"이 Mac에 없는 목소리입니다"}""")
-                    repo.save(user.userId, dev.vesta.core.identity.UserSettings(nickname, tone, dto.voiceReply, voice))
+                    repo.save(user.userId, dev.vesta.core.identity.UserSettings(nickname, tone, dto.voiceReply, voice, dto.memoryAuto))
                     call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                }
+            }
+            // 장기 기억 (M27 MEM-05): 내 기억 보기·더하기·고치기·지우기
+            route("/memories") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val memories = call.memoriesFor(user, deps) ?: return@get
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(dev.vesta.api.MemoryDto.serializer()), memories.list(user.userId).map { it.dto() }))
+                }
+                post {
+                    val user = call.principal(deps) ?: return@post
+                    val memories = call.memoriesFor(user, deps) ?: return@post
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.MemoryEditDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    call.memorySaved(memories.remember(user.userId, dto.text, dev.vesta.core.memory.MemorySource.EXPLICIT, dto.kind?.let(::memoryKind)))
+                }
+                put("/{id}") {
+                    val user = call.principal(deps) ?: return@put
+                    val memories = call.memoriesFor(user, deps) ?: return@put
+                    val id = call.parameters["id"]?.toLongOrNull() ?: return@put call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 기억입니다"}""")
+                    val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.MemoryEditDto.serializer(), call.receiveText()) }.getOrNull()
+                        ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
+                    call.memorySaved(memories.edit(user.userId, id, dto.text, dto.kind?.let(::memoryKind)))
+                }
+                delete("/{id}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val memories = call.memoriesFor(user, deps) ?: return@delete
+                    val removed = call.parameters["id"]?.toLongOrNull()?.let { memories.delete(user.userId, it) } ?: false
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
+                delete {
+                    val user = call.principal(deps) ?: return@delete
+                    val memories = call.memoriesFor(user, deps) ?: return@delete
+                    call.respondJson(HttpStatusCode.OK, """{"removed":${memories.clear(user.userId)}}""")
+                }
+                // 자동 기억을 지금 한 번 (쉬는 때를 기다리지 않음). 모든 사용자의 새 질문을 본다 → Mac 주인만
+                post("/scan") {
+                    val user = call.principal(deps) ?: return@post
+                    val scan = deps.memoryScan ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"자동 기억을 쓸 수 없습니다"}""")
+                    if (!call.manages(user, deps, "자동 기억 돌리기는 Mac 주인만 할 수 있습니다")) return@post
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(kotlinx.serialization.serializer<String>()), scan()))
                 }
             }
             // 메신저 연결 (M20): 내 연결 목록, 내 연결 코드 만들기·끊기
@@ -1073,6 +1118,23 @@ private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
         return respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", e.message.orEmpty()) }.toString())
     }
     respondJson(HttpStatusCode.OK, result?.let { ApiJson.encodeToString(UserDto.serializer(), it) } ?: """{"ok":true}""")
+}
+
+/** 기억은 GUEST가 아닌 사용자 본인 것만 (MEM-06). 없거나 손님이면 응답을 보내고 null */
+private suspend fun ApplicationCall.memoriesFor(user: UserContext, deps: ServerDeps): dev.vesta.memory.MemoryService? {
+    val m = deps.memories ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"기억 기능을 쓸 수 없습니다"}"""); return null }
+    if (user.role == UserRole.GUEST) { respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 기억 기능을 쓰지 않습니다"}"""); return null }
+    return m
+}
+
+private fun memoryKind(name: String): dev.vesta.core.memory.MemoryKind? = runCatching { dev.vesta.core.memory.MemoryKind.valueOf(name.uppercase()) }.getOrNull()
+
+private fun dev.vesta.core.memory.Memory.dto() = dev.vesta.api.MemoryDto(id, text, kind.name, source.name, updatedAt.toString(), uses)
+
+private suspend fun ApplicationCall.memorySaved(saved: dev.vesta.memory.MemoryService.Saved) = when (saved) {
+    is dev.vesta.memory.MemoryService.Saved.New -> respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.MemoryDto.serializer(), saved.memory.dto()))
+    is dev.vesta.memory.MemoryService.Saved.Replaced -> respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.MemoryDto.serializer(), saved.memory.dto()))
+    is dev.vesta.memory.MemoryService.Saved.Refused -> respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", saved.reason) }.toString())
 }
 
 /** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */

@@ -86,6 +86,17 @@ class QuestionWriter(private val inference: InferenceClient, private val models:
     }
 }
 
+/** 자동 기억 (M27 MEM-03): 메인 모델로 질문에서 오래 쓸 사실을 뽑는다 */
+class MemoryExtractor(private val inference: InferenceClient, private val models: ModelManager) {
+    suspend fun extract(questions: List<String>): List<dev.vesta.memory.ExtractedFact> {
+        val spec = models.acquire(ModelRole.GENERAL)
+        val answer = inference.chat(
+            ChatRequest(spec.name, listOf(ChatMessage(ChatRole.USER, dev.vesta.memory.MemoryKeeper.prompt(questions))), temperature = 0.1, maxTokens = 600, reasoningEffort = spec.reasoningEffort, keepAlive = spec.keepAlive),
+        ).filterIsInstance<ChatChunk.Delta>().fold(StringBuilder()) { acc, c -> acc.append(c.text) }.toString()
+        return dev.vesta.memory.MemoryKeeper.parse(answer)
+    }
+}
+
 /**
  * 임베딩 모델 전환 (L-23): 모든 사용자의 컬렉션 벡터를 [switch]의 모델로 다시 만든다. 조각 글은 그대로 두고 벡터만 바꾼다.
  * 컬렉션마다 새 벡터를 다 만든 뒤 한 트랜잭션으로 바꾸므로, 검색 중에 두 모델의 벡터가 한 컬렉션에 섞이지 않는다.

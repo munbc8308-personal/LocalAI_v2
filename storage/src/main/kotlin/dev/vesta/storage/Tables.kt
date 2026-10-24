@@ -288,6 +288,8 @@ object UserSettingsTable : org.jetbrains.exposed.v1.core.Table("user_settings") 
     val tone = varchar("tone", 16).default("DEFAULT")
     val voiceReply = bool("voice_reply").nullable()
     val voice = varchar("voice", 80).nullable()
+    /** 자동 기억 (M27, v24). null이면 기본(GUEST만 끔) */
+    val memoryAuto = bool("memory_auto").nullable()
     override val primaryKey = PrimaryKey(userId)
 }
 
@@ -367,6 +369,21 @@ object TrainingSamples : LongIdTable("training_sample") {
 }
 
 /** 큐레이터 진행 위치 등 작은 값 (M25, v21) */
+/** 장기 기억 (M27, v24). 사용자별 사실 문장과 임베딩 */
+object Memories : LongIdTable("memory") {
+    val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
+    val text = varchar("text", 400)
+    val kind = varchar("kind", 16)
+    val origin = varchar("source", 16)
+    val vector = blob("vector").nullable()
+    /** 벡터를 만든 임베딩 모델 (바뀌면 다시 만든다) */
+    val model = varchar("model", 200).nullable()
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+    val lastUsedAt = timestamp("last_used_at").nullable()
+    val uses = integer("uses").default(0)
+}
+
 object CuratorState : org.jetbrains.exposed.v1.core.Table("curator_state") {
     val key = varchar("key", 40)
     val value = long("value")

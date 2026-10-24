@@ -373,7 +373,17 @@ data class SettingsDto(
     val voiceReply: Boolean? = null,
     val voice: String? = null,
     val voices: List<String> = emptyList(),
+    /** 자동 기억 (M27). null이면 기본(켬) */
+    val memoryAuto: Boolean? = null,
 )
+
+/** 장기 기억 하나 (`/api/memories`, M27) */
+@Serializable
+data class MemoryDto(val id: Long, val text: String, val kind: String, val source: String, val updatedAt: String, val uses: Int)
+
+/** 기억 추가·고치기 */
+@Serializable
+data class MemoryEditDto(val text: String, val kind: String? = null)
 
 // --- 에이전트 스튜디오 (M22) ---
 

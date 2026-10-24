@@ -81,6 +81,28 @@ private class RecordingJournal : dev.vesta.core.studio.RunJournal {
 class DefaultConversationServiceTest : FunSpec({
     val user = UserContext(UserId(1), UserRole.OWNER)
 
+    test("기억 (M27): 기억 명령은 모델 없이 답하고, 관련 기억은 시스템 프롬프트에 넣고 상태로 알린다") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val messages = MemoryMessages()
+        val service = DefaultConversationService(
+            MemorySessions(), messages, mapOf(AgentType.CHAT to agent),
+            memoryCommand = { _, text -> if (text.startsWith("기억해:")) "기억했어요" else null },
+            recall = { _, q -> if ("차" in q) listOf("사용자는 녹차를 좋아한다") else emptyList() },
+            persona = { "사용자를 '민아'라고 부른다." },
+        )
+        val saved = service.send(user, ChannelType.WEB, null, UserInput("기억해: 나는 녹차를 좋아해")).toList()
+        saved.filterIsInstance<AgentEvent.Token>().single().text shouldBe "기억했어요"
+        agent.requests.size shouldBe 0
+        val events = service.send(user, ChannelType.WEB, null, UserInput("/chat 차 추천해 줘")).toList()
+        events.filterIsInstance<AgentEvent.Status>().map { it.text } shouldBe listOf("기억 1개를 참고합니다")
+        agent.requests.single().persona!!.let {
+            it.contains("민아") shouldBe true
+            it.contains("- 사용자는 녹차를 좋아한다") shouldBe true
+        }
+        service.send(user, ChannelType.WEB, null, UserInput("/chat 안녕")).toList()
+        agent.requests.last().persona shouldBe "사용자를 '민아'라고 부른다."
+    }
+
     test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {
         val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val messages = MemoryMessages()

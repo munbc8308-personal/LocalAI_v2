@@ -153,6 +153,8 @@ fun main() {
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
         publicGate = publicGate(app.config.publicAccess, app.config.server.port),
+        memories = app.memories,
+        memoryScan = { memoryKeeper?.runOnce(force = true)?.saved.orEmpty() },
         userEmail = { app.userRepository.get(it)?.email },
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
@@ -224,6 +226,9 @@ private fun DashboardDto.statusText(): String = buildString {
 private fun gb(bytes: Long): String = "%.1fGB".format(bytes / (1024.0 * 1024 * 1024))
 
 /** 결정 모델 학습 (M14). 시작할 때 끝나지 못한 실행을 정리한다 */
+/** 자동 기억 (M27). 큐레이터와 함께 [trainingEndpoints]에서 만든다 */
+private var memoryKeeper: dev.vesta.memory.MemoryKeeper? = null
+
 private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): TrainingEndpoints {
     kotlinx.coroutines.runBlocking { app.trainingRuns.abandonRunning() }
     val service = dev.vesta.training.TrainingService(
@@ -280,6 +285,21 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
         },
     )
     curator.start(scope)
+    // 자동 기억 (M27 MEM-03): 큐레이터와 같은 쉬는 때만, 10분마다. 저장한 것은 그 사용자의 에이전트 타임라인에
+    memoryKeeper = dev.vesta.memory.MemoryKeeper(
+        repo = app.memoryRepository,
+        memories = app.memories,
+        extract = { app.memoryExtractor.extract(it) },
+        enabled = { app.memoryAuto(it) },
+        idle = {
+            !app.journal.busy && !service.running && !app.jobs.busy &&
+                java.time.Duration.between(app.journal.lastActivity, java.time.Instant.now()) > java.time.Duration.ofMinutes(2) &&
+                app.evolutionRepository.runs(1).firstOrNull()?.status != dev.vesta.core.evolution.EvolutionStatus.RUNNING
+        },
+        record = { user, report ->
+            app.journal.background(user, "MEMORY", "자동 기억", listOf(Triple("sources", "새로 기억함 ${report.saved.size}개", report.saved.joinToString("\n") { "· $it" })))
+        },
+    ).also { it.start(scope) }
     fun dev.vesta.core.training.TrainingRun.dto() = dev.vesta.api.TrainingRunDto(
         id, kind, status.name, stage, step, total, loss, candidate, error, report, startedAt.toString(), finishedAt?.toString(),
     )

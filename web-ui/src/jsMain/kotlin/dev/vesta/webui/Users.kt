@@ -11,6 +11,8 @@ import dev.vesta.api.ApiJson
 import dev.vesta.api.ChangePasswordDto
 import dev.vesta.api.ConsentDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.MemoryDto
+import dev.vesta.api.MemoryEditDto
 import dev.vesta.api.MessengersDto
 import dev.vesta.api.PairCodeDto
 import dev.vesta.api.SettingsDto
@@ -223,6 +225,92 @@ fun SettingsCard() {
             }
         }
     }
+}
+
+/**
+ * 장기 기억 (M27 MEM-05): 자동 기억 켜기·끄기, 목록·고치기·지우기·더하기. 대화에서는 "기억해: …"·/forget·/memory
+ */
+@Composable
+fun MemoriesCard() {
+    val scope = rememberCoroutineScope()
+    var settings by remember { mutableStateOf<SettingsDto?>(null) }
+    var items by remember { mutableStateOf<List<MemoryDto>?>(null) }
+    var editing by remember { mutableStateOf<Long?>(null) }
+    var draft by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    fun load() = scope.launch {
+        runCatching { Http.get("/api/memories", ListSerializer(MemoryDto.serializer())) }.onSuccess { items = it }.onFailure { message = false to (it.message ?: "불러오지 못했습니다") }
+    }
+    LaunchedEffect(Unit) {
+        runCatching { Http.get("/api/me/settings", SettingsDto.serializer()) }.onSuccess { settings = it }
+        load()
+    }
+    fun act(block: suspend () -> Unit) = scope.launch {
+        runCatching { block() }.onSuccess { message = null; load() }.onFailure { message = false to (it.message ?: "실패") }
+    }
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span { B { Text("기억") }; Text(" "); Span({ classes("muted", "small") }) { Text("${items?.size ?: 0}개 · 답할 때 질문과 관계있는 것만 참고") } }
+            if (!items.isNullOrEmpty()) Button({
+                classes("link", "small", "danger")
+                onClick { if (window.confirm("기억 ${items!!.size}개를 모두 지울까요? 되돌릴 수 없습니다.")) act { Http.delete("/api/memories") } }
+            }) { Text("모두 지우기") }
+        }
+        message?.let { (ok, text) -> P({ classes(if (ok) "good" else "error", "small") }) { Text(text) } }
+        settings?.let { s ->
+            Div({ classes("row", "small") }) {
+                Span { Text("자동 기억") }
+                Select({
+                    onChange { e ->
+                        val next = s.copy(memoryAuto = e.value == "on", voices = emptyList())
+                        settings = next
+                        scope.launch { runCatching { Http.put("/api/me/settings", ApiJson.encodeToString(SettingsDto.serializer(), next)) }.onFailure { message = false to (it.message ?: "저장 실패") } }
+                    }
+                }) {
+                    val on = s.memoryAuto != false
+                    Option("on", { if (on) selected() }) { Text("켬: 대화에서 나에 대한 사실을 쉬는 때 뽑아 둔다") }
+                    Option("off", { if (!on) selected() }) { Text("끔: 직접 \"기억해\"라고 한 것만") }
+                }
+            }
+        }
+        Form(attrs = {
+            classes("row", "small")
+            addEventListener("submit") { e -> e.preventDefault(); val text = adding.trim(); if (text.isNotEmpty()) { adding = ""; act { Http.post("/api/memories", ApiJson.encodeToString(MemoryEditDto.serializer(), MemoryEditDto(text))) } } }
+        }) {
+            Input(InputType.Text) { value(adding); placeholder("예: 나는 커피보다 차를 좋아해"); attr("maxlength", "200"); onInput { adding = it.value } }
+            Button({ type(ButtonType.Submit); if (adding.isBlank()) disabled() }) { Text("기억하기") }
+        }
+        val list = items
+        if (list != null && list.isEmpty()) P({ classes("muted", "small") }) { Text("아직 기억하는 것이 없습니다. 대화에서 \"기억해: …\"라고 말하거나 위에 적어 보세요.") }
+        list?.forEach { m ->
+            Div({ classes("row", "small", "memory") }) {
+                if (editing == m.id) {
+                    Input(InputType.Text) { value(draft); attr("maxlength", "200"); onInput { draft = it.value } }
+                    Span {
+                        Button({ classes("link", "small"); onClick { val text = draft.trim(); editing = null; if (text.isNotEmpty() && text != m.text) act { Http.put("/api/memories/${m.id}", ApiJson.encodeToString(MemoryEditDto.serializer(), MemoryEditDto(text))) } } }) { Text("저장") }
+                        Button({ classes("link", "small"); onClick { editing = null } }) { Text("취소") }
+                    }
+                } else {
+                    Span {
+                        Text(m.text)
+                        Span({ classes("muted") }) { Text(" · ${memoryKindName(m.kind)}${if (m.source == "AUTO") " · 자동" else ""}${if (m.uses > 0) " · ${m.uses}번 씀" else ""}") }
+                    }
+                    Span {
+                        Button({ classes("link", "small"); attr("aria-label", "고치기"); onClick { editing = m.id; draft = m.text } }) { Text("✎") }
+                        Button({ classes("link", "small", "remove"); attr("aria-label", "지우기"); onClick { act { Http.delete("/api/memories/${m.id}") } } }) { Text("🗑") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun memoryKindName(kind: String) = when (kind) {
+    "PROFILE" -> "나에 대해"
+    "PREFERENCE" -> "좋아함·싫어함"
+    "PROJECT" -> "하는 일"
+    else -> "기타"
 }
 
 /** 일회용 연결 코드와 보내는 방법 */

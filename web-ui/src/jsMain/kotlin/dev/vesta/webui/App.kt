@@ -706,6 +706,7 @@ private fun DashboardView(me: MeDto) {
         if (me.role == "OWNER") TrainingCard()
         if (me.role == "OWNER") UsersCard(me)
         SettingsCard()
+        if (me.role != "GUEST") MemoriesCard()
         MessengersCard()
         PasswordCard()
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
