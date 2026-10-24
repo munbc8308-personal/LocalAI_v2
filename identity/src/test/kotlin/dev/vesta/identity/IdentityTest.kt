@@ -120,6 +120,13 @@ class IdentityTest : FunSpec({
         service.setConsent("mina", true)
         service.trainingUsers() shouldBe setOf(owner, mina.id)
 
+        // 바깥 접속 이메일 (M26): 소문자로, 한 이메일은 한 사용자만
+        service.setEmail("mina", " Mina@Example.com ").email shouldBe "mina@example.com"
+        service.find("mina")!!.email shouldBe "mina@example.com"
+        shouldThrow<UserException> { service.setEmail("owner", "mina@example.com") }
+        shouldThrow<UserException> { service.setEmail("owner", "not-an-email") }
+        service.setEmail("mina", null).email shouldBe null
+
         shouldThrow<UserException> { service.setOwnPassword(mina.id, "short") }
         service.setOwnPassword(mina.id, "password2")
         PasswordHasher.verify("password2", WebAuthRepository(db.db).credential("mina")!!.passwordHash!!) shouldBe true

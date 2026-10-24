@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 지인 공개 터널 (PROJECT.md 7.20 P-01, M26). scripts/cloudflare-tunnel.sh가 설정을 만들고 등록한다. Cloudflare로 나가는 연결만 쓴다 (공유기 포트 개방 없음) -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.cloudflared</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>tunnel</string>
+        <string>--no-autoupdate</string>
+        <string>--config</string>
+        <string>__HOME__/.vesta/cloudflared/config.yml</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/cloudflared.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/cloudflared.err.log</string>
+</dict>
+</plist>

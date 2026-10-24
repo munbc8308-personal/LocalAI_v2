@@ -14,6 +14,8 @@ data class User(
     /** 학습 데이터로 써도 되는지 (L-09). OWNER는 항상 쓴다 */
     val trainingConsent: Boolean,
     val createdAt: Instant,
+    /** 바깥 접속 로그인 이메일 (M26). 없으면 바깥(Cloudflare 터널)에서는 로그인할 수 없다 */
+    val email: String? = null,
 ) {
     val context get() = UserContext(id, role)
 }
@@ -29,6 +31,9 @@ interface UserRepository {
     suspend fun create(name: String, role: UserRole, passwordHash: String?): User
     suspend fun setRole(id: UserId, role: UserRole): Boolean
     suspend fun setConsent(id: UserId, consent: Boolean): Boolean
+    /** 바깥 접속 이메일 (M26). null이면 지운다 */
+    suspend fun setEmail(id: UserId, email: String?): Boolean
+    suspend fun findByEmail(email: String): User?
 
     /** 사용자와 그 데이터(대화·컬렉션·미디어 정보·메신저 연결·로그인 세션·피드백)를 지운다. 미디어 파일은 호출한 쪽이 지운다 */
     suspend fun delete(id: UserId): Boolean

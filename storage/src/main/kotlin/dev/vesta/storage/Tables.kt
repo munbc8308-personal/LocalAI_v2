@@ -14,6 +14,8 @@ object Users : LongIdTable("users") {
     val role = enumerationByName("role", 16, UserRole::class)
     val passwordHash = varchar("password_hash", 255).nullable()
     val trainingConsent = bool("training_consent").default(false)
+    /** 바깥 접속(Cloudflare Access) 로그인 이메일 (M26). 소문자로 저장 */
+    val email = varchar("email", 254).nullable()
     val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp)
 }
 

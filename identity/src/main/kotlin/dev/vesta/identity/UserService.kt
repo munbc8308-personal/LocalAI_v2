@@ -71,6 +71,18 @@ class UserService(
         return user.copy(trainingConsent = consent)
     }
 
+    /** 바깥 접속 이메일 (M26). Cloudflare Access 로그인 이메일과 같아야 터널로 로그인할 수 있다. 한 이메일은 한 사용자만 */
+    suspend fun setEmail(name: String, email: String?): User {
+        val user = require(name)
+        val clean = email?.trim()?.lowercase()?.ifBlank { null }
+        if (clean != null) {
+            if (!EMAIL.matches(clean)) throw UserException("이메일 형식이 아닙니다: $email")
+            users.findByEmail(clean)?.takeIf { it.id != user.id }?.let { throw UserException("이미 ${it.name} 이(가) 쓰는 이메일입니다") }
+        }
+        users.setEmail(user.id, clean)
+        return user.copy(email = clean)
+    }
+
     suspend fun delete(name: String) {
         val user = require(name)
         if (user.role == UserRole.OWNER) throw UserException("OWNER는 지울 수 없습니다")
@@ -96,6 +108,7 @@ class UserService(
         /** 공개 대화방 손님처럼 서버가 만드는 계정 (사용자 수에 세지 않는다, M18) */
         val SYSTEM_USERS = setOf("discord-guest")
         /** 글자·숫자로 시작: "."·".."처럼 경로를 벗어나는 이름을 막는다 (MEMBER 폴더 `<memberRoot>/<이름>`) */
+        private val EMAIL = Regex("^[^@\\s]{1,64}@[^@\\s]+\\.[^@\\s]+$")
         private val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}._-]{0,31}$")
     }
 }

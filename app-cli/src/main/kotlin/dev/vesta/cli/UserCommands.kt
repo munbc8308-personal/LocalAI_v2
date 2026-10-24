@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.convert
+import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
@@ -29,19 +30,21 @@ class UserCommand : CliktCommand(name = "user") {
     override fun run() = Unit
 
     companion object {
-        fun create() = UserCommand().subcommands(UserListCommand(), UserAddCommand(), UserRoleCommand(), UserPasswdCommand(), UserConsentCommand(), UserRemoveCommand())
+        fun create() = UserCommand().subcommands(UserListCommand(), UserAddCommand(), UserRoleCommand(), UserPasswdCommand(), UserEmailCommand(), UserConsentCommand(), UserRemoveCommand())
     }
 }
 
 /** DB와 사용자 서비스 (가벼운 명령용: 모델·도구는 띄우지 않는다) */
 internal class UserStore {
     val paths = VestaPaths.default()
+    val config = dev.vesta.core.config.ConfigLoader.load(paths.configFile)
     val db = VestaDatabase.open(paths.database).also { it.migrate() }
     val owner = db.ensureOwner(System.getProperty("user.name") ?: "owner")
     val repository = ExposedUserRepository(db.db)
     val service = UserService(
         repository, WebAuthRepository(db.db),
         deleteMedia = { id -> withContext(Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
+        maxUsers = config.users.maxUsers,
     )
     val knowledge = KnowledgeRepository(db.db)
 }
@@ -67,7 +70,7 @@ class UserListCommand : CliktCommand(name = "list") {
         val usage = store.service.usageToday()
         store.service.list().forEach { u ->
             val today = usage[u.id]
-            val flags = listOfNotNull(if (!u.hasPassword) "비밀번호 없음" else null, if (u.trainingConsent && u.role != UserRole.OWNER) "학습 동의" else null)
+            val flags = listOfNotNull(if (!u.hasPassword) "비밀번호 없음" else null, if (u.trainingConsent && u.role != UserRole.OWNER) "학습 동의" else null, u.email?.let { "바깥 접속 $it" })
             echo("${u.name.padEnd(16)} ${u.role.name.padEnd(6)}  오늘 질문 ${today?.questions ?: 0}개 · 토큰 ${today?.completionTokens ?: 0}" + flags.joinToString("") { " · $it" })
         }
     }
@@ -114,6 +117,21 @@ class UserPasswdCommand : CliktCommand(name = "passwd") {
     }
 }
 
+class UserEmailCommand : CliktCommand(name = "email") {
+    override fun help(context: Context) = "바깥 접속(Cloudflare Access) 로그인 이메일을 정한다. 이 이메일로 Access에 로그인해야 터널로 이 계정을 쓸 수 있다 (M26)"
+    private val name by argument()
+    private val email by argument().optional()
+    private val clear by option("--clear", help = "지운다 (바깥 접속 막기)").flag()
+
+    override fun run() = runBlocking {
+        if (email == null && !clear) { echo("이메일을 주거나 --clear", err = true); throw ProgramResult(1) }
+        val store = UserStore()
+        userAction { store.service.setEmail(name, if (clear) null else email).also { echo("${it.name}: ${it.email ?: "바깥 접속 없음"}") } }
+        syncAccess(store)
+        Unit
+    }
+}
+
 class UserConsentCommand : CliktCommand(name = "consent") {
     override fun help(context: Context) = "이 사용자의 라우팅 정정을 결정 모델 학습에 써도 되는지 (L-09)"
     private val name by argument()
@@ -139,7 +157,9 @@ class UserRemoveCommand : CliktCommand(name = "remove") {
             echo("$name 의 대화·컬렉션·이미지가 모두 지워집니다. 지우려면 이름을 다시 입력하세요: ", trailingNewline = false)
             if (readlnOrNull()?.trim() != name) { echo("취소했습니다."); return@runBlocking }
         }
-        userAction { store.service.delete(name); echo("지웠습니다: $name (파일 폴더 ${dev.vesta.core.config.ConfigLoader.load(store.paths.configFile).users.memberRoot}/$name 은 남겨 둡니다)") }
+        userAction { store.service.delete(name); echo("지웠습니다: $name (파일 폴더 ${store.config.users.memberRoot}/$name 은 남겨 둡니다)") }
+        syncAccess(store)
+        Unit
     }
 }
 

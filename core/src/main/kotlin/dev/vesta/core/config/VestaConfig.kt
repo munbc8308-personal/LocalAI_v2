@@ -18,7 +18,29 @@ data class VestaConfig(
     val training: TrainingConfig = TrainingConfig(),
     val users: UsersConfig = UsersConfig(),
     val evolution: EvolutionConfig = EvolutionConfig(),
+    val publicAccess: PublicAccessConfig = PublicAccessConfig(),
 )
+
+/**
+ * 지인 공개 (PROJECT.md 7.20, M26). Cloudflare Tunnel(`cloudflared`)이 [port]로만 들어오고, 그 앞에 Cloudflare Access 로그인이 있다.
+ * 이 포트로 온 요청은 Access 토큰(JWT)을 확인하고, 토큰 API(`/v1`·CLI Bearer)는 받지 않는다. 설정: `vesta public setup`
+ */
+data class PublicAccessConfig(
+    val enabled: Boolean = false,
+    /** 터널이 넘겨주는 곳 (127.0.0.1에서만 연다) */
+    val port: Int = 8788,
+    /** 바깥 주소 (`vesta.내도메인`) */
+    val hostname: String = "",
+    /** Access 팀 도메인 (`<팀>.cloudflareaccess.com`) */
+    val teamDomain: String = "",
+    /** Access 앱의 AUD 태그 */
+    val audience: String = "",
+    /** 바깥에서도 Mac 주인이 관리 기능(사용자·설정·학습·자가 개선)을 쓸지. 기본은 이 Mac(·Tailscale)에서만 */
+    val ownerAdmin: Boolean = false,
+) {
+    /** 터널을 열 수 있을 만큼 채워졌는지 */
+    val ready: Boolean get() = enabled && hostname.isNotBlank() && teamDomain.isNotBlank() && audience.isNotBlank()
+}
 
 /**
  * 주간 자가 개선 (PROJECT.md 7.13, M16). launchd가 매주 `vesta evolve run`을 실행한다.
@@ -66,6 +88,10 @@ data class UsersConfig(
     val paths: Map<String, List<String>> = emptyMap(),
     /** MEMBER도 셸을 쓰되, 실행마다 Mac 주인의 메신저 승인을 받는다 (M20). false면 MEMBER는 셸 없음 */
     val memberShell: Boolean = true,
+    /** 사용자 수 한도 (Mac 주인 포함 안 함). 메인 모델은 답을 하나씩 만들므로 작게 */
+    val maxUsers: Int = 5,
+    /** Mac 주인이 아닌 사용자의 하루 질문 수 (이 Mac 시간대 자정에 초기화, P-04). 0이면 한도 없음 */
+    val dailyQuestions: Int = 0,
 )
 
 /** 모델 학습 (PROJECT.md 7.10, M14). Python 학습기(trainer, uv)는 Vesta가 자식 프로세스로 실행한다 */

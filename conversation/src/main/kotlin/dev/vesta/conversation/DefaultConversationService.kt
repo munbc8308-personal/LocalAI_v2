@@ -71,6 +71,8 @@ class DefaultConversationService(
     private val directory: suspend (UserContext, String, dev.vesta.core.agent.Workspace?) -> String? = { _, _, _ -> null },
     /** 실행 기록·실시간 보기 (M22) */
     private val journal: dev.vesta.core.studio.RunJournal? = null,
+    /** 사용 한도 (P-04, M26): 넘었으면 안내 글, 아니면 null. 넘으면 질문을 저장하지 않고 안내만 보낸다 */
+    private val quota: suspend (UserContext) -> String? = { null },
 ) : ConversationService {
 
     /** 세션별 직전 라우팅 (후속 질문 이어가기). 프로세스 안에서만 기억한다 */
@@ -108,6 +110,11 @@ class DefaultConversationService(
     }
 
     private fun answer(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
+        quota(user)?.let { limit ->
+            emit(AgentEvent.Token(limit))
+            emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null))
+            return@flow
+        }
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }
         val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else "" }))
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))

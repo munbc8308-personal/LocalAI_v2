@@ -67,6 +67,7 @@ import io.ktor.server.request.header
 import io.ktor.server.request.host
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
+import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondBytes
 import io.ktor.utils.io.readRemaining
@@ -135,6 +136,10 @@ class ServerDeps(
     /** 사용자별 설정 (U-07, M20)과 고를 수 있는 목소리 */
     val userSettings: dev.vesta.core.identity.UserSettingsRepository? = null,
     val voices: () -> List<String> = { emptyList() },
+    /** 지인 공개 (M26): 터널 포트로 온 요청 거르기. null이면 터널 포트를 열지 않는다 */
+    val publicGate: PublicGate? = null,
+    /** 사용자의 바깥 접속 이메일 (M26) */
+    val userEmail: suspend (dev.vesta.core.UserId) -> String? = { null },
 )
 
 /** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
@@ -202,7 +207,18 @@ fun Application.vestaApi(deps: ServerDeps) {
     }
     // 모든 응답: Host 검사(DNS 리바인딩 방지)와 보안 헤더
     intercept(ApplicationCallPipeline.Plugins) {
-        if (!hostAllowed(call.request.host(), deps.allowedHosts)) {
+        val gate = deps.publicGate
+        if (gate != null && call.request.local.localPort == gate.port) {
+            // 터널로 온 요청 (M26): 공개 주소·Access 토큰 확인, 토큰 API 막기
+            when (val result = gate.check(call.request.host(), call.request.path(), call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER))) {
+                is PublicGate.Result.Pass -> call.attributes.put(ACCESS_EMAIL, result.email)
+                is PublicGate.Result.Reject -> {
+                    call.respondJson(HttpStatusCode.fromValue(result.status), buildJsonObject { put("error", result.message) }.toString())
+                    finish()
+                    return@intercept
+                }
+            }
+        } else if (!hostAllowed(call.request.host(), deps.allowedHosts)) {
             call.respondJson(HttpStatusCode.Forbidden, """{"error":"허용되지 않은 Host"}""")
             finish()
             return@intercept
@@ -227,6 +243,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val dto = ApiJson.decodeFromString(LoginDto.serializer(), call.receiveText())
                 when (val result = auth.login(dto.name, dto.password, call.request.header(HttpHeaders.UserAgent))) {
                     is LoginResult.Ok -> {
+                        // 바깥에서는 Access 이메일이 이 계정의 이메일과 같아야 한다 (M26)
+                        call.publicMismatch(deps, result.session.user)?.let { message ->
+                            auth.logout(result.token)
+                            return@post call.respondJson(HttpStatusCode.Forbidden, buildJsonObject { put("error", message) }.toString())
+                        }
                         call.response.cookies.append(
                             Cookie(
                                 SESSION_COOKIE, result.token,
@@ -253,6 +274,7 @@ fun Application.vestaApi(deps: ServerDeps) {
             get("/me") {
                 val session = call.request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) }
                     ?: return@get call.respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
+                call.publicMismatch(deps, session.user)?.let { return@get call.respondJson(HttpStatusCode.Unauthorized, buildJsonObject { put("error", it) }.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe()))
             }
             post("/chat") {
@@ -557,7 +579,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                 post("/preview") {
                     val user = call.principal(deps) ?: return@post
                     val studio = deps.studio ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
-                    if (user.role != UserRole.OWNER) return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
+                    if (!call.manages(user, deps, "Mac 주인만 A2A 에이전트를 붙일 수 있습니다")) return@post
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
                     studio.previewA2a(dto.url, dto.local).fold(
@@ -568,7 +590,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                 put("/{name}") {
                     val user = call.principal(deps) ?: return@put
                     val studio = deps.studio ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
-                    if (user.role != UserRole.OWNER) return@put call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만 A2A 에이전트를 붙일 수 있습니다"}""")
+                    if (!call.manages(user, deps, "Mac 주인만 A2A 에이전트를 붙일 수 있습니다")) return@put
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.A2aAddDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
                     studio.saveA2a(user, call.parameters["name"].orEmpty(), dto.url, dto.endpoint, dto.local)?.let { error ->
@@ -579,7 +601,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                 delete("/{name}") {
                     val user = call.principal(deps) ?: return@delete
                     val repo = deps.studio?.a2aRepo ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
-                    if (user.role != UserRole.OWNER) return@delete call.respondJson(HttpStatusCode.Forbidden, """{"error":"Mac 주인만"}""")
+                    if (!call.manages(user, deps, "Mac 주인만")) return@delete
                     val removed = repo.delete(user.userId, call.parameters["name"].orEmpty())
                     call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
                 }
@@ -919,7 +941,7 @@ private suspend fun ApplicationCall.sse(block: suspend (emit: suspend (String) -
 
 /** Tailscale serve는 HTTPS를 받아 이 서버(HTTP)로 넘긴다 */
 private fun ApplicationCall.isHttps(): Boolean =
-    request.origin.scheme == "https" || request.header("X-Forwarded-Proto") == "https" || request.host().endsWith(".ts.net")
+    attributes.contains(ACCESS_EMAIL) || request.origin.scheme == "https" || request.header("X-Forwarded-Proto") == "https" || request.host().endsWith(".ts.net")
 
 /**
  * 요청한 사용자. Bearer 토큰(CLI)이면 OWNER, 세션 쿠키(웹 UI)면 그 사용자.
@@ -932,6 +954,10 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
         respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
         return null
     }
+    publicMismatch(deps, session.user)?.let {
+        respondJson(HttpStatusCode.Forbidden, buildJsonObject { put("error", it) }.toString())
+        return null
+    }
     if (request.httpMethod != HttpMethod.Get && request.httpMethod != HttpMethod.Head) {
         val given = request.header(CSRF_HEADER).orEmpty()
         if (!MessageDigest.isEqual(given.toByteArray(), session.csrf.toByteArray())) {
@@ -942,10 +968,36 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
     return session.user
 }
 
+/** 터널(Access)로 온 요청이면 Access 이메일 (M26) */
+private val ACCESS_EMAIL = io.ktor.util.AttributeKey<String>("vesta-access-email")
+internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
+
+/** 바깥에서 로그인한 계정의 이메일이 Access 이메일과 다르면 안내 글. 이 Mac·Tailscale에서 온 요청이면 null */
+private suspend fun ApplicationCall.publicMismatch(deps: ServerDeps, user: UserContext): String? {
+    val access = attributes.getOrNull(ACCESS_EMAIL) ?: return null
+    val email = deps.userEmail(user.userId)
+    if (email != null && email.equals(access, ignoreCase = true)) return null
+    return "이 Cloudflare 로그인($access)은 이 Vesta 계정에 연결돼 있지 않습니다. Mac 주인에게 vesta user email 로 연결을 부탁하세요"
+}
+
+/**
+ * 관리 기능(사용자·설정·학습·자가 개선·A2A)은 Mac 주인만, 바깥(터널)에서는 `publicAccess.ownerAdmin`일 때만 (P-06).
+ * 안 되면 응답을 보내고 false
+ */
+private suspend fun ApplicationCall.manages(user: UserContext, deps: ServerDeps, message: String): Boolean {
+    val error = when {
+        !dev.vesta.identity.RolePolicy.canManage(user.role) -> message
+        attributes.contains(ACCESS_EMAIL) && deps.publicGate?.ownerAdmin != true -> "관리 기능은 이 Mac(또는 Tailscale)에서만 쓸 수 있습니다"
+        else -> null
+    } ?: return true
+    respondJson(HttpStatusCode.Forbidden, buildJsonObject { put("error", error) }.toString())
+    return false
+}
+
 /** 사용자 관리는 Mac 주인만 (U-01). 없거나 권한이 없으면 응답을 보내고 null */
 private suspend fun ApplicationCall.usersFor(user: UserContext, deps: ServerDeps): dev.vesta.identity.UserService? {
     val users = deps.users ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}"""); return null }
-    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"사용자 관리는 Mac 주인만 할 수 있습니다"}"""); return null }
+    if (!manages(user, deps, "사용자 관리는 Mac 주인만 할 수 있습니다")) return null
     return users
 }
 
@@ -965,7 +1017,7 @@ private suspend fun ApplicationCall.userAction(block: suspend () -> UserDto?) {
 /** 학습은 Mac 주인만 (7.12). 없거나 권한이 없으면 응답을 보내고 null */
 private suspend fun ApplicationCall.messengersFor(user: UserContext, deps: ServerDeps): MessengerEndpoints? {
     val m = deps.messengers ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"메신저가 설정돼 있지 않습니다"}"""); return null }
-    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"다른 사용자의 메신저 연결은 Mac 주인만 관리할 수 있습니다"}"""); return null }
+    if (!manages(user, deps, "다른 사용자의 메신저 연결은 Mac 주인만 관리할 수 있습니다")) return null
     return m
 }
 
@@ -978,13 +1030,13 @@ private suspend fun ApplicationCall.messengerOf(m: MessengerEndpoints): ChannelT
 
 private suspend fun ApplicationCall.evolutionFor(user: UserContext, deps: ServerDeps): EvolutionDesk? {
     val desk = deps.evolution ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"자가 개선이 설정돼 있지 않습니다"}"""); return null }
-    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"설정 변경은 Mac 주인만 할 수 있습니다"}"""); return null }
+    if (!manages(user, deps, "설정 변경은 Mac 주인만 할 수 있습니다")) return null
     return desk
 }
 
 private suspend fun ApplicationCall.trainingFor(user: UserContext, deps: ServerDeps): TrainingEndpoints? {
     val training = deps.training ?: run { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"학습이 설정돼 있지 않습니다"}"""); return null }
-    if (!dev.vesta.identity.RolePolicy.canManage(user.role)) { respondJson(HttpStatusCode.Forbidden, """{"error":"학습은 Mac 주인만 할 수 있습니다"}"""); return null }
+    if (!manages(user, deps, "학습은 Mac 주인만 할 수 있습니다")) return null
     return training
 }
 

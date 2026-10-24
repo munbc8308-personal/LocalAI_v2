@@ -36,3 +36,20 @@ vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 ```
 
 웹 UI: http://127.0.0.1:8787 (휴대폰은 Tailscale, `vesta setup`).
+
+## 지인에게 공개 (선택)
+
+초대한 사람만 주소 하나로 접속합니다. 필요한 것: Cloudflare 계정에 올린 내 도메인, Zero Trust 팀(무료).
+모델은 그대로 이 Mac에서 돌고, 공유기 포트는 열지 않습니다.
+
+```sh
+vesta public token                                              # Cloudflare API 토큰 (키체인)
+vesta public setup --hostname vesta.example.com --email 내@메일  # Access 로그인 관문
+scripts/cloudflare-tunnel.sh vesta.example.com                  # 터널
+vesta public invite mina mina@example.com                       # 초대 (기본 손님: 대화·웹 검색)
+vesta public status                                             # 바깥에서 막고 있는지 확인
+```
+
+바깥에서는 Access 로그인과 Vesta 로그인을 모두 거칩니다. 두 로그인은 같은 사람이어야 합니다(이메일).
+토큰 API(`/v1`·CLI)는 바깥에 열지 않습니다. 관리 기능은 이 Mac에서만 씁니다.
+하루 질문 한도는 `~/.vesta/config.yaml`의 `users.dailyQuestions`로 정합니다.

@@ -10,6 +10,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.request.get
 import io.ktor.http.isSuccess
 import io.ktor.server.cio.CIO
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import dev.vesta.api.DashboardDto
 import kotlinx.coroutines.CoroutineScope
@@ -151,6 +152,8 @@ fun main() {
         ),
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
+        publicGate = publicGate(app.config.publicAccess, app.config.server.port),
+        userEmail = { app.userRepository.get(it)?.email },
     )
     // 메신저 봇 (M10). 서버와 같은 프로세스에서 돈다
     val channels = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -178,7 +181,34 @@ fun main() {
     evolution.start(background)
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
-    embeddedServer(CIO, port = app.config.server.port, host = host) { vestaApi(deps) }.start(wait = true)
+    val gate = deps.publicGate
+    if (gate != null) log.info { "지인 공개 터널 입구: http://127.0.0.1:${gate.port} → https://${gate.hostname} (Cloudflare Access)" }
+    embeddedServer(CIO, configure = {
+        connector { this.host = host; port = app.config.server.port }
+        // 터널 입구는 이 Mac 안에서만 연다 (cloudflared가 붙는다)
+        if (gate != null) connector { this.host = "127.0.0.1"; port = gate.port }
+    }) { vestaApi(deps) }.start(wait = true)
+}
+
+/** 지인 공개 설정이 다 채워졌으면 터널 입구 (M26). 빠진 게 있으면 열지 않고 알린다 */
+internal fun publicGate(config: dev.vesta.core.config.PublicAccessConfig, serverPort: Int): PublicGate? {
+    if (!config.enabled) return null
+    if (!config.ready) { log.error { "지인 공개가 켜져 있지만 hostname·teamDomain·audience가 비어 있어 열지 않습니다 (vesta public setup)" }; return null }
+    if (config.port == serverPort) { log.error { "publicAccess.port가 server.port와 같아 열지 않습니다" }; return null }
+    val http = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(5)).build()
+    val verifier = AccessVerifier(config.teamDomain, config.audience, fetchKeys = { url ->
+        kotlinx.coroutines.Dispatchers.IO.let { io ->
+            kotlinx.coroutines.withContext(io) {
+                val response = http.send(
+                    java.net.http.HttpRequest.newBuilder(java.net.URI(url)).timeout(java.time.Duration.ofSeconds(10)).GET().build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString(),
+                )
+                check(response.statusCode() == 200) { "HTTP ${response.statusCode()}" }
+                response.body()
+            }
+        }
+    })
+    return PublicGate(config.port, config.hostname.lowercase(), verifier, config.ownerAdmin)
 }
 
 /** 메신저 `/status` 답 */

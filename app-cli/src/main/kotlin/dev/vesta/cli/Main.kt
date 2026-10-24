@@ -48,5 +48,5 @@ fun main(args: Array<String>) = Vesta()
         StatusCommand(), DoctorCommand(), SetupCommand(), PasswdCommand(), UserCommand.create(),
         *messengerCommands().toTypedArray(),
         TrainCommand.create(), EvolveCommand.create(),
-        ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand(), ModelsCommand.create(), ExportCommand(), ImportCommand(), UpdateCommand(), UninstallCommand())
+        ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand(), ModelsCommand.create(), ExportCommand(), ImportCommand(), UpdateCommand(), UninstallCommand(), PublicCommand.create())
     .main(args)

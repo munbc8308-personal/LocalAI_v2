@@ -36,6 +36,9 @@ class VestaDatabase private constructor(val db: Database) {
         // v19: a2a_agent.local (사용자가 고른 내부 에이전트인지, M22 보안 검토)
         val a2aColumns = exec("PRAGMA table_info(a2a_agent)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("local" !in a2aColumns) exec("ALTER TABLE a2a_agent ADD COLUMN local BOOLEAN DEFAULT 0 NOT NULL")
+        // v23: users.email (지인 공개의 Access 로그인 이메일, M26)
+        val userColumns = exec("PRAGMA table_info(users)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
+        if ("email" !in userColumns) exec("ALTER TABLE users ADD COLUMN email VARCHAR(254) NULL")
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
             log.info { "schema $current -> $CURRENT_VERSION" }
@@ -57,8 +60,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12), 11: media_asset.caption (M13), 12: message_feedback·training_run·model_version (M14), 13: collection_share (M15), 14: evolution_run·evolution_proposal·evolution_candidate (M16), 15: user_settings (M20), 16: custom_agent·agent_run·run_event (M22), 17: agent_team (M22 팀), 18: a2a_agent (M22 A2A), 19: a2a_agent.local, 20: skill (M22 스킬), 21: training_sample·curator_state (M25) */
-        const val CURRENT_VERSION = 22
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12), 11: media_asset.caption (M13), 12: message_feedback·training_run·model_version (M14), 13: collection_share (M15), 14: evolution_run·evolution_proposal·evolution_candidate (M16), 15: user_settings (M20), 16: custom_agent·agent_run·run_event (M22), 17: agent_team (M22 팀), 18: a2a_agent (M22 A2A), 19: a2a_agent.local, 20: skill (M22 스킬), 21: training_sample·curator_state (M25), 22: video_project (M24), 23: users.email (M26) */
+        const val CURRENT_VERSION = 23
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()

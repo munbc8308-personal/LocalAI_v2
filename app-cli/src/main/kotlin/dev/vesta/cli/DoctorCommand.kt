@@ -235,6 +235,15 @@ internal class Doctor(private val home: Path = Path.of(System.getProperty("user.
             command(tailscale, "serve", "status")?.contains("8787") == true -> ok("Tailscale", "serve로 8787 공개 중 (tailnet 안에서만)")
             else -> off("Tailscale", "설치됨, serve 안 함", "scripts/tailscale-serve.sh")
         }
+        // 지인 공개 (M26): 켜져 있으면 터널·관문이 막고 있는지까지 본다
+        publicChecks(config.publicAccess, config.server.port).forEach { (mark, detail) ->
+            when (mark) {
+                "✓" -> ok("지인 공개", detail)
+                "!" -> warn("지인 공개", detail, "vesta public status")
+                "✗" -> fail("지인 공개", detail, "vesta public status")
+                else -> off("지인 공개", "꺼짐 (초대한 지인에게 주소 하나로 공개)", "vesta public setup")
+            }
+        }
     }
 
     /** 명령 출력 첫 줄들 (실패하면 null) */

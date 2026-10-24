@@ -81,6 +81,21 @@ private class RecordingJournal : dev.vesta.core.studio.RunJournal {
 class DefaultConversationServiceTest : FunSpec({
     val user = UserContext(UserId(1), UserRole.OWNER)
 
+    test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {
+        val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val messages = MemoryMessages()
+        val service = DefaultConversationService(
+            MemorySessions(), messages, mapOf(AgentType.CHAT to agent),
+            quota = { if (it.role == UserRole.GUEST) "오늘 질문 한도를 다 썼습니다" else null },
+        )
+        val events = service.send(UserContext(UserId(3), UserRole.GUEST), ChannelType.WEB, null, UserInput("안녕")).toList()
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldBe "오늘 질문 한도를 다 썼습니다"
+        messages.items.size shouldBe 0
+        agent.requests.size shouldBe 0
+        service.send(user, ChannelType.WEB, null, UserInput("/chat 안녕")).toList()
+        agent.requests.size shouldBe 1
+    }
+
     test("CLI 작업 폴더(M17)는 Mac 주인의, 홈 아래 실제 폴더일 때만 에이전트에 넘긴다") {
         val agent = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to agent))

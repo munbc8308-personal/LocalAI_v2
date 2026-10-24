@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.6, 2026-10-24)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(실제 도메인·Access 확인 남음), M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.7, 2026-10-24)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -57,6 +57,7 @@
 | v5.4 | 2026-10-24 | **영상 백그라운드 만들기 (G-04)**: `BackgroundJobs`·`JobDesk`(한 번에 하나씩, 진행 상태, 결과를 같은 대화에 답 메시지로), `AgentEvent.JobStarted`·`EventDto.Job`·`/api/jobs/{id}`, 메신저 `ChannelNotifier.sendMedia`, 웹 진행 표시·결과 붙이기, CLI 기다리기. 13.33 진행 기록 |
 | v5.5 | 2026-10-24 | **M23 1단계 설치 도구**: 한 줄 설치 `install.sh`, 하드웨어 맞춤 모델(`HardwareProfile`·`vesta config init`·`vesta models pull`), 대화형 첫 설정 `vesta setup`, 점검 `vesta doctor`, README. 13.34 진행 기록 |
 | v5.6 | 2026-10-24 | **M23 2단계**: 옮기기(`vesta export`·`import`: 설정·DB 스냅숏·미디어·학습 모델, 키체인 제외), 업데이트·제거(`vesta update`·`uninstall`). 13.35 진행 기록 |
+| v5.7 | 2026-10-24 | **M26 지인 공개**: 터널 입구 포트(`publicAccess`, 127.0.0.1:8788)와 공개 관문(Access JWT 확인·Host·`/v1`·Bearer 거부·이메일 연결·바깥 관리 막기), `users.email`(schema v23), 하루 질문 한도(`users.dailyQuestions`)·사용자 수(`users.maxUsers`), `vesta public token·setup·invite·sync·status·off`·`vesta user email`, Access 앱·허용 목록 API, `scripts/cloudflare-tunnel.sh`·`dev.vesta.cloudflared`, doctor. 13.36 진행 기록 |
 | v4.6 | 2026-10-23 | **M22 4단계 스킬**: 스킬(K-01, SKILL.md 꼴: 작업 폴더 `.vesta/skills`·`~/.vesta/skills`·웹, schema v20 `skill`), `/이름 할 일`(K-02, `$ARGUMENTS`, 메신저 `!이름`), `/skills`·`/agents` 목록, 안전(K-06: 도구 ∩ 역할 도구, 작업 폴더 스킬은 VESTA.md와 함께 해시 승인, 숨은 문자 거부). M22 완료. 13.26 진행 기록 |
 | v4.5 | 2026-10-23 | **M22 3단계 A2A**: `a2a` 모듈(Agent Card·JSON-RPC, A2A 1.0과 0.3 둘 다, 스트리밍), A2A 에이전트 등록(A-15, schema v18 `a2a_agent`, Mac 주인만, 미리 보기 경고), `/agent 이름`·팀 멤버로 사용, 로컬 데이터를 읽은 흐름에서 보내면 승인. 공식 a2a-sdk 1.2.3 echo 에이전트로 확인. 13.25 진행 기록 |
 | v4.4 | 2026-10-23 | **M22 2단계 팀**: 팀(A-14, schema v17 `agent_team`: 리더 + 멤버 1~6, 모두 사용자 정의 에이전트), 리더의 `delegate` 도구(멤버는 할 일만 받아 따로 맥락에서 일하고 답을 돌려줌, 한 단계), 멤버 단계·승인은 리더 흐름으로, 타임라인 들여쓰기, `/team 이름 할 일`. 13.24 진행 기록 |
@@ -1000,7 +1001,7 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 ---
 
-### 7.20 지인 공개 (Invite-only Access) — 예정 (M26)
+### 7.20 지인 공개 (Invite-only Access) — 구현 (M26, P-05·P-07 남음)
 **목적**: 가족 밖의 지인도 주소 하나로 Vesta에 접속한다. **초대한 사람만**(누구나 가입하는 정식 서비스는 범위 밖). 모델은 그대로 집 Mac에서, 로컬·무료 원칙 유지.
 
 | ID | 기능 | 우선순위 | 설명 |
@@ -1390,7 +1391,7 @@ app-cli / app-server
 | **M23. 설치 도구** | 한 줄 설치, 하드웨어 맞춤 모델, 대화형 첫 설정, `vesta doctor`, export·import, update·uninstall (7.17) | 새 Apple Silicon Mac에서 명령 하나로 설치해 웹·메신저까지 동작 |
 | **M24. 영상 제작 (예정)** | VideoAgent, 구성형 영상(이미지·내레이션·자막·ffmpeg), 생성형 짧은 클립 평가·도입, 진행률·보관, 장면 고치기 (7.18) | 한국어 요청으로 30초 영상을 만들어 웹·메신저로 받는다 |
 | **M25. 학습 넓히기** | 메신저 피드백·말하지 않은 신호, 학습 재료 큐레이터(백그라운드)·검토, 결정 모델 판정 넓히기, 임베딩 미세조정, 메인 모델 QLoRA (7.19) | 피드백 없이도 재료가 쌓이고, 학습한 모델이 평가 게이트를 넘어야만 바뀐다 |
-| **M26. 지인 공개 (예정)** | Cloudflare Tunnel·Access, 지인 계정·사용 한도, (선택) Pages·Vercel 웹 UI, 공개 경계 (7.20) | 초대한 지인이 주소 하나로 접속해 손님 권한으로 쓰고, 주인 기능·도구는 막혀 있다 |
+| **M26. 지인 공개 (구현)** | Cloudflare Tunnel·Access, 지인 계정·사용 한도, (선택) Pages·Vercel 웹 UI, 공개 경계 (7.20) | 초대한 지인이 주소 하나로 접속해 손님 권한으로 쓰고, 주인 기능·도구는 막혀 있다 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -2651,3 +2652,55 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 #### 남은 일
 - 새 Mac에서 실제 `install.sh` → `import`까지 해 보지 않았다.
 - 묶음은 암호화하지 않는다(대화·문서가 들어 있어 본인만 읽게 만들고 안내만 한다).
+
+### 13.36 M26 지인 공개 진행 기록 (2026-10-24)
+
+#### 구조
+- 바깥 → Cloudflare(Access 로그인) → `cloudflared`(launchd `dev.vesta.cloudflared`, 나가는 연결만) → **터널 입구** `127.0.0.1:8788` → Vesta.
+- 같은 서버가 포트 둘을 연다. 이 Mac·Tailscale용 8787은 지금 그대로. 8788로 온 요청만 공개 관문(`PublicGate`)을 거친다. 포트로 가르므로 헤더를 꾸며 바깥 요청을 안쪽 요청처럼 보이게 할 수 없다.
+
+#### 완료
+- **P-01 터널** `scripts/cloudflare-tunnel.sh <주소>`:
+  1. `cloudflared`를 설치하고 `tunnel login`으로 계정을 연결한다.
+  2. 터널 `vesta`를 만들거나 다시 쓰고, DNS를 연결한다(`route dns --overwrite-dns`).
+  3. `~/.vesta/cloudflared/config.yml`(600)을 만든다. 들어오는 주소는 하나이고 나머지는 404.
+  4. launchd에 등록한다. 끄기는 `off`.
+- **P-02 Access**:
+  - `vesta public setup --hostname <주소> --email <주인 이메일>`이 API로 self-hosted Access 앱(세션 1주)을 만든다. 같은 주소의 앱이 이미 있으면 그것을 쓴다.
+  - 팀 도메인·AUD를 설정에 저장하고 서버를 다시 시작한다.
+  - API 토큰은 `vesta public token`으로 키체인 `dev.vesta.cloudflare`에 둔다. 토큰 없이 `--team`·`--aud`를 직접 줄 수도 있다.
+  - Vesta는 `Cf-Access-Jwt-Assertion`을 다시 확인한다: RS256 서명(JWKS, 모르는 kid면 1분에 한 번까지 다시 받음), `aud`, `iss`=`https://<팀>`, `exp`·`nbf`(60초 여유), `email`. Access 설정이 빠지거나 우회돼도 막힌다.
+- **P-03 지인 계정**:
+  - `vesta public invite <이름> <이메일> [--role guest|member]`는 계정(기본 GUEST)과 임시 비밀번호(헷갈리는 글자 뺀 `xxxx-xxxx-xxxx`)를 만들고, 바깥 접속 이메일을 연결하고, Access 허용 목록을 맞춘다. 보낼 안내문도 출력한다.
+  - 허용 목록의 원본은 Vesta 사용자 이메일이다. 정책 "Vesta 초대"를 그 목록으로 덮어쓴다. `user remove`·`user email` 뒤에도 맞추고, `vesta public sync`로 직접 맞출 수도 있다.
+  - `users.email`(schema v23)은 소문자로 저장하고, 한 이메일은 한 사용자만 쓴다.
+  - 사용자 수 한도는 설정 `users.maxUsers`(5)로 정한다.
+- **P-04 사용 한도** `users.dailyQuestions`(0이면 없음): Mac 주인이 아닌 사용자의 하루 질문 수(이 Mac 시간대 자정 기준).
+  - 넘으면 질문을 저장하지 않고 안내만 보낸다. 웹·CLI·메신저 모두 같다.
+  - 대기 순번은 기존 요청 큐(U-05)가 알려 준다.
+- **P-06 공개 경계** (터널 입구로 온 요청):
+  - Host는 공개 주소만 받는다.
+  - `/v1`은 404, `Authorization` 헤더(CLI 토큰)는 401로 거부한다.
+  - 로그인·`/me`·모든 인증 요청에서, 로그인한 계정의 이메일이 Access 이메일과 같아야 한다. 이메일이 없는 계정은 바깥에서 못 쓴다. 쿠키를 훔쳐도 다른 Access 로그인으로는 못 쓰고, 이메일을 지우면 바로 막힌다.
+  - 관리 기능(사용자·설정·학습·자가 개선·A2A 등록)은 `publicAccess.ownerAdmin`일 때만 쓸 수 있다. 셸·파일·Apple 앱은 지금처럼 역할(RolePolicy)로 막는다.
+  - 쿠키는 `Secure`.
+- **점검** `vesta public status`·`vesta doctor`:
+  - 터널 입구가 토큰 없는 요청을 403으로 막는지 본다.
+  - 터널 서비스가 있는지 본다.
+  - 바깥 주소가 Access 로그인 화면으로 넘기는지 본다. 200이면 ✗: 로그인 없이 닿는다는 뜻이다.
+  - Access 허용 목록이 사용자 이메일과 같은지 본다.
+
+#### 확인
+- 단위 테스트:
+  - 관문: 서명·aud·iss·만료·`alg:none`·다른 키·내용 바꿈·키 다시 받기 횟수.
+  - 바깥 로그인: 이메일 불일치는 비밀번호가 맞아도 거부, 훔친 쿠키 거부, 이메일을 지우면 즉시 차단, 주인 관리는 막힘, `ownerAdmin`이면 허용, 8787은 그대로.
+  - 한도, 설정 블록 바꾸기, Access API(만들기·덮어쓰기·지우기·오류).
+- 실제 cloudflared(임시 quick tunnel `*.trycloudflare.com` → 8788, 가짜 팀·AUD):
+  - 바깥 `/api/health`·`/`·`/api/sessions`는 403 "Cloudflare Access 로그인이 필요합니다".
+  - `/v1/models`는 404, 가짜 JWT는 403, Bearer는 401. 8787은 200.
+  - `vesta public status`는 입구 ✓, 바깥 403 ! (Access가 없으므로 맞는 판정). 시험 뒤 설정을 되돌리고 터널을 껐다.
+
+#### 남은 일
+- 실제 도메인·Zero Trust 팀·API 토큰으로 `setup` → 터널 → `invite` → 휴대폰 로그인까지 해 보지 않았다(Cloudflare API 호출 형식은 문서와 가짜 응답으로만 확인).
+- P-05(웹 UI를 Pages에 따로 올리기)와 P-07(멈췄을 때 상태 페이지)은 P2라 하지 않았다. 지금은 Vesta가 웹 UI를 직접 보여 주고, 집 서버가 멈추면 Cloudflare 오류 화면(502·530)이 보인다.
+- 웹 UI 사용자 화면에는 이메일을 아직 보여 주지 않는다(터미널 `vesta user list`).

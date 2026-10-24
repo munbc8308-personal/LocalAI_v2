@@ -66,6 +66,8 @@ channels:
 users:
   maxParallel: 2               # 동시에 생성하는 요청 수. 넘으면 사용자별로 돌아가며 기다린다
   memberRoot: ~/Vesta/users    # MEMBER 파일 도구 폴더: <memberRoot>/<이름>
+  maxUsers: 5                  # 사용자 수 한도 (Mac 주인 제외)
+  dailyQuestions: 0            # Mac 주인이 아닌 사용자의 하루 질문 수. 0이면 한도 없음 (지인 공개 때 50 정도)
   # paths:                     # 사용자별 추가 허용 폴더
   #   mina: [~/Shared/가족사진]
 
@@ -82,3 +84,9 @@ evolution:
   minImprovement: 0.03                    # 종합 점수가 이만큼 높아야 제안 (같은 모델도 1%p 안팎 흔들린다)
   maxSlowdown: 1.5                        # 답변 시작이 지금 모델의 이 배수보다 느리면 탈락
   retrainMinCorrections: 5                # 라우팅 정정이 이만큼 쌓이면 결정 모델 재학습
+
+# 지인 공개 (PROJECT.md 7.20, M26). Cloudflare Tunnel + Access. 직접 고치지 말고 vesta public setup 으로
+publicAccess:
+  enabled: false
+  port: 8788                   # cloudflared가 넘겨주는 곳 (127.0.0.1)
+  ownerAdmin: false            # 바깥에서도 주인 관리 기능(사용자·설정·학습)을 쓸지

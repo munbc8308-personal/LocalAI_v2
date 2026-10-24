@@ -227,6 +227,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val users = dev.vesta.identity.UserService(
         userRepository, webAuth,
         deleteMedia = { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
+        maxUsers = config.users.maxUsers,
     )
     private val memberTools = java.util.concurrent.ConcurrentHashMap<Long, ToolRegistry>()
     private val workspaceTools = java.util.concurrent.ConcurrentHashMap<String, ToolRegistry>()
@@ -309,6 +310,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         skillAgent = { user, skill -> skillAgent(skill) },
         directory = { user, kind, workspace -> directory(user, kind, workspace) },
         journal = journal,
+        quota = { user -> questionLimit(user) },
         agents = mapOf(
             AgentType.CHAT to ChatAgent(inference, modelManager),
             AgentType.DOCS to DocsAgent(inference, modelManager, knowledge, retriever, rewriter = rewriter, judge = judge),
@@ -368,6 +370,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 사용자 정의 에이전트 (A-11, M22): 작업 에이전트에 역할·지침을 얹고, 도구는 그 사용자가 쓸 수 있는 것 중 고른 것만.
      * 셸·쓰기 승인, MEMBER 셸의 주인 승인은 그대로
      */
+    /** 하루 질문 한도 (P-04, M26). Mac 주인은 세지 않는다. 공개 대화방 손님 계정은 여럿이 한 한도를 같이 쓴다. 넘었으면 안내 글 */
+    private suspend fun questionLimit(user: UserContext): String? {
+        val limit = config.users.dailyQuestions
+        if (limit <= 0 || user.role == UserRole.OWNER) return null
+        val used = users.usageToday()[user.userId]?.questions ?: 0
+        if (used < limit) return null
+        return "오늘 질문 한도(${limit}개)를 다 썼습니다. 내일 0시(이 Mac 시간)에 다시 쓸 수 있어요."
+    }
+
     private suspend fun customAgent(
         user: UserContext,
         name: String,

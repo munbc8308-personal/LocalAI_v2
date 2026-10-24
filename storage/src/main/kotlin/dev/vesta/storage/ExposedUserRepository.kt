@@ -52,6 +52,12 @@ class ExposedUserRepository(private val db: Database, private val clock: Clock =
         Users.update({ Users.id eq id.value }) { it[trainingConsent] = consent } > 0
     }
 
+    override suspend fun setEmail(id: UserId, email: String?): Boolean = io {
+        Users.update({ Users.id eq id.value }) { it[Users.email] = email?.lowercase() } > 0
+    }
+
+    override suspend fun findByEmail(email: String): User? = io { Users.selectAll().where { Users.email eq email.lowercase() }.firstOrNull()?.toUser() }
+
     override suspend fun delete(id: UserId): Boolean = io {
         if (Users.selectAll().where { Users.id eq id.value }.empty()) return@io false
         val sessionIds = Sessions.select(Sessions.id).where { Sessions.userId eq id.value }.map { it[Sessions.id] }
@@ -91,6 +97,7 @@ class ExposedUserRepository(private val db: Database, private val clock: Clock =
         hasPassword = this[Users.passwordHash] != null,
         trainingConsent = this[Users.trainingConsent],
         createdAt = this[Users.createdAt],
+        email = this[Users.email],
     )
 }
 
