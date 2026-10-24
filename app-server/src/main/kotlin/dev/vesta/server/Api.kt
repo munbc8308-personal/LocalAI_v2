@@ -770,8 +770,9 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@post
                     val (scheduler, _) = call.schedulesFor(user, deps) ?: return@post
                     val id = call.parameters["id"]?.toLongOrNull() ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
-                    if (scheduler.runNow(user, id)) call.respondJson(HttpStatusCode.Accepted, """{"started":true}""")
-                    else call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
+                    val problem = scheduler.runNow(user, id)
+                    if (problem == null) call.respondJson(HttpStatusCode.Accepted, """{"started":true}""")
+                    else call.respondJson(HttpStatusCode.Conflict, buildJsonObject { put("error", problem) }.toString())
                 }
                 delete("/{id}") {
                     val user = call.principal(deps) ?: return@delete

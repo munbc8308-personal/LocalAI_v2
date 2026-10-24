@@ -21,6 +21,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.cancel
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -178,6 +179,29 @@ class SchedulerTest : FunSpec({
         scheduler.command(owner, ChannelType.WEB, "/schedule run 1")!! shouldContain "답: 뉴스 요약"
         pair.first.inputs.single().third.text shouldBe "뉴스 요약"
         store.items.single().let { it.nextAt shouldBe at(8, 0, 26); it.lastAt shouldBe at(10, 20) }
+    }
+
+    test("지금 실행은 사용자당 하나, 같은 예약은 겹치지 않고, 예약 실행은 기다리지 않는다 (보안 검토)") {
+        val store = ScheduleStore()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val chat = FakeConversation { gate.await(); emit(AgentEvent.Token("답")) }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        val clock = TestClock(at(10, 20))
+        val scheduler = Scheduler(store, chat, SessionStore(), { UserRole.OWNER }, clock = clock, zone = zone, background = scope)
+        val a = scheduler.add(me, ChannelType.WEB, "매일 11시 a").getOrThrow()
+        val b = scheduler.add(me, ChannelType.WEB, "매일 12시 b").getOrThrow()
+        scheduler.runNow(owner, a.id) shouldBe null
+        scheduler.runNow(owner, a.id) shouldBe "이 예약은 이미 돌고 있습니다"
+        scheduler.runNow(owner, b.id) shouldBe "다른 예약을 지금 돌리는 중입니다. 끝난 뒤 다시 해 주세요"
+        scheduler.runNow(UserContext(UserId(9), UserRole.OWNER), a.id) shouldBe "없는 예약입니다"
+        // 도는 예약은 때가 와도 겹쳐 돌리지 않고, tick은 기다리지 않는다
+        clock.now = at(12, 0)
+        kotlinx.coroutines.withTimeout(2_000) { scheduler.tick() } shouldBe 1
+        store.items.first { it.id == b.id }.nextAt shouldBe at(12, 0, 26)
+        gate.complete(Unit)
+        kotlinx.coroutines.withTimeout(5_000) { while (store.items.any { it.lastAt == null }) kotlinx.coroutines.delay(20) }
+        scheduler.runNow(owner, b.id) shouldBe null
+        scope.cancel()
     }
 
     test("사용자당 개수 한도") {

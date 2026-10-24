@@ -58,7 +58,12 @@ class Scheduler(
     /** `/schedule run`을 기다리지 않고 돌릴 곳. 없으면 그 자리에서 돌고 결과를 답한다 */
     private val background: CoroutineScope? = null,
 ) {
-    private val lock = Mutex()
+    // 사용자마다 한 번에 하나씩 (다른 사용자 예약을 막지 않게). 모델 동시 사용은 FairScheduler가 나눈다
+    private val userLocks = java.util.concurrent.ConcurrentHashMap<UserId, Mutex>()
+    /** 기다리거나 도는 예약 (같은 예약을 겹쳐 돌리지 않는다) */
+    private val inFlight: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** 지금 돌리기를 기다리거나 도는 사용자 (사용자당 하나, 보안 검토: 쌓아 두고 다른 예약을 늦추지 못하게) */
+    private val manual: MutableSet<UserId> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     fun start(scope: CoroutineScope, every: Duration = Duration.ofSeconds(30)): Job = scope.launch {
         while (isActive) {
@@ -82,15 +87,20 @@ class Scheduler(
                 repo.advance(s.id, next, null, "놓침: ${local(planned)} 실행을 건너뜀 (서버가 꺼져 있었음)")
                 continue
             }
-            val outcome = run(s, role)
-            repo.advance(s.id, next, now, status(outcome))
+            if (!inFlight.add(s.id)) continue
+            // 먼저 다음 때로 옮겨 다시 고르지 않게 하고, 실행은 기다리지 않는다 (한 실행이 다른 사용자 예약을 늦추지 않게)
+            repo.advance(s.id, next, null, null)
+            val job = suspend {
+                try { repo.advance(s.id, repo.get(s.id)?.nextAt, now, status(run(s, role))) } finally { inFlight.remove(s.id) }
+            }
+            background?.launch { runCatching { job() }.onFailure { log.warn(it) { "예약 실행 실패: ${s.id}" } } } ?: job()
             ran++
         }
         return ran
     }
 
     /** 예약 하나를 지금 돈다 (때와 상관없이, `/schedule run`) */
-    suspend fun run(s: Schedule, role: UserRole): ScheduleOutcome = lock.withLock {
+    suspend fun run(s: Schedule, role: UserRole): ScheduleOutcome = userLocks.computeIfAbsent(s.user) { Mutex() }.withLock {
         val user = UserContext(s.user, role)
         val session = sessions.create(s.user, s.channel, "⏰ " + s.task.take(40))
         repo.addRun(s.id, session.id, clock.instant())
@@ -154,13 +164,30 @@ class Scheduler(
         return repo.setEnabled(user, id, true, next)
     }
 
-    /** 지금 돌리기 (웹·CLI): 기다리지 않는다. 다음 때는 그대로 */
-    suspend fun runNow(user: UserContext, id: Long): Boolean {
-        val s = repo.get(id)?.takeIf { it.user == user.userId } ?: return false
-        if (user.role == UserRole.GUEST) return false
-        val work = suspend { repo.advance(s.id, s.nextAt, clock.instant(), status(run(s, user.role))) }
-        background?.launch { runCatching { work() }.onFailure { log.warn(it) { "예약 지금 실행 실패: ${s.id}" } } } ?: work()
-        return true
+    /** 지금 돌리기 (웹·CLI): 기다리지 않는다. 다음 때는 그대로. 못 돌리면 그 이유 */
+    suspend fun runNow(user: UserContext, id: Long): String? {
+        val s = repo.get(id)?.takeIf { it.user == user.userId } ?: return "없는 예약입니다"
+        if (user.role == UserRole.GUEST) return "손님 계정은 예약을 쓸 수 없습니다"
+        return manualRun(user, s).exceptionOrNull()?.message
+    }
+
+    /**
+     * 사용자당 하나, 같은 예약은 겹치지 않게 (보안 검토). [background]가 있으면 기다리지 않고 null 결과, 없으면 그 자리에서 돌린 결과 글
+     */
+    private suspend fun manualRun(user: UserContext, s: Schedule): Result<String?> {
+        if (s.id in inFlight) return Result.failure(IllegalStateException("이 예약은 이미 돌고 있습니다"))
+        if (!manual.add(user.userId)) return Result.failure(IllegalStateException("다른 예약을 지금 돌리는 중입니다. 끝난 뒤 다시 해 주세요"))
+        if (!inFlight.add(s.id)) { manual.remove(user.userId); return Result.failure(IllegalStateException("이 예약은 이미 돌고 있습니다")) }
+        val job = suspend {
+            try {
+                val outcome = run(s, user.role)
+                repo.advance(s.id, repo.get(s.id)?.nextAt, clock.instant(), status(outcome))
+                outcome.text
+            } finally { inFlight.remove(s.id); manual.remove(user.userId) }
+        }
+        val scope = background ?: return Result.success(job())
+        scope.launch { runCatching { job() }.onFailure { log.warn(it) { "예약 지금 실행 실패: ${s.id}" } } }
+        return Result.success(null)
     }
 
     /** 사람이 읽는 언제 (웹 목록) */
@@ -176,16 +203,7 @@ class Scheduler(
                 val next = s.parsed?.next(now)?.toInstant() ?: return "${number}번 예약은 다시 돌 때가 없습니다 (지난 한 번 예약)."
                 repo.setEnabled(user.userId, s.id, true, next); "${number}번 예약을 다시 켰습니다. 다음: ${local(next)}"
             }
-            else -> { // run
-                suspend fun now(): String {
-                    val outcome = run(s, user.role)
-                    repo.advance(s.id, s.nextAt, clock.instant(), status(outcome))
-                    return outcome.text
-                }
-                val scope = background ?: return now()
-                scope.launch { runCatching { now() }.onFailure { log.warn(it) { "예약 지금 실행 실패: ${s.id}" } } }
-                "${number}번 예약을 지금 돌립니다. 결과는 새 대화(⏰)" + (if (s.channel == ChannelType.WEB || s.channel == ChannelType.CLI) "" else "와 이 대화방") + "으로 갑니다."
-            }
+            else -> manualRun(user, s).fold({ text -> text ?: "${number}번 예약을 지금 돌립니다. 결과는 새 대화(⏰)" + (if (s.channel == ChannelType.WEB || s.channel == ChannelType.CLI) "" else "와 이 대화방") + "으로 갑니다." }, { it.message.orEmpty() })
         }
     }
 
