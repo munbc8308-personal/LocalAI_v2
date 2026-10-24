@@ -950,7 +950,7 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 | ID | 기능 | 우선순위 | 설명 |
 |----|------|----------|------|
-| N-01 | 한 줄 설치 | P1 | `curl -fsSL …/install.sh \| sh`: 저장소 받기 → 필요한 것 확인·설치(Homebrew·JDK·Xcode 명령줄 도구·Ollama·Ollaya·ffmpeg·uv·opus·Colima·SearXNG) → 빌드 → launchd 등록. 여러 번 실행해도 안전. 지금의 `setup-macos.sh`·`install-vesta.sh`·`install-launchd.sh`를 묶는다 **완료**: `install.sh`(저장소 루트, `curl … | sh`) |
+| N-01 | 한 줄 설치 | P1 | `curl -fsSL …/install.sh \| sh`: 저장소 받기 → 필요한 것 확인·설치(Homebrew·JDK·Xcode 명령줄 도구·Ollama·Ollaya·ffmpeg·uv·opus·Colima·SearXNG) → 빌드 → launchd 등록. 여러 번 실행해도 안전. 지금의 `setup-macos.sh`·`install-vesta.sh`·`install-launchd.sh`를 묶는다 **완료**: `install.sh`(저장소 루트, `curl … \| sh`) |
 | N-02 | 하드웨어 맞춤 모델 | P1 | 메모리로 메인·결정·임베딩 모델을 고른다(예: 128GB gemma4 26B, 64GB·32GB는 더 작은 모델), 받기 전에 디스크 여유 확인, 모델 받기 진행률 **완료**: `HardwareProfile`, `vesta config init`, `vesta models pull` |
 | N-03 | 대화형 첫 설정 | P1 | 웹 비밀번호, 메신저 토큰(선택), Tailscale(선택), Orchard(선택, 유료)를 하나씩 묻는다. 건너뛴 것은 `vesta setup`으로 **완료**: `vesta setup` |
 | N-04 | 점검 | P1 | `vesta doctor`: 구성 요소마다 상태와 고치는 명령 (`vesta status`를 넓힌다) **완료**: `vesta doctor` |
