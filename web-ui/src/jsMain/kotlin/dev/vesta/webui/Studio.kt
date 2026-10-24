@@ -277,6 +277,7 @@ fun StudioView() {
                                 Button({
                                     classes("link", "small")
                                     onClick {
+                                        if (!window.confirm("/${k.name} 을 쓸까요? 아래 지침대로, 도구 ${k.tools.joinToString().ifEmpty { "없음" }}로 일합니다.")) return@onClick
                                         scope.launch {
                                             runCatching { Http.put("/api/skills/${k.name}", ApiJson.encodeToString(SkillDto.serializer(), k)) }
                                                 .onSuccess { error = null }.onFailure { error = it.message }

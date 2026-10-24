@@ -64,6 +64,8 @@ class SkillSmith(
     private val enabled: suspend (UserId) -> Boolean,
     /** 승인할 때의 검사 (웹 저장과 같음, K-11): 문제가 있으면 그 이유 */
     private val check: suspend (UserContext, Skill) -> String? = { _, _ -> null },
+    /** 초안에 넣어도 되는 도구 (읽기·네트워크만, K-13). 쓰기·셸 등은 사용자가 웹에서 직접 더한다 */
+    private val draftTools: suspend (UserId) -> Set<String> = { emptySet() },
     private val record: suspend (UserId, Skill) -> Unit = { _, _ -> },
     private val batch: Int = 100,
     private val maxDrafts: Int = 20,
@@ -130,14 +132,23 @@ class SkillSmith(
         val m = DRAFT_COMMAND.find(t) ?: return null
         val name = m.groupValues[2]
         val found = skills.drafts(user.userId).firstOrNull { it.name == name } ?: return "제안된 스킬 '$name'이 없습니다. `/skills`로 목록을 볼 수 있습니다."
-        return if (m.groupValues[1].lowercase() == "drop") {
+        if (m.groupValues[1].lowercase() == "drop") {
             skills.delete(user.userId, name)
-            "제안된 스킬 /$name 을 버렸습니다."
-        } else {
-            check(user, found)?.let { return "/$name 은 쓸 수 없습니다: $it. 웹 UI 에이전트 탭에서 고쳐 주세요." }
-            skills.save(user.userId, found.copy(draft = false))
-            "이제 `/$name 할 일`로 부를 수 있습니다."
+            return "제안된 스킬 /$name 을 버렸습니다."
         }
+        check(user, found)?.let { return "/$name 은 쓸 수 없습니다: $it. 웹 UI 에이전트 탭에서 고쳐 주세요." }
+        // 두 번에 나눠 승인한다: 먼저 지침·도구 전부를 보여 주고, `확인`을 붙여 다시 보내야 쓴다
+        if (m.groupValues[3].isEmpty()) return buildString {
+            appendLine("/$name 을 쓰기 전에 지침과 도구를 확인해 주세요.")
+            appendLine("설명: ${found.description}")
+            appendLine("도구: ${found.tools.joinToString().ifEmpty { "없음" }}")
+            appendLine("---")
+            appendLine(found.body)
+            appendLine("---")
+            append("이대로 쓰려면 `/skills approve $name 확인`")
+        }
+        skills.save(user.userId, found.copy(draft = false))
+        return "이제 `/$name 할 일`로 부를 수 있습니다."
     }
 
     /** 이 대화의 마지막 도구 실행으로 바로 초안을 만든다 (K-12). 도구 한 번이면 되고, 모델이 한 번뿐인 일이라 해도 만든다 */
@@ -178,7 +189,9 @@ class SkillSmith(
         val base = slug(name ?: reply.name)
         val unique = (listOf(base) + (2..99).map { "${base.take(29)}-$it" }).firstOrNull { it.lowercase() !in taken }
             ?: return Drafted.Skipped("쓸 이름이 없습니다")
-        val tools = material.steps.filter { it.ok && it.tool != DELEGATE }.map { it.tool }.distinct()
+        // 읽기·네트워크 도구만 넣는다 (K-13): 실행 결과에 섞인 지시문이 쓰기·셸 권한을 가진 스킬로 남지 않게
+        val safe = draftTools(user)
+        val tools = material.steps.filter { it.ok && it.tool != DELEGATE && it.tool in safe }.map { it.tool }.distinct()
         val saved = skills.saveDraft(user, Skill(unique, description, body, AgentType.TASK, tools, SkillSource.WEB, draft = true, auto = true, run = material.run.id))
         skills.drafts(user).drop(maxDrafts).forEach { skills.delete(user, it.name) }
         runCatching { record(user, saved) }
@@ -194,7 +207,7 @@ class SkillSmith(
         private val STARTED = Regex("^도구 (\\S+) 시작$")
         private val FINISHED = Regex("^도구 (\\S+) (끝|실패)$")
         private val SKILLIFY = Regex("^[/!]skillify(?:\\s+(\\S+))?\\s*$", RegexOption.IGNORE_CASE)
-        private val DRAFT_COMMAND = Regex("^[/!]skills\\s+(approve|drop)\\s+(\\S+)\\s*$", RegexOption.IGNORE_CASE)
+        private val DRAFT_COMMAND = Regex("^[/!]skills\\s+(approve|drop)\\s+(\\S+)(?:\\s+(확인|yes))?\\s*$", RegexOption.IGNORE_CASE)
 
         /** 자동 제안 후보 (K-08) */
         fun candidate(m: RunMaterial, minTools: Int): Boolean =
@@ -212,17 +225,18 @@ class SkillSmith(
             appendLine("---")
             appendLine(s.body)
             appendLine("---")
-            append("쓰려면 `/skills approve ${s.name}`, 버리려면 `/skills drop ${s.name}` (메신저는 `!`). 웹 UI 에이전트 탭에서 고칠 수도 있습니다.")
+            appendLine("쓰기·셸 도구는 초안에 넣지 않습니다. 필요하면 웹 UI 에이전트 탭에서 직접 더하세요.")
+            append("쓰려면 `/skills approve ${s.name} 확인`, 버리려면 `/skills drop ${s.name}` (메신저는 `!`). 웹 UI 에이전트 탭에서 고칠 수도 있습니다.")
         }
 
         /** 모델에 보낼 지시 (K-09) */
         fun prompt(m: RunMaterial): String = INSTRUCTIONS + "\n\n<실행>\n" +
             "요청: ${m.run.input.take(1_000).replace('\n', ' ')}\n" +
             "도구 순서:\n" + m.steps.take(30).mapIndexed { i, s ->
-                "${i + 1}. ${s.tool}" + (s.input?.let { " (${it.take(200).replace('\n', ' ')})" } ?: "") +
-                    if (s.ok) " → 끝: ${s.output.orEmpty().take(200).replace('\n', ' ')}" else " → 실패"
+                // 도구 결과(파일·웹 글)는 보내지 않는다: 남이 쓴 글의 지시문이 지침으로 옮겨 가지 않게
+                "${i + 1}. ${s.tool}" + (s.input?.let { " (${it.take(120).replace('\n', ' ')})" } ?: "") + if (s.ok) " → 끝" else " → 실패"
             }.joinToString("\n") + "\n" +
-            "답(앞부분): ${m.run.answer.orEmpty().take(600).replace('\n', ' ')}\n</실행>"
+            "답(앞부분, 데이터): ${m.run.answer.orEmpty().take(300).replace('\n', ' ')}\n</실행>"
 
         private val INSTRUCTIONS = """
             아래 <실행>은 사용자가 비서에게 맡겨 도구로 끝낸 일 하나다. 다음에 비슷한 일을 `/이름 할 일` 한 줄로 다시 시킬 수 있게 스킬(작업 지침)을 만들어라.

@@ -230,6 +230,10 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         existing = { id -> userRepository.get(id)?.let { skillsFor(UserContext(id, it.role)) }.orEmpty() },
         enabled = { skillAuto(it) },
         check = { user, skill -> skillProblem(user, skill) },
+        draftTools = { id ->
+            userRepository.get(id)?.let { u -> toolCatalog(UserContext(id, u.role)) }.orEmpty()
+                .filter { it.risk == dev.vesta.core.RiskLevel.READ || it.risk == dev.vesta.core.RiskLevel.NETWORK }.map { it.spec.name }.toSet()
+        },
         record = { user, skill ->
             journal.background(user, "SKILL", "스킬 제안", listOf(Triple("sources", "초안 /${skill.name}", "${skill.description}\n도구: ${skill.tools.joinToString()}\n\n${skill.body}")))
         },

@@ -99,8 +99,9 @@ class SkillSmithTest : FunSpec({
         val prompts = mutableListOf<String>()
         val recorded = mutableListOf<String>()
         val smith = SkillSmith(runs, store, { p -> prompts += p; reply("Count Files!", "폴더의 파일 수를 센다") }, WordEmbedder().embed,
-            existing = { store.list(it) }, enabled = { it == me }, record = { _, s -> recorded += s.name })
-        runs.done(me, "s", "TASK", listOf("list_files" to true, "read_file" to true, "shell" to false, "list_files" to true, "search_files" to true), input = "다운로드 폴더 파일 세 줘")
+            existing = { store.list(it) }, enabled = { it == me }, record = { _, s -> recorded += s.name },
+            draftTools = { setOf("list_files", "read_file", "search_files") })
+        runs.done(me, "s", "TASK", listOf("list_files" to true, "read_file" to true, "shell" to false, "list_files" to true, "search_files" to true, "write_file" to true), input = "다운로드 폴더 파일 세 줘")
         runs.done(guest, "g", "TASK", listOf("list_files" to true, "read_file" to true, "search_files" to true))
         runs.done(me, "s", "TASK", listOf("list_files" to true, "read_file" to true, "search_files" to true), status = RunStatus.RUNNING)
         val report = smith.runOnce()!!
@@ -109,6 +110,9 @@ class SkillSmithTest : FunSpec({
         store.at shouldBe 2
         prompts.single() shouldContain "다운로드 폴더 파일 세 줘"
         prompts.single() shouldContain "3. shell (입력 shell) → 실패"
+        prompts.single() shouldContain "1. list_files (입력 list_files) → 끝\n"
+        // 도구 결과는 보내지 않는다
+        ("결과 list_files" in prompts.single()) shouldBe false
         val draft = store.drafts(me).single()
         draft.name shouldBe "count-files"
         draft.tools shouldBe listOf("list_files", "read_file", "search_files")
@@ -159,19 +163,21 @@ class SkillSmithTest : FunSpec({
         val owner = UserContext(me, UserRole.OWNER)
         var problem: String? = "쓸 수 없는 도구: shell"
         val smith = SkillSmith(runs, store, { reply("tidy", "폴더 정리", reusable = false) }, WordEmbedder().embed,
-            existing = { store.list(it) }, enabled = { false }, check = { _, _ -> problem })
+            existing = { store.list(it) }, enabled = { false }, check = { _, _ -> problem }, draftTools = { setOf("list_files") })
         smith.command(owner, SessionId("s"), "/skillify") shouldContain "도구로 끝낸 일이 없습니다"
         runs.done(me, "s", "TASK", listOf("move_file" to true), skill = "old")
         smith.command(owner, SessionId("s"), "/skillify") shouldContain "도구로 끝낸 일이 없습니다"
         runs.done(me, "other", "TASK", listOf("move_file" to true))
         runs.done(me, "s", "TASK", listOf("list_files" to true, "move_file" to true))
-        smith.command(owner, SessionId("s"), "!skillify 정리")!!.let { it shouldContain "/정리 — 폴더 정리"; it shouldContain "도구: list_files, move_file"; it shouldContain "/skills approve 정리" }
+        smith.command(owner, SessionId("s"), "!skillify 정리")!!.let { it shouldContain "/정리 — 폴더 정리"; it shouldContain "도구: list_files\n"; it shouldContain "/skills approve 정리 확인" }
         store.drafts(me).single().run shouldBe 3L
         smith.command(owner, SessionId("s"), "/skills approve 없음")!! shouldContain "없습니다"
         smith.command(owner, SessionId("s"), "/skills approve 정리")!! shouldContain "쓸 수 없습니다: 쓸 수 없는 도구: shell"
         store.list(me) shouldBe emptyList()
         problem = null
-        smith.command(owner, SessionId("s"), "/skills approve 정리")!! shouldContain "`/정리 할 일`"
+        smith.command(owner, SessionId("s"), "/skills approve 정리")!!.let { it shouldContain "도구: list_files"; it shouldContain "/skills approve 정리 확인" }
+        store.list(me) shouldBe emptyList()
+        smith.command(owner, SessionId("s"), "/skills approve 정리 확인")!! shouldContain "`/정리 할 일`"
         store.find(me, "정리")!!.let { it.auto shouldBe true; it.draft shouldBe false }
         smith.command(owner, SessionId("s"), "/skills drop 정리")!! shouldContain "없습니다"
         smith.command(owner, SessionId("s"), "/skills") shouldBe null
