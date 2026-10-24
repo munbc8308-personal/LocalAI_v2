@@ -30,6 +30,9 @@ vesta -p "질문"      # 한 번만
 vesta setup          # 웹 비밀번호·메신저·Tailscale·Orchard 설정
 vesta doctor         # 점검 (고치는 명령을 알려 준다)
 vesta models pull    # 설정의 모델 받기
+vesta update         # 새 버전으로 (설정·데이터 그대로)
+vesta export         # 다른 Mac으로 옮길 파일 (새 Mac에서 vesta import 파일)
+vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 ```
 
 웹 UI: http://127.0.0.1:8787 (휴대폰은 Tailscale, `vesta setup`).

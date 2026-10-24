@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 1단계 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.5, 2026-10-24)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.6, 2026-10-24)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -56,6 +56,7 @@
 | v5.3 | 2026-10-24 | **M24 2단계**: 장면 단위 고치기(G-05: `video_project` schema v22, `MediaKind.SCENE`, 바뀐 장면만 다시, 내레이션 빠르기), 생성형 짧은 클립(G-03: mlx-video 고정 커밋 + Wan2.2 TI2V-5B, `video/`·`vesta_clip.py` 캐시 한도, `media.clips`), 영상 고치기 라우팅. 13.32 진행 기록 |
 | v5.4 | 2026-10-24 | **영상 백그라운드 만들기 (G-04)**: `BackgroundJobs`·`JobDesk`(한 번에 하나씩, 진행 상태, 결과를 같은 대화에 답 메시지로), `AgentEvent.JobStarted`·`EventDto.Job`·`/api/jobs/{id}`, 메신저 `ChannelNotifier.sendMedia`, 웹 진행 표시·결과 붙이기, CLI 기다리기. 13.33 진행 기록 |
 | v5.5 | 2026-10-24 | **M23 1단계 설치 도구**: 한 줄 설치 `install.sh`, 하드웨어 맞춤 모델(`HardwareProfile`·`vesta config init`·`vesta models pull`), 대화형 첫 설정 `vesta setup`, 점검 `vesta doctor`, README. 13.34 진행 기록 |
+| v5.6 | 2026-10-24 | **M23 2단계**: 옮기기(`vesta export`·`import`: 설정·DB 스냅숏·미디어·학습 모델, 키체인 제외), 업데이트·제거(`vesta update`·`uninstall`). 13.35 진행 기록 |
 | v4.6 | 2026-10-23 | **M22 4단계 스킬**: 스킬(K-01, SKILL.md 꼴: 작업 폴더 `.vesta/skills`·`~/.vesta/skills`·웹, schema v20 `skill`), `/이름 할 일`(K-02, `$ARGUMENTS`, 메신저 `!이름`), `/skills`·`/agents` 목록, 안전(K-06: 도구 ∩ 역할 도구, 작업 폴더 스킬은 VESTA.md와 함께 해시 승인, 숨은 문자 거부). M22 완료. 13.26 진행 기록 |
 | v4.5 | 2026-10-23 | **M22 3단계 A2A**: `a2a` 모듈(Agent Card·JSON-RPC, A2A 1.0과 0.3 둘 다, 스트리밍), A2A 에이전트 등록(A-15, schema v18 `a2a_agent`, Mac 주인만, 미리 보기 경고), `/agent 이름`·팀 멤버로 사용, 로컬 데이터를 읽은 흐름에서 보내면 승인. 공식 a2a-sdk 1.2.3 echo 에이전트로 확인. 13.25 진행 기록 |
 | v4.4 | 2026-10-23 | **M22 2단계 팀**: 팀(A-14, schema v17 `agent_team`: 리더 + 멤버 1~6, 모두 사용자 정의 에이전트), 리더의 `delegate` 도구(멤버는 할 일만 받아 따로 맥락에서 일하고 답을 돌려줌, 한 단계), 멤버 단계·승인은 리더 흐름으로, 타임라인 들여쓰기, `/team 이름 할 일`. 13.24 진행 기록 |
@@ -945,7 +946,7 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 ---
 
-### 7.17 설치 도구 (Installer) — 진행 중 (M23, 1단계 완료: N-01~N-04)
+### 7.17 설치 도구 (Installer) — 완료 (M23)
 **목적**: 다른 Mac에서도 Vesta를 쉽게 설치·점검·옮기기·업데이트한다. **Apple Silicon Mac만** (MLX·macOS 음성·launchd·Orchard에 기대므로 Windows·Linux는 범위 밖).
 
 | ID | 기능 | 우선순위 | 설명 |
@@ -954,8 +955,8 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 | N-02 | 하드웨어 맞춤 모델 | P1 | 메모리로 메인·결정·임베딩 모델을 고른다(예: 128GB gemma4 26B, 64GB·32GB는 더 작은 모델), 받기 전에 디스크 여유 확인, 모델 받기 진행률 **완료**: `HardwareProfile`, `vesta config init`, `vesta models pull` |
 | N-03 | 대화형 첫 설정 | P1 | 웹 비밀번호, 메신저 토큰(선택), Tailscale(선택), Orchard(선택, 유료)를 하나씩 묻는다. 건너뛴 것은 `vesta setup`으로 **완료**: `vesta setup` |
 | N-04 | 점검 | P1 | `vesta doctor`: 구성 요소마다 상태와 고치는 명령 (`vesta status`를 넓힌다) **완료**: `vesta doctor` |
-| N-05 | 옮기기 | P2 | `vesta export`: 설정·tuned·DB(대화·컬렉션·사용자·설정)·학습한 결정 모델을 파일 하나로, `vesta import`로 새 Mac에 푼다. 키체인의 토큰·비밀번호는 옮기지 않고 다시 넣는다 |
-| N-06 | 업데이트·제거 | P2 | `vesta update`(새 버전 받기 → 다시 설치 → 서버 다시 시작), `vesta uninstall`(서비스·앱 제거, 데이터는 남길지 묻는다) |
+| N-05 | 옮기기 | P2 | `vesta export`: 설정·tuned·DB(대화·컬렉션·사용자·설정)·학습한 결정 모델을 파일 하나로, `vesta import`로 새 Mac에 푼다. 키체인의 토큰·비밀번호는 옮기지 않고 다시 넣는다 **완료**: `vesta export`·`vesta import` |
+| N-06 | 업데이트·제거 | P2 | `vesta update`(새 버전 받기 → 다시 설치 → 서버 다시 시작), `vesta uninstall`(서비스·앱 제거, 데이터는 남길지 묻는다) **완료**: `vesta update`·`vesta uninstall` |
 
 ---
 
@@ -2618,3 +2619,35 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 #### 남은 일
 - 새 Mac(빈 계정)에서 실제 설치는 해 보지 않았다(Homebrew·Xcode 도구 설치 경로, 32GB 이하 모델 품질).
 - N-05 옮기기(`vesta export/import`), N-06 업데이트·제거(`vesta update/uninstall`).
+
+### 13.35 M23 2단계 진행 기록 (2026-10-24)
+
+#### 완료 (N-05·N-06)
+- **옮기기** `vesta export [-o 파일] [--no-media] [--no-models]` → `.tar.gz` 하나 (본인만 읽기, 600).
+  - 넣는 것: `config.yaml`·`tuned.properties`, DB 스냅숏(`VACUUM INTO`: 서버가 돌아도 한 시점의 일관된 사본), 미디어, 지금 켜진 학습 모델(결정 모델·임베딩), 안내서 `manifest.json`(형식, 만든 Mac 홈, schema, 넣은 모델).
+  - 학습 모델은 매니페스트와 기본 모델에 없는 blob만 넣는다(결정 모델 7.5GB + 임베딩 1.1GB). 기본 모델은 새 Mac에서 `vesta models pull`.
+  - Ollama는 받은 모델을 `manifests/registry.ollama.ai/library`, API로 만든 모델(학습한 임베딩)을 `manifests-v2/ollama.com/library`에 둔다 → 두 곳을 모두 찾는다(처음엔 임베딩을 못 찾아 뺐다).
+  - 넣지 않는 것: 키체인(API·메신저·A2A 토큰), 학습 작업 폴더, 영상 클립 모델, 로그.
+- **가져오기** `vesta import 파일 [--yes]`:
+  1. 형식을 확인하고 묻는다.
+  2. 서비스(server·media·evolve)를 멈추고, 지금 설정·DB·미디어를 `~/.vesta/backup-날짜/`로 옮긴 뒤 바꾼다.
+  3. 미디어 경로를 만든 Mac 홈에서 이 Mac 홈으로 바꾸고, 학습 모델을 Ollaya·Ollama 저장소에 넣은 뒤 서비스를 다시 켠다.
+  - 컬렉션의 원본 파일 경로는 그대로라, 다시 색인할 때는 이 Mac 경로로 추가하라고 안내한다.
+  - `VESTA_HOME`으로 따로 둔 환경에서는 이 Mac의 서비스를 건드리지 않는다(시험용).
+- **업데이트** `vesta update`: 받아 둔 저장소(`~/.vesta/src`, `VESTA_SRC`)의 `install.sh`를 다시 돌린다(갱신 → 빌드 → 서비스 재시작, 설정·데이터 그대로). 저장소가 없으면 한 줄 설치를 안내한다.
+- **제거** `vesta uninstall [--dry-run]`:
+  - 서비스·프로그램(`~/.vesta/app`·워커·학습기·영상 환경·`~/.local/bin/vesta`)은 지운다.
+  - 데이터(`~/.vesta`), 키체인 토큰, SearXNG 컨테이너, 받은 모델은 하나씩 묻고 기본은 남긴다.
+  - 먼저 지울 것을 모두 보여 주고 "삭제"(또는 delete)를 입력해야 진행한다. Homebrew 패키지는 남긴다.
+
+#### 확인
+- `export --no-models`: 1.9초, 95MB → 따로 둔 홈에 `import`. 대화 443개 같음, 미디어 경로가 새 홈으로 바뀌고 파일이 열림, 실제 서버는 그대로.
+- 전체 `export`: 2분, 7.2GB(결정 모델 + 임베딩) → `import`하면 Ollaya·Ollama(`manifests-v2`) 저장소의 제자리에 풀린다.
+- `uninstall`(가짜 홈, `expect`로 "삭제" → 모두 아니오): 프로그램만 지우고 데이터를 남김. 실제 키체인·서버는 그대로.
+- `setup`(새 홈, `expect`): 웹 비밀번호를 숨겨서 받아 저장. 처음 시험에서 비밀번호가 보였던 것은 `expect`가 입력 숨김이 켜지기 전에 보낸 탓이었다(0.5초 뒤 보내면 숨겨짐).
+- 시험 방법: `script`에 파이프로 넣은 입력은 프로그램에 닿지 않았다(앞의 `setup` 시험은 질문이 없어 드러나지 않았다) → `expect`로 바꿨다.
+- `vesta update`(`VESTA_SRC`=저장소): 끝까지 돌고 "문제 없음".
+
+#### 남은 일
+- 새 Mac에서 실제 `install.sh` → `import`까지 해 보지 않았다.
+- 묶음은 암호화하지 않는다(대화·문서가 들어 있어 본인만 읽게 만들고 안내만 한다).
