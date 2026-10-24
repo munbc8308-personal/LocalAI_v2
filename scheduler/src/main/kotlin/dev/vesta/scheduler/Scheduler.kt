@@ -91,7 +91,7 @@ class Scheduler(
             // 먼저 다음 때로 옮겨 다시 고르지 않게 하고, 실행은 기다리지 않는다 (한 실행이 다른 사용자 예약을 늦추지 않게)
             repo.advance(s.id, next, null, null)
             val job = suspend {
-                try { repo.advance(s.id, repo.get(s.id)?.nextAt, now, status(run(s, role))) } finally { inFlight.remove(s.id) }
+                try { run(s, manual = false)?.let { repo.advance(s.id, repo.get(s.id)?.nextAt, now, status(it)) } } finally { inFlight.remove(s.id) }
             }
             background?.launch { runCatching { job() }.onFailure { log.warn(it) { "예약 실행 실패: ${s.id}" } } } ?: job()
             ran++
@@ -100,7 +100,15 @@ class Scheduler(
     }
 
     /** 예약 하나를 지금 돈다 (때와 상관없이, `/schedule run`) */
-    suspend fun run(s: Schedule, role: UserRole): ScheduleOutcome = userLocks.computeIfAbsent(s.user) { Mutex() }.withLock {
+    /**
+     * 예약 하나를 돈다. 사용자 잠금을 잡은 **뒤에** 예약·역할을 다시 읽는다 (보안 검토: 기다리는 사이 지워졌거나, 멈췄거나, 역할이 바뀌었을 수 있다).
+     * 돌지 않았으면 null
+     */
+    suspend fun run(queued: Schedule, manual: Boolean): ScheduleOutcome? = userLocks.computeIfAbsent(queued.user) { Mutex() }.withLock {
+        val s = repo.get(queued.id)?.takeIf { it.user == queued.user } ?: return@withLock null
+        // 예약 실행은 고를 때 다음 때로 옮기며 한 번 예약을 이미 껐다. 그 밖에 꺼져 있으면 사용자가 멈춘 것
+        if (!manual && !s.enabled && s.parsed !is When.Once) return@withLock null
+        val role = roleOf(s.user)?.takeIf { it != UserRole.GUEST } ?: return@withLock null
         val user = UserContext(s.user, role)
         val session = sessions.create(s.user, s.channel, "⏰ " + s.task.take(40))
         repo.addRun(s.id, session.id, clock.instant())
@@ -180,9 +188,9 @@ class Scheduler(
         if (!inFlight.add(s.id)) { manual.remove(user.userId); return Result.failure(IllegalStateException("이 예약은 이미 돌고 있습니다")) }
         val job = suspend {
             try {
-                val outcome = run(s, user.role)
-                repo.advance(s.id, repo.get(s.id)?.nextAt, clock.instant(), status(outcome))
-                outcome.text
+                val outcome = run(s, manual = true)
+                if (outcome == null) "${s.task}: 돌지 않았습니다 (지워졌거나 이 계정이 예약을 쓸 수 없습니다)"
+                else { repo.advance(s.id, repo.get(s.id)?.nextAt, clock.instant(), status(outcome)); outcome.text }
             } finally { inFlight.remove(s.id); manual.remove(user.userId) }
         }
         val scope = background ?: return Result.success(job())

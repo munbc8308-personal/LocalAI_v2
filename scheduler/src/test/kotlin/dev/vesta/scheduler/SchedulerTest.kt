@@ -204,6 +204,26 @@ class SchedulerTest : FunSpec({
         scope.cancel()
     }
 
+    test("기다리는 사이 바뀐 것은 잠금 뒤에 다시 본다: 지움·멈춤·손님으로 바뀜이면 돌지 않는다 (보안 검토)") {
+        val store = ScheduleStore()
+        var role: UserRole? = UserRole.OWNER
+        val chat = FakeConversation()
+        val scheduler = Scheduler(store, chat, SessionStore(), { role }, clock = TestClock(at(10, 20)), zone = zone)
+        val daily = scheduler.add(me, ChannelType.WEB, "매일 11시 a").getOrThrow()
+        val once = scheduler.add(me, ChannelType.WEB, "오늘 11시 b").getOrThrow()
+        store.setEnabled(me, daily.id, false, null)
+        scheduler.run(daily, manual = false) shouldBe null
+        (scheduler.run(daily, manual = true) != null) shouldBe true
+        store.advance(once.id, null, null, null)
+        (scheduler.run(once, manual = false) != null) shouldBe true
+        role = UserRole.GUEST
+        scheduler.run(once, manual = true) shouldBe null
+        role = UserRole.OWNER
+        store.delete(me, once.id)
+        scheduler.run(once, manual = true) shouldBe null
+        chat.inputs.size shouldBe 2
+    }
+
     test("사용자당 개수 한도") {
         val store = ScheduleStore()
         val scheduler = Scheduler(store, FakeConversation(), SessionStore(), { UserRole.OWNER }, clock = TestClock(at(10, 20)), zone = zone, maxPerUser = 2)
