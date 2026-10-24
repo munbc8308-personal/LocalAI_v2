@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.4, 2026-10-24)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 1단계 완료, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v5.5, 2026-10-24)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -55,6 +55,7 @@
 | v5.2 | 2026-10-23 | **M24 1단계 구성형 영상**: `VideoAgent`(대본·장면 계획, 실제 인물 흉내 거절), `FfmpegVideoComposer`(확대·이동·페이드·끝 화면·배경 음악·"AI 생성" 메타데이터), `SubtitleRenderer`(Java2D 한글 자막), `AgentType.VIDEO`·`MediaKind.VIDEO`, `/video`·규칙 라우팅, 웹 채팅·갤러리 재생(Range), 메신저 `sendVideo`, CLI 저장. 13.31 진행 기록 |
 | v5.3 | 2026-10-24 | **M24 2단계**: 장면 단위 고치기(G-05: `video_project` schema v22, `MediaKind.SCENE`, 바뀐 장면만 다시, 내레이션 빠르기), 생성형 짧은 클립(G-03: mlx-video 고정 커밋 + Wan2.2 TI2V-5B, `video/`·`vesta_clip.py` 캐시 한도, `media.clips`), 영상 고치기 라우팅. 13.32 진행 기록 |
 | v5.4 | 2026-10-24 | **영상 백그라운드 만들기 (G-04)**: `BackgroundJobs`·`JobDesk`(한 번에 하나씩, 진행 상태, 결과를 같은 대화에 답 메시지로), `AgentEvent.JobStarted`·`EventDto.Job`·`/api/jobs/{id}`, 메신저 `ChannelNotifier.sendMedia`, 웹 진행 표시·결과 붙이기, CLI 기다리기. 13.33 진행 기록 |
+| v5.5 | 2026-10-24 | **M23 1단계 설치 도구**: 한 줄 설치 `install.sh`, 하드웨어 맞춤 모델(`HardwareProfile`·`vesta config init`·`vesta models pull`), 대화형 첫 설정 `vesta setup`, 점검 `vesta doctor`, README. 13.34 진행 기록 |
 | v4.6 | 2026-10-23 | **M22 4단계 스킬**: 스킬(K-01, SKILL.md 꼴: 작업 폴더 `.vesta/skills`·`~/.vesta/skills`·웹, schema v20 `skill`), `/이름 할 일`(K-02, `$ARGUMENTS`, 메신저 `!이름`), `/skills`·`/agents` 목록, 안전(K-06: 도구 ∩ 역할 도구, 작업 폴더 스킬은 VESTA.md와 함께 해시 승인, 숨은 문자 거부). M22 완료. 13.26 진행 기록 |
 | v4.5 | 2026-10-23 | **M22 3단계 A2A**: `a2a` 모듈(Agent Card·JSON-RPC, A2A 1.0과 0.3 둘 다, 스트리밍), A2A 에이전트 등록(A-15, schema v18 `a2a_agent`, Mac 주인만, 미리 보기 경고), `/agent 이름`·팀 멤버로 사용, 로컬 데이터를 읽은 흐름에서 보내면 승인. 공식 a2a-sdk 1.2.3 echo 에이전트로 확인. 13.25 진행 기록 |
 | v4.4 | 2026-10-23 | **M22 2단계 팀**: 팀(A-14, schema v17 `agent_team`: 리더 + 멤버 1~6, 모두 사용자 정의 에이전트), 리더의 `delegate` 도구(멤버는 할 일만 받아 따로 맥락에서 일하고 답을 돌려줌, 한 단계), 멤버 단계·승인은 리더 흐름으로, 타임라인 들여쓰기, `/team 이름 할 일`. 13.24 진행 기록 |
@@ -944,15 +945,15 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 ---
 
-### 7.17 설치 도구 (Installer) — 예정 (M23)
+### 7.17 설치 도구 (Installer) — 진행 중 (M23, 1단계 완료: N-01~N-04)
 **목적**: 다른 Mac에서도 Vesta를 쉽게 설치·점검·옮기기·업데이트한다. **Apple Silicon Mac만** (MLX·macOS 음성·launchd·Orchard에 기대므로 Windows·Linux는 범위 밖).
 
 | ID | 기능 | 우선순위 | 설명 |
 |----|------|----------|------|
-| N-01 | 한 줄 설치 | P1 | `curl -fsSL …/install.sh \| sh`: 저장소 받기 → 필요한 것 확인·설치(Homebrew·JDK·Xcode 명령줄 도구·Ollama·Ollaya·ffmpeg·uv·opus·Colima·SearXNG) → 빌드 → launchd 등록. 여러 번 실행해도 안전. 지금의 `setup-macos.sh`·`install-vesta.sh`·`install-launchd.sh`를 묶는다 |
-| N-02 | 하드웨어 맞춤 모델 | P1 | 메모리로 메인·결정·임베딩 모델을 고른다(예: 128GB gemma4 26B, 64GB·32GB는 더 작은 모델), 받기 전에 디스크 여유 확인, 모델 받기 진행률 |
-| N-03 | 대화형 첫 설정 | P1 | 웹 비밀번호, 메신저 토큰(선택), Tailscale(선택), Orchard(선택, 유료)를 하나씩 묻는다. 건너뛴 것은 `vesta setup`으로 |
-| N-04 | 점검 | P1 | `vesta doctor`: 구성 요소마다 상태와 고치는 명령 (`vesta status`를 넓힌다) |
+| N-01 | 한 줄 설치 | P1 | `curl -fsSL …/install.sh \| sh`: 저장소 받기 → 필요한 것 확인·설치(Homebrew·JDK·Xcode 명령줄 도구·Ollama·Ollaya·ffmpeg·uv·opus·Colima·SearXNG) → 빌드 → launchd 등록. 여러 번 실행해도 안전. 지금의 `setup-macos.sh`·`install-vesta.sh`·`install-launchd.sh`를 묶는다 **완료**: `install.sh`(저장소 루트, `curl … | sh`) |
+| N-02 | 하드웨어 맞춤 모델 | P1 | 메모리로 메인·결정·임베딩 모델을 고른다(예: 128GB gemma4 26B, 64GB·32GB는 더 작은 모델), 받기 전에 디스크 여유 확인, 모델 받기 진행률 **완료**: `HardwareProfile`, `vesta config init`, `vesta models pull` |
+| N-03 | 대화형 첫 설정 | P1 | 웹 비밀번호, 메신저 토큰(선택), Tailscale(선택), Orchard(선택, 유료)를 하나씩 묻는다. 건너뛴 것은 `vesta setup`으로 **완료**: `vesta setup` |
+| N-04 | 점검 | P1 | `vesta doctor`: 구성 요소마다 상태와 고치는 명령 (`vesta status`를 넓힌다) **완료**: `vesta doctor` |
 | N-05 | 옮기기 | P2 | `vesta export`: 설정·tuned·DB(대화·컬렉션·사용자·설정)·학습한 결정 모델을 파일 하나로, `vesta import`로 새 Mac에 푼다. 키체인의 토큰·비밀번호는 옮기지 않고 다시 넣는다 |
 | N-06 | 업데이트·제거 | P2 | `vesta update`(새 버전 받기 → 다시 설치 → 서버 다시 시작), `vesta uninstall`(서비스·앱 제거, 데이터는 남길지 묻는다) |
 
@@ -1385,7 +1386,7 @@ app-cli / app-server
 | **M20. 가족이 혼자 쓰기** | 웹 메신저 연결·초대 안내, 사용자별 설정, MEMBER 셸 주인 승인 | 가족이 터미널 없이 연결하고, 셸은 주인 승인 후에만 |
 | **M21. 스킬·에이전트 (예정)** | 스킬 파일·부르기·자동 선택, 사용자 정의 에이전트·나눠 맡기기, 권한을 넓히지 않는 안전 규칙 (7.15) | `/이름`·`/agent`로 부르고, 프로젝트 스킬은 승인 후에만 |
 | **M22. 에이전트 스튜디오 (완료)** | 사용자 정의 에이전트, 실행 기록·실시간 보기, 팀·나눠 맡기기, A2A 에이전트 (7.16, M21 포함) | 웹에서 에이전트를 만들고 팀으로 일을 맡겨, 단계를 실시간으로 본다 |
-| **M23. 설치 도구 (예정)** | 한 줄 설치, 하드웨어 맞춤 모델, 대화형 첫 설정, `vesta doctor`, export·import, update·uninstall (7.17) | 새 Apple Silicon Mac에서 명령 하나로 설치해 웹·메신저까지 동작 |
+| **M23. 설치 도구** | 한 줄 설치, 하드웨어 맞춤 모델, 대화형 첫 설정, `vesta doctor`, export·import, update·uninstall (7.17) | 새 Apple Silicon Mac에서 명령 하나로 설치해 웹·메신저까지 동작 |
 | **M24. 영상 제작 (예정)** | VideoAgent, 구성형 영상(이미지·내레이션·자막·ffmpeg), 생성형 짧은 클립 평가·도입, 진행률·보관, 장면 고치기 (7.18) | 한국어 요청으로 30초 영상을 만들어 웹·메신저로 받는다 |
 | **M25. 학습 넓히기** | 메신저 피드백·말하지 않은 신호, 학습 재료 큐레이터(백그라운드)·검토, 결정 모델 판정 넓히기, 임베딩 미세조정, 메인 모델 QLoRA (7.19) | 피드백 없이도 재료가 쌓이고, 학습한 모델이 평가 게이트를 넘어야만 바뀐다 |
 | **M26. 지인 공개 (예정)** | Cloudflare Tunnel·Access, 지인 계정·사용 한도, (선택) Pages·Vercel 웹 UI, 공개 경계 (7.20) | 초대한 지인이 주소 하나로 접속해 손님 권한으로 쓰고, 주인 기능·도구는 막혀 있다 |
@@ -2585,3 +2586,35 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 
 #### 남은 일
 - 서버를 다시 켜면 진행 중이던 작업은 사라진다(작업 중에는 설정 반영 재시작을 미룬다). 메신저로 실제 영상이 오는 것은 테스트로만 확인했다.
+
+### 13.34 M23 1단계 진행 기록 (2026-10-24)
+
+#### 완료 (N-01~N-04)
+- **한 줄 설치** `install.sh` (저장소 루트, `curl -fsSL …/install.sh | sh`). 여러 번 실행해도 안전하고 업데이트도 같은 명령.
+  - 확인: macOS·arm64(아니면 멈춤), 메모리(16GB 미만 주의), 디스크 60GB.
+  - Xcode 명령줄 도구(없으면 설치 창, 끝날 때까지 기다림), Homebrew(없으면 공식 설치, 비밀번호는 /dev/tty), JDK 21(없으면 `brew install openjdk@21`, 시스템 링크(sudo) 대신 `JAVA_HOME`).
+  - 저장소: `~/.vesta/src`(`VESTA_SRC`). 고친 파일이 있으면 갱신하지 않고 그대로 쓴다.
+  - 인프라 `scripts/setup-macos.sh` → 설정 `vesta config init --keep` → 모델 `vesta models pull` → 빌드·서비스 `scripts/install-vesta.sh` → 터미널이 있으면 `vesta setup < /dev/tty` → `vesta doctor`.
+  - `setup-macos.sh`는 이제 Ollaya 서비스만 먼저 등록한다. 새 Mac에서는 서버 실행 파일이 없어 등록이 계속 실패했다. `install-launchd.sh 이름`은 기본 묶음의 서비스도 고를 수 있다.
+- **하드웨어 맞춤 모델** (`HardwareProfile`):
+  - 메모리 단계별 메인 모델(MLX 태그): 96GB 이상 `26b-mxfp8`(영상 클립 가능), 64GB `26b-nvfp4`, 48GB `12b-mxfp8`, 32GB `12b-nvfp4`, 16~24GB `e4b-mxfp8`.
+  - 결정 모델·임베딩·그림·음성 인식은 같다. 받을 크기도 대략 계산한다.
+  - `vesta config init`이 기본 설정 틀의 메인·코드·비전 모델을 바꿔 쓴다(`--keep`: 있으면 그대로).
+  - `vesta models pull`: 설정의 Ollama 모델·Ollaya 결정 모델 중 없는 것만 받는다. 디스크 여유를 먼저 확인하고(대략 크기 + 10GB) 5% 단위로 진행률을 보인다. `vesta models list`.
+- **대화형 첫 설정** `vesta setup`:
+  - 웹 비밀번호 → Telegram·Discord·Slack(토큰 → 계정 연결 코드) → Tailscale(serve 켜기) → Orchard(설치·실행 상태 안내).
+  - 이미 된 것은 건너뛴다. 기존 `passwd`·`<메신저> token/pair` 명령을 그대로 부른다.
+  - 비밀번호·토큰은 콘솔에서 보이지 않게 받는다. 터미널이 아니면 실행하지 않는다.
+- **점검** `vesta doctor`: 시스템·도구·설정·서비스(launchd)·엔진·모델·Vesta(서버·토큰·웹 비밀번호·워커·클립 모델)·메신저·선택 기능을 본다.
+  - 표시: ✓ 정상, ! 손볼 것, · 꺼짐(선택), ✗ 고칠 것(끝 코드 1). 문제마다 고치는 명령을 붙인다.
+  - 한글은 터미널에서 두 칸이라 폭을 맞춘다. Orchard 앱이 없으면 경고가 아니라 "설치 안 됨(선택)".
+- **README.md**: 설치 한 줄, 메모리별 모델, 기본 명령.
+
+#### 확인
+- 이 Mac에서 `VESTA_SRC=저장소 sh install.sh`를 두 번 실행: 47초, 모든 단계를 건너뛰거나 다시 등록하고 `vesta doctor` "문제 없음".
+- `vesta setup`(가짜 터미널): 이미 된 단계를 모두 건너뜀.
+- 단위 테스트: 메모리 단계(GiB)별 모델, 설정 틀 바꾸기, 한글 폭.
+
+#### 남은 일
+- 새 Mac(빈 계정)에서 실제 설치는 해 보지 않았다(Homebrew·Xcode 도구 설치 경로, 32GB 이하 모델 품질).
+- N-05 옮기기(`vesta export/import`), N-06 업데이트·제거(`vesta update/uninstall`).
