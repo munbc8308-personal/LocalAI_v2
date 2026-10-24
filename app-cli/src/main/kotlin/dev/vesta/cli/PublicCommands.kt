@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
@@ -26,7 +27,15 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /**
- * 지인 공개 (PROJECT.md 7.20, M26). 순서:
+ * 지인 공개 (PROJECT.md 7.20, M26). 두 가지 방법:
+ *
+ * 직접 (공유기 포트포워딩 + DDNS, 예: iptime):
+ * 1. `vesta public setup --direct --hostname 이름.iptime.org` — 설정 저장, 서버 다시 시작
+ * 2. `scripts/direct-https.sh 이름.iptime.org` — Caddy(HTTPS, Let's Encrypt)·launchd 등록
+ * 3. 공유기: 바깥 443·80 → 이 Mac 443·80 (8787은 열지 않는다)
+ * 4. `vesta public invite <이름>` — 지인 계정 + 임시 비밀번호
+ *
+ * Cloudflare (도메인이 Cloudflare에 있을 때, 공유기 설정 없음). 순서:
  * 1. `vesta public token` — Cloudflare API 토큰을 키체인에 (Access 앱·허용 목록을 Vesta가 맞춘다)
  * 2. `vesta public setup --hostname vesta.내도메인 --email 내이메일` — Access 앱 만들기, 설정 저장, 서버 다시 시작
  * 3. `scripts/cloudflare-tunnel.sh vesta.내도메인` — 터널 만들기·launchd 등록
@@ -69,12 +78,26 @@ class PublicSetupCommand : CliktCommand(name = "setup") {
     private val team by option("--team", help = "API 토큰 없이: Access 팀 도메인 (<팀>.cloudflareaccess.com)")
     private val aud by option("--aud", help = "API 토큰 없이: Access 앱의 AUD 태그")
     private val ownerAdmin by option("--owner-admin", help = "바깥에서도 주인 관리 기능(사용자·설정·학습)을 쓴다").flag()
+    private val direct by option("--direct", help = "Cloudflare 없이 공유기 포트포워딩(443) + DDNS 주소 (Caddy가 HTTPS)").flag()
 
     override fun run() = runBlocking {
         val store = UserStore()
         val current = store.config.publicAccess
         val host = (hostname ?: current.hostname).trim().lowercase()
-        if (!HOSTNAME.matches(host)) { echo("--hostname 이 필요합니다 (예: vesta.example.com)", err = true); throw ProgramResult(1) }
+        if (!HOSTNAME.matches(host)) { echo("--hostname 이 필요합니다 (예: vesta.example.com, 이름.iptime.org)", err = true); throw ProgramResult(1) }
+        if (direct) {
+            writePublicConfig(store.paths.configFile, PublicAccessConfig(enabled = true, mode = "direct", port = current.port, hostname = host, ownerAdmin = ownerAdmin || current.ownerAdmin))
+            echo("설정을 저장했습니다: ${store.paths.configFile} (publicAccess, 직접 모드)")
+            restartServer()
+            val short = store.service.list().filter { it.hasPassword && it.name !in dev.vesta.identity.UserService.SYSTEM_USERS }.map { it.name }
+            echo("")
+            echo("바깥 로그인은 ${PublicAccessConfig.DIRECT_MIN_PASSWORD}자 이상 비밀번호만 받습니다 (짧으면 vesta user passwd <이름>, 주인은 vesta passwd)")
+            echo("다음: 1) 저장소의 scripts/direct-https.sh $host   (HTTPS 인증서·Caddy)")
+            echo("      2) 공유기 포트포워딩: 바깥 443 → 이 Mac(${lanAddress() ?: "이 Mac IP"}) 443, 바깥 80 → 80. 8787 포워딩은 지우세요")
+            echo("      3) vesta public status")
+            if (short.isEmpty()) echo("      (아직 비밀번호가 있는 사용자가 없습니다)")
+            return@runBlocking
+        }
         email?.let { e -> userAction { store.service.setEmail(store.service.list().first { it.role == UserRole.OWNER }.name, e) } }
         val (teamDomain, audience) = if (team != null && aud != null) {
             team!!.trim().removePrefix("https://").removeSuffix("/") to aud!!.trim()
@@ -93,7 +116,7 @@ class PublicSetupCommand : CliktCommand(name = "setup") {
                 domain to app.aud
             }
         }
-        val next = PublicAccessConfig(enabled = true, port = current.port, hostname = host, teamDomain = teamDomain, audience = audience, ownerAdmin = ownerAdmin || current.ownerAdmin)
+        val next = PublicAccessConfig(enabled = true, mode = "cloudflare", port = current.port, hostname = host, teamDomain = teamDomain, audience = audience, ownerAdmin = ownerAdmin || current.ownerAdmin)
         writePublicConfig(store.paths.configFile, next)
         echo("설정을 저장했습니다: ${store.paths.configFile} (publicAccess)")
         restartServer()
@@ -107,17 +130,19 @@ class PublicSetupCommand : CliktCommand(name = "setup") {
 class PublicInviteCommand : CliktCommand(name = "invite") {
     override fun help(context: Context) = "지인을 초대한다: 계정(기본 손님) + 임시 비밀번호 + Access 허용 목록"
     private val name by argument()
-    private val email by argument()
+    private val email by argument(help = "Cloudflare 방식일 때 지인의 로그인 이메일 (직접 방식은 필요 없음)").optional()
     private val role by option("--role", help = "guest: 대화·웹 검색만 / member: 문서·파일(자기 폴더)·이미지도").choice("guest", "member").default("guest")
 
     override fun run() = runBlocking {
         val store = UserStore()
+        val direct = store.config.publicAccess.direct
+        if (!direct && email == null) { echo("Cloudflare 방식은 이메일이 필요합니다: vesta public invite $name <이메일>", err = true); throw ProgramResult(1) }
         val password = temporaryPassword()
         userAction {
             store.service.create(name, UserRole.valueOf(role.uppercase()), password)
-            runCatching { store.service.setEmail(name, email) }.onFailure { store.service.delete(name); throw it }
+            email?.let { e -> runCatching { store.service.setEmail(name, e) }.onFailure { store.service.delete(name); throw it } }
         }
-        val synced = syncAccess(store)
+        val synced = direct || syncAccess(store)
         val host = store.config.publicAccess.hostname.ifBlank { "(vesta public setup 을 먼저)" }
         echo("초대했습니다: $name (${if (role == "guest") "손님: 대화·웹 검색" else "가족: 문서·파일·이미지"})")
         if (!synced) echo("! Access 허용 목록에는 직접 넣으세요: Zero Trust > Access > 애플리케이션 > Vesta > 정책 '${CloudflareAccess.POLICY}'에 $email")
@@ -125,9 +150,10 @@ class PublicInviteCommand : CliktCommand(name = "invite") {
         echo("")
         echo("── 지인에게 보낼 내용 ──")
         echo("주소: https://$host")
-        echo("1) 이메일 $email 을 넣고, 메일로 온 코드로 Cloudflare 로그인")
-        echo("2) Vesta 로그인: 이름 $name · 임시 비밀번호 $password")
-        echo("3) 로그인한 뒤 설정에서 비밀번호를 바꿔 주세요")
+        var step = 1
+        if (!direct) echo("${step++}) 이메일 $email 을 넣고, 메일로 온 코드로 Cloudflare 로그인")
+        echo("${step++}) Vesta 로그인: 이름 $name · 임시 비밀번호 $password")
+        echo("$step) 로그인한 뒤 설정에서 비밀번호를 바꿔 주세요" + if (direct) " (${PublicAccessConfig.DIRECT_MIN_PASSWORD}자 이상)" else "")
         echo("────────────────────")
         echo("임시 비밀번호는 다시 보여 주지 않습니다. 잃어버리면 vesta user passwd $name")
     }
@@ -154,10 +180,10 @@ class PublicStatusCommand : CliktCommand(name = "status") {
             echo("")
             echo("바깥 접속 사용자:")
             val usage = store.service.usageToday()
-            store.service.list().filter { it.email != null }.forEach { u ->
-                echo("  ${u.name.padEnd(14)} ${u.role.name.padEnd(6)} ${u.email}  오늘 질문 ${usage[u.id]?.questions ?: 0}개")
+            store.service.list().filter { if (config.direct) it.hasPassword && it.name !in dev.vesta.identity.UserService.SYSTEM_USERS else it.email != null }.forEach { u ->
+                echo("  ${u.name.padEnd(14)} ${u.role.name.padEnd(6)} ${u.email.orEmpty()}  오늘 질문 ${usage[u.id]?.questions ?: 0}개")
             }
-            cloudflare()?.let { cf ->
+            if (!config.direct) cloudflare()?.let { cf ->
                 runCatching {
                     val id = cf.account(null).first
                     val app = cf.findApp(id, config.hostname) ?: return@runCatching echo("! Access 앱이 없습니다 (vesta public setup)")
@@ -222,6 +248,7 @@ internal fun writePublicConfig(file: Path, config: PublicAccessConfig) {
     val block = buildString {
         appendLine("publicAccess:")
         appendLine("  enabled: ${config.enabled}")
+        appendLine("  mode: ${config.mode}")
         appendLine("  port: ${config.port}")
         appendLine("  hostname: \"${config.hostname}\"")
         appendLine("  teamDomain: \"${config.teamDomain}\"")
@@ -256,7 +283,7 @@ private fun restartServer() {
 internal fun publicChecks(config: PublicAccessConfig, serverPort: Int): List<Pair<String, String>> = buildList {
     if (!config.enabled) { add("·" to "지인 공개 꺼짐 (켜기: vesta public setup)"); return@buildList }
     if (!config.ready) { add("✗" to "설정이 덜 됐습니다: hostname·teamDomain·audience (vesta public setup)"); return@buildList }
-    add("✓" to "설정: https://${config.hostname} · Access ${config.teamDomain}" + if (config.ownerAdmin) " · 바깥 관리 허용" else "")
+    add("✓" to "설정: https://${config.hostname} · " + (if (config.direct) "직접(공유기 + Caddy)" else "Access ${config.teamDomain}") + if (config.ownerAdmin) " · 바깥 관리 허용" else "")
     val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build()
     fun get(url: String): Pair<Int, String?>? = runCatching {
         val request = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(10)).GET().build()
@@ -268,6 +295,7 @@ internal fun publicChecks(config: PublicAccessConfig, serverPort: Int): List<Pai
         null -> add("✗" to "터널 입구(127.0.0.1:${config.port})가 닫혀 있습니다: 서버가 공개 설정을 읽었는지 (vesta public setup이 다시 시작함, 로그 ~/.vesta/logs/server.err.log)")
         else -> if (local.first == 403) add("✓" to "터널 입구가 열려 있고, Access 토큰 없는 요청을 막습니다") else add("✗" to "터널 입구가 토큰 없는 요청에 ${local.first}로 답합니다 (403이어야 함)")
     }
+    if (config.direct) { addAll(directChecks(config, ::get)); return@buildList }
     val agent = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.cloudflared.plist")
     add(if (agent.exists()) "✓" to "터널 서비스 등록됨 (dev.vesta.cloudflared)" else "✗" to "터널 서비스가 없습니다: scripts/cloudflare-tunnel.sh ${config.hostname}")
     // 바깥: 로그인하지 않은 요청은 Access 로그인 화면으로 넘겨져야 한다 (Vesta까지 오면 안 됨)
@@ -282,4 +310,27 @@ internal fun publicChecks(config: PublicAccessConfig, serverPort: Int): List<Pai
         }
     }
     if (config.port == serverPort) add("✗" to "publicAccess.port가 server.port와 같습니다")
+}
+
+/** 직접 모드: Caddy가 돌고, 바깥 주소가 HTTPS로 열리고, 관문이 토큰 API를 막는지 */
+private fun directChecks(config: PublicAccessConfig, get: (String) -> Pair<Int, String?>?): List<Pair<String, String>> = buildList {
+    val agent = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.caddy.plist")
+    add(if (agent.exists()) "✓" to "HTTPS 서비스 등록됨 (dev.vesta.caddy)" else "✗" to "HTTPS 서비스가 없습니다: scripts/direct-https.sh ${config.hostname}")
+    // 바깥 주소로 이 Mac에서 접속 (공유기가 같은 망 안의 요청도 포워딩해 주는 경우: iptime은 대부분 됨)
+    when (val api = get("https://${config.hostname}/v1/models")) {
+        null -> add("✗" to "https://${config.hostname} 에 연결하지 못했습니다: 공유기 포트포워딩(443 → 이 Mac 443)·인증서(~/.vesta/logs/caddy.err.log)를 확인하세요. 휴대폰 LTE로도 열어 보세요")
+        else -> if (api.first == 404) add("✓" to "바깥 주소가 HTTPS로 열리고, 토큰 API(/v1)는 막혀 있습니다") else add("✗" to "바깥 /v1 이 ${api.first}입니다 (404여야 함): 8787을 바로 포워딩하지 않았는지 확인")
+    }
+    when (val plain = get("http://${config.hostname}:8787/api/health")) {
+        null -> add("✓" to "8787은 바깥에서 닫혀 있습니다")
+        else -> add("✗" to "8787이 바깥에서 열립니다 (HTTP ${plain.first}): 공유기의 8787 포워딩을 지우세요")
+    }
+}
+
+/** 이 Mac의 공유기 쪽 주소 (en0 → en1) */
+private fun lanAddress(): String? = listOf("en0", "en1").firstNotNullOfOrNull { iface ->
+    runCatching {
+        val p = ProcessBuilder("/usr/sbin/ipconfig", "getifaddr", iface).redirectErrorStream(true).start()
+        p.inputStream.bufferedReader().readText().trim().takeIf { p.waitFor() == 0 && it.isNotEmpty() }
+    }.getOrNull()
 }

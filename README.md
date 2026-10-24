@@ -39,8 +39,23 @@ vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 
 ## 지인에게 공개 (선택)
 
-초대한 사람만 주소 하나로 접속합니다. 필요한 것: Cloudflare 계정에 올린 내 도메인, Zero Trust 팀(무료).
-모델은 그대로 이 Mac에서 돌고, 공유기 포트는 열지 않습니다.
+초대한 사람만 주소 하나로 접속합니다. 방법은 두 가지입니다.
+
+### 공유기 + DDNS (예: iptime)
+
+```sh
+vesta public setup --direct --hostname 이름.iptime.org
+scripts/direct-https.sh 이름.iptime.org      # HTTPS (Caddy, Let's Encrypt)
+vesta public invite mina                     # 초대 (기본 손님)
+vesta public status
+```
+
+공유기에서 이 Mac의 IP를 고정하고, 바깥 443 → 이 Mac 443, 바깥 80 → 이 Mac 80을 포워딩합니다. 8787은 포워딩하지 않습니다.
+바깥 로그인은 12자 이상 비밀번호만 됩니다.
+
+### Cloudflare (공유기 설정 없음)
+
+필요한 것: Cloudflare 계정에 올린 내 도메인, Zero Trust 팀(무료).
 
 ```sh
 vesta public token                                              # Cloudflare API 토큰 (키체인)
@@ -50,6 +65,6 @@ vesta public invite mina mina@example.com                       # 초대 (기본
 vesta public status                                             # 바깥에서 막고 있는지 확인
 ```
 
-바깥에서는 Access 로그인과 Vesta 로그인을 모두 거칩니다. 두 로그인은 같은 사람이어야 합니다(이메일).
+Cloudflare 방식은 Access 로그인과 Vesta 로그인을 모두 거칩니다. 두 로그인은 같은 사람이어야 합니다(이메일).
 토큰 API(`/v1`·CLI)는 바깥에 열지 않습니다. 관리 기능은 이 Mac에서만 씁니다.
 하루 질문 한도는 `~/.vesta/config.yaml`의 `users.dailyQuestions`로 정합니다.

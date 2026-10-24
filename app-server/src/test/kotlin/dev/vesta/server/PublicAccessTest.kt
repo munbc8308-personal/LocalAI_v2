@@ -132,7 +132,7 @@ class PublicAccessTest : FunSpec({
         access.fetches shouldBe 1
     }
 
-    fun publicDeps(gatePort: Int, access: FakeAccess, ownerAdmin: Boolean = false): Triple<ServerDeps, UserService, UserId> {
+    fun publicDeps(gatePort: Int, access: FakeAccess?, ownerAdmin: Boolean = false, logins: IpLimiter = IpLimiter(100, java.time.Duration.ofMinutes(10))): Triple<ServerDeps, UserService, UserId> {
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
         val owner = db.ensureOwner("owner")
         val auth = WebAuthRepository(db.db)
@@ -141,13 +141,14 @@ class PublicAccessTest : FunSpec({
         runBlocking {
             auth.setPasswordHash(owner, PasswordHasher.hash("correct horse"))
             users.create("mina", UserRole.GUEST, "mina-pass-1")
+            users.create("long", UserRole.GUEST, "long-enough-pass")
             users.setEmail("mina", "mina@example.com")
             users.setEmail("owner", "owner@example.com")
         }
         val deps = ServerDeps(
             EchoConversation(), GateSessions, GateMessages, UserContext(owner, UserRole.OWNER), token = "local-api-key", version = "t",
             auth = WebAuth(auth), users = users,
-            publicGate = PublicGate(gatePort, HOST, access.verifier(), ownerAdmin),
+            publicGate = PublicGate(gatePort, HOST, access?.verifier(), ownerAdmin, logins = logins),
             userEmail = { repo.get(it)?.email },
         )
         return Triple(deps, users, owner)
@@ -161,8 +162,10 @@ class PublicAccessTest : FunSpec({
         val jwt = access.token()
         client.get("/api/health") { header("Host", HOST) }.status shouldBe HttpStatusCode.Forbidden
         client.get("/api/health") { header("Host", "127.0.0.1"); header(ACCESS_HEADER, jwt) }.status shouldBe HttpStatusCode.Forbidden
-        client.get("/api/health") { header("Host", HOST); header(ACCESS_HEADER, jwt) }.status shouldBe HttpStatusCode.OK
-        client.get("/api/health") { header("Host", HOST); header(ACCESS_HEADER, access.token(aud = "x")) }.status shouldBe HttpStatusCode.Forbidden
+        // 관문을 지나면 로그인 확인까지 간다 (401). 상태 API는 바깥에 열지 않는다
+        client.get("/api/me") { header("Host", HOST); header(ACCESS_HEADER, jwt) }.status shouldBe HttpStatusCode.Unauthorized
+        client.get("/api/health") { header("Host", HOST); header(ACCESS_HEADER, jwt) }.status shouldBe HttpStatusCode.NotFound
+        client.get("/api/me") { header("Host", HOST); header(ACCESS_HEADER, access.token(aud = "x")) }.status shouldBe HttpStatusCode.Forbidden
         client.get("/v1/models") { header("Host", HOST); header(ACCESS_HEADER, jwt); bearerAuth("local-api-key") }.status shouldBe HttpStatusCode.NotFound
         client.get("/api/sessions") { header("Host", HOST); header(ACCESS_HEADER, jwt); bearerAuth("local-api-key") }.status shouldBe HttpStatusCode.Unauthorized
     } }
@@ -214,6 +217,48 @@ class PublicAccessTest : FunSpec({
             .headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
         client.get("/api/users") { header("Host", HOST); header(ACCESS_HEADER, ownerJwt); header("Cookie", cookie) }.status shouldBe HttpStatusCode.OK
     } }
+
+    test("직접 모드(공유기 + Caddy): Access 없이 로그인, 짧은 비밀번호·토큰 API·관리 기능은 막고, IP별 로그인 시도를 제한한다") { testApplication {
+        val (deps) = publicDeps(80, access = null, logins = IpLimiter(3, java.time.Duration.ofMinutes(10)))
+        application { vestaApi(deps) }
+        fun ip(n: Int): io.ktor.client.request.HttpRequestBuilder.() -> Unit = { header("Host", HOST); header("X-Forwarded-For", "203.0.113.$n") }
+        client.get("/api/me", ip(1)).status shouldBe HttpStatusCode.Unauthorized
+        client.get("/api/me") { header("Host", "munbc.iptime.org") }.status shouldBe HttpStatusCode.Forbidden
+        client.get("/v1/models") { ip(1)(); bearerAuth("local-api-key") }.status shouldBe HttpStatusCode.NotFound
+        // 8자 비밀번호(mina)는 맞아도 바깥에서는 안 된다
+        client.post("/api/login") { ip(1)(); setBody("""{"name":"mina","password":"mina-pass-1"}""") }.bodyAsText() shouldContain "12자 이상"
+        val login = client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }
+        login.status shouldBe HttpStatusCode.OK
+        login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty() shouldContain "Secure"
+        val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        client.get("/api/sessions") { ip(1)(); header("Cookie", cookie) }.status shouldBe HttpStatusCode.OK
+        // 같은 IP의 로그인 시도는 3번까지 (다른 IP는 따로)
+        client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"wrong-password-x"}""") }.status shouldBe HttpStatusCode.Unauthorized
+        client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        client.post("/api/login") { ip(2)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.OK
+        // 주인 관리 기능은 바깥에서 막힌다
+        val owner = client.post("/api/login") { ip(3)(); setBody("""{"password":"correct horse"}""") }
+        owner.status shouldBe HttpStatusCode.OK
+        val ownerCookie = owner.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        client.get("/api/users") { ip(3)(); header("Cookie", ownerCookie) }.status shouldBe HttpStatusCode.Forbidden
+    } }
+
+    test("IP 제한: 창이 지나면 다시 열리고, 기록 수는 고정") {
+        var now = Instant.ofEpochSecond(1_000)
+        val clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId?) = this
+            override fun instant() = now
+        }
+        val limiter = IpLimiter(2, java.time.Duration.ofMinutes(1), clock, maxEntries = 100)
+        limiter.allow("a") shouldBe true
+        limiter.allow("a") shouldBe true
+        limiter.allow("a") shouldBe false
+        now = now.plusSeconds(61)
+        limiter.allow("a") shouldBe true
+        repeat(500) { limiter.allow("ip$it") }
+        limiter.allow("fresh") shouldBe true
+    }
 
     test("이 Mac 포트(터널 입구가 아닌 곳)는 Access 없이 지금처럼") { testApplication {
         val access = FakeAccess()

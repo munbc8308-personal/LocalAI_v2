@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 지인 공개 직접 모드 HTTPS (PROJECT.md 7.20, M26). scripts/direct-https.sh가 Caddyfile을 만들고 등록한다. 443·80을 받아 Vesta 바깥 입구(127.0.0.1:8788)로 넘긴다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.caddy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/caddy</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>__HOME__/.vesta/caddy/Caddyfile</string>
+        <string>--adapter</string>
+        <string>caddyfile</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>XDG_DATA_HOME</key>
+        <string>__HOME__/.vesta/caddy/data</string>
+        <key>XDG_CONFIG_HOME</key>
+        <string>__HOME__/.vesta/caddy/config</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/caddy.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/caddy.err.log</string>
+</dict>
+</plist>

@@ -25,37 +25,76 @@ import java.util.Base64
 private val log = KotlinLogging.logger {}
 
 /**
- * 지인 공개 (PROJECT.md 7.20 P-02·P-06, M26). Cloudflare 터널 포트로 온 요청을 거른다.
+ * 지인 공개 (PROJECT.md 7.20 P-02·P-06, M26). 바깥 입구 포트로 온 요청을 거른다.
  * - Host는 공개 주소 하나만
- * - Cloudflare Access 토큰(`Cf-Access-Jwt-Assertion`, RS256)을 확인한다: 서명·aud·iss·만료. Access 설정이 빠졌거나 우회돼도 Vesta가 다시 막는다
- * - 토큰 API(`/v1`, CLI Bearer)는 바깥에 열지 않는다
- * - 로그인한 Vesta 사용자의 이메일이 Access 이메일과 같아야 한다 (principal에서)
+ * - 토큰 API(`/v1`, CLI Bearer)와 상태 API(`/api/health`)는 바깥에 열지 않는다
+ * - IP별 요청 수·로그인 시도 수를 제한한다 (Cloudflare 앞단이 없는 직접 모드에서 특히)
+ * - [verifier]가 있으면(cloudflare 모드) Cloudflare Access 토큰(`Cf-Access-Jwt-Assertion`, RS256)을 확인한다: 서명·aud·iss·만료.
+ *   Access 설정이 빠졌거나 우회돼도 Vesta가 다시 막는다. 로그인한 사용자의 이메일이 Access 이메일과 같아야 한다 (principal에서)
+ * - 직접 모드(공유기 포트포워딩 + Caddy HTTPS)에는 Access가 없어 Vesta 로그인만 남는다: 바깥 로그인은 긴 비밀번호만 받는다
  */
 class PublicGate(
     val port: Int,
     val hostname: String,
-    private val verifier: AccessVerifier,
+    private val verifier: AccessVerifier?,
     /** 바깥에서도 Mac 주인의 관리 기능을 쓸지 */
     val ownerAdmin: Boolean = false,
+    private val requests: IpLimiter = IpLimiter(limit = 600, window = Duration.ofMinutes(1)),
+    private val logins: IpLimiter = IpLimiter(limit = 10, window = Duration.ofMinutes(10)),
 ) {
-    /** 거르면 그 이유(HTTP 상태, 글), 통과하면 Access 이메일 */
+    /** 직접 모드: 바깥 로그인 비밀번호 최소 길이 */
+    val minPassword: Int? = if (verifier == null) dev.vesta.core.config.PublicAccessConfig.DIRECT_MIN_PASSWORD else null
+
+    /** 거르면 그 이유(HTTP 상태, 글), 통과하면 Access 이메일(직접 모드는 null) */
     sealed interface Result {
-        data class Pass(val email: String) : Result
+        data class Pass(val email: String?) : Result
         data class Reject(val status: Int, val message: String) : Result
     }
 
-    suspend fun check(host: String, path: String, authorization: String?, assertion: String?): Result {
+    suspend fun check(host: String, path: String, authorization: String?, assertion: String?, ip: String = "?", login: Boolean = false): Result {
+        if (!requests.allow(ip)) return Result.Reject(429, "요청이 너무 많습니다. 잠시 뒤에 다시 시도하세요")
         if (!host.equals(hostname, ignoreCase = true)) return Result.Reject(403, "허용되지 않은 Host")
         if (path == "/v1" || path.startsWith("/v1/")) return Result.Reject(404, "OpenAI 호환 API는 바깥에 열지 않습니다")
         if (authorization != null) return Result.Reject(401, "토큰 API는 바깥에 열지 않습니다 (웹 로그인을 쓰세요)")
-        val token = assertion ?: return Result.Reject(403, "Cloudflare Access 로그인이 필요합니다")
-        return when (val verified = verifier.verify(token)) {
-            is AccessVerifier.Verified.Ok -> Result.Pass(verified.email)
-            is AccessVerifier.Verified.Invalid -> {
-                log.warn { "Access 토큰 거부: ${verified.reason}" }
-                Result.Reject(403, "Cloudflare Access 확인 실패")
+        val email = if (verifier == null) null else {
+            val token = assertion ?: return Result.Reject(403, "Cloudflare Access 로그인이 필요합니다")
+            when (val verified = verifier.verify(token)) {
+                is AccessVerifier.Verified.Ok -> verified.email
+                is AccessVerifier.Verified.Invalid -> {
+                    log.warn { "Access 토큰 거부: ${verified.reason}" }
+                    return Result.Reject(403, "Cloudflare Access 확인 실패")
+                }
             }
         }
+        if (path == "/api/health") return Result.Reject(404, "없음")
+        if (login && !logins.allow(ip)) return Result.Reject(429, "로그인 시도가 너무 많습니다. 10분 뒤에 다시 시도하세요")
+        return Result.Pass(email)
+    }
+
+}
+
+/** IP별 고정 창 횟수 제한. 기록은 [maxEntries]개까지 (넘으면 지난 창 것부터 비운다) */
+class IpLimiter(
+    private val limit: Int,
+    private val window: Duration,
+    private val clock: Clock = Clock.systemUTC(),
+    private val maxEntries: Int = 10_000,
+) {
+    private class Slot(var start: Instant, var count: Int)
+    private val slots = HashMap<String, Slot>()
+
+    @Synchronized
+    fun allow(ip: String): Boolean {
+        val now = clock.instant()
+        if (slots.size >= maxEntries) {
+            slots.values.removeIf { Duration.between(it.start, now) >= window }
+            // 모두 지금 창이면 가장 오래된 절반을 버린다 (메모리 고정)
+            if (slots.size >= maxEntries) slots.entries.sortedBy { it.value.start }.take(maxEntries / 2).forEach { slots.remove(it.key) }
+        }
+        val slot = slots.getOrPut(ip) { Slot(now, 0) }
+        if (Duration.between(slot.start, now) >= window) { slot.start = now; slot.count = 0 }
+        slot.count++
+        return slot.count <= limit
     }
 }
 

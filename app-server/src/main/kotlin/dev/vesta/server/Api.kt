@@ -209,9 +209,11 @@ fun Application.vestaApi(deps: ServerDeps) {
     intercept(ApplicationCallPipeline.Plugins) {
         val gate = deps.publicGate
         if (gate != null && call.request.local.localPort == gate.port) {
-            // 터널로 온 요청 (M26): 공개 주소·Access 토큰 확인, 토큰 API 막기
-            when (val result = gate.check(call.request.host(), call.request.path(), call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER))) {
-                is PublicGate.Result.Pass -> call.attributes.put(ACCESS_EMAIL, result.email)
+            // 바깥 입구로 온 요청 (M26): 공개 주소·Access 토큰 확인, 토큰 API 막기, IP별 제한
+            val path = call.request.path()
+            val login = path == "/api/login" && call.request.httpMethod == HttpMethod.Post
+            when (val result = gate.check(call.request.host(), path, call.request.header(HttpHeaders.Authorization), call.request.header(ACCESS_HEADER), call.clientIp(), login)) {
+                is PublicGate.Result.Pass -> call.attributes.put(PUBLIC_REQUEST, PublicRequest(result.email))
                 is PublicGate.Result.Reject -> {
                     call.respondJson(HttpStatusCode.fromValue(result.status), buildJsonObject { put("error", result.message) }.toString())
                     finish()
@@ -244,6 +246,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                 // 바깥에서는 비밀번호를 보기 전에 계정 이메일이 Access 이메일과 같은지 본다: 다르면 틀린 비밀번호와 같은 답.
                 // 비밀번호가 맞는지 알려 주지 않고, 남의 계정 잠금 횟수도 올리지 않는다 (보안 검토)
                 if (!call.publicLoginAllowed(deps, dto.name)) return@post call.respondJson(HttpStatusCode.Unauthorized, """{"error":"비밀번호가 맞지 않습니다"}""")
+                // 직접 모드(앞단 로그인 없음)는 긴 비밀번호만 받는다. 입력 길이만 보므로 계정에 대해 알려 주는 것은 없다
+                val minimum = deps.publicGate?.minPassword?.takeIf { call.attributes.contains(PUBLIC_REQUEST) }
+                if (minimum != null && dto.password.length < minimum) {
+                    return@post call.respondJson(HttpStatusCode.Unauthorized, buildJsonObject { put("error", "바깥에서는 ${minimum}자 이상 비밀번호로만 로그인할 수 있습니다 (이 Mac에서 vesta user passwd 로 바꾸세요)") }.toString())
+                }
                 when (val result = auth.login(dto.name, dto.password, call.request.header(HttpHeaders.UserAgent))) {
                     is LoginResult.Ok -> {
                         // 위에서 확인했지만 한 번 더 (M26)
@@ -944,7 +951,7 @@ private suspend fun ApplicationCall.sse(block: suspend (emit: suspend (String) -
 
 /** Tailscale serve는 HTTPS를 받아 이 서버(HTTP)로 넘긴다 */
 private fun ApplicationCall.isHttps(): Boolean =
-    attributes.contains(ACCESS_EMAIL) || request.origin.scheme == "https" || request.header("X-Forwarded-Proto") == "https" || request.host().endsWith(".ts.net")
+    attributes.contains(PUBLIC_REQUEST) || request.origin.scheme == "https" || request.header("X-Forwarded-Proto") == "https" || request.host().endsWith(".ts.net")
 
 /**
  * 요청한 사용자. Bearer 토큰(CLI)이면 OWNER, 세션 쿠키(웹 UI)면 그 사용자.
@@ -971,13 +978,23 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
     return session.user
 }
 
-/** 터널(Access)로 온 요청이면 Access 이메일 (M26) */
-private val ACCESS_EMAIL = io.ktor.util.AttributeKey<String>("vesta-access-email")
+/** 바깥 입구로 온 요청 (M26). [email]은 Cloudflare Access 이메일 (직접 모드는 null) */
+private class PublicRequest(val email: String?)
+private val PUBLIC_REQUEST = io.ktor.util.AttributeKey<PublicRequest>("vesta-public")
 internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
+
+/**
+ * 바깥 요청의 IP. 입구는 127.0.0.1에만 열려 앞단(cloudflared·Caddy)만 붙으므로 앞단이 적은 값을 믿는다:
+ * Cloudflare는 `Cf-Connecting-IP`, Caddy는 `X-Forwarded-For`(받은 값을 버리고 실제 접속 IP로 쓴다)
+ */
+private fun ApplicationCall.clientIp(): String =
+    request.header("Cf-Connecting-IP")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: request.header("X-Forwarded-For")?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+        ?: request.origin.remoteAddress
 
 /** 바깥에서 로그인한 계정의 이메일이 Access 이메일과 다르면 안내 글. 이 Mac·Tailscale에서 온 요청이면 null */
 private suspend fun ApplicationCall.publicMismatch(deps: ServerDeps, user: UserContext): String? {
-    val access = attributes.getOrNull(ACCESS_EMAIL) ?: return null
+    val access = attributes.getOrNull(PUBLIC_REQUEST)?.email ?: return null
     val email = deps.userEmail(user.userId)
     if (email != null && email.equals(access, ignoreCase = true)) return null
     return "이 Cloudflare 로그인($access)은 이 Vesta 계정에 연결돼 있지 않습니다. Mac 주인에게 vesta user email 로 연결을 부탁하세요"
@@ -985,7 +1002,7 @@ private suspend fun ApplicationCall.publicMismatch(deps: ServerDeps, user: UserC
 
 /** 바깥 로그인: 로그인하려는 계정(이름을 비우면 Mac 주인)의 이메일이 Access 이메일과 같은지. 이 Mac·Tailscale에서 온 요청이면 true */
 private suspend fun ApplicationCall.publicLoginAllowed(deps: ServerDeps, name: String?): Boolean {
-    val access = attributes.getOrNull(ACCESS_EMAIL) ?: return true
+    val access = attributes.getOrNull(PUBLIC_REQUEST)?.email ?: return true
     val login = name?.trim()?.takeIf { it.isNotBlank() }
     val id = if (login == null) deps.owner.userId else deps.users?.find(login)?.id ?: return false
     return deps.userEmail(id)?.equals(access, ignoreCase = true) == true
@@ -998,7 +1015,7 @@ private suspend fun ApplicationCall.publicLoginAllowed(deps: ServerDeps, name: S
 private suspend fun ApplicationCall.manages(user: UserContext, deps: ServerDeps, message: String): Boolean {
     val error = when {
         !dev.vesta.identity.RolePolicy.canManage(user.role) -> message
-        attributes.contains(ACCESS_EMAIL) && deps.publicGate?.ownerAdmin != true -> "관리 기능은 이 Mac(또는 Tailscale)에서만 쓸 수 있습니다"
+        attributes.contains(PUBLIC_REQUEST) && deps.publicGate?.ownerAdmin != true -> "관리 기능은 이 Mac(또는 Tailscale)에서만 쓸 수 있습니다"
         else -> null
     } ?: return true
     respondJson(HttpStatusCode.Forbidden, buildJsonObject { put("error", error) }.toString())

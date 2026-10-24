@@ -36,9 +36,12 @@ class PublicTest : FunSpec({
     test("저장한 공개 설정을 다시 읽을 수 있다") {
         val file = createTempDirectory("vesta").resolve("config.yaml")
         file.writeText(javaClass.getResource("/default-config.yaml")!!.readText())
-        val config = PublicAccessConfig(true, 8788, "vesta.example.com", "family.cloudflareaccess.com", "aud-tag", false)
+        val config = PublicAccessConfig(enabled = true, port = 8788, hostname = "vesta.example.com", teamDomain = "family.cloudflareaccess.com", audience = "aud-tag")
         writePublicConfig(file, config)
         ConfigLoader.load(file, tunedFile = null).publicAccess shouldBe config
+        val direct = PublicAccessConfig(enabled = true, mode = "direct", hostname = "munbc.iptime.org")
+        writePublicConfig(file, direct)
+        ConfigLoader.load(file, tunedFile = null).publicAccess.let { it shouldBe direct; it.ready shouldBe true }
         file.readText() shouldContain "evolution:"
     }
 

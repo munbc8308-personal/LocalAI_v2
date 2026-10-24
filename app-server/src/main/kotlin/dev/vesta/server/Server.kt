@@ -182,10 +182,10 @@ fun main() {
     Runtime.getRuntime().addShutdownHook(Thread { channels.cancel(); background.cancel(); app.close() })
     log.info { "Vesta 서버 시작: http://$host:${app.config.server.port}" }
     val gate = deps.publicGate
-    if (gate != null) log.info { "지인 공개 터널 입구: http://127.0.0.1:${gate.port} → https://${gate.hostname} (Cloudflare Access)" }
+    if (gate != null) log.info { "지인 공개 입구: http://127.0.0.1:${gate.port} ← https://${gate.hostname} (${app.config.publicAccess.mode})" }
     embeddedServer(CIO, configure = {
         connector { this.host = host; port = app.config.server.port }
-        // 터널 입구는 이 Mac 안에서만 연다 (cloudflared가 붙는다)
+        // 바깥 입구는 이 Mac 안에서만 연다 (cloudflared·Caddy가 붙는다)
         if (gate != null) connector { this.host = "127.0.0.1"; port = gate.port }
     }) { vestaApi(deps) }.start(wait = true)
 }
@@ -193,8 +193,10 @@ fun main() {
 /** 지인 공개 설정이 다 채워졌으면 터널 입구 (M26). 빠진 게 있으면 열지 않고 알린다 */
 internal fun publicGate(config: dev.vesta.core.config.PublicAccessConfig, serverPort: Int): PublicGate? {
     if (!config.enabled) return null
-    if (!config.ready) { log.error { "지인 공개가 켜져 있지만 hostname·teamDomain·audience가 비어 있어 열지 않습니다 (vesta public setup)" }; return null }
+    if (!config.ready) { log.error { "지인 공개가 켜져 있지만 설정이 비어 있어 열지 않습니다: hostname${if (config.direct) "" else "·teamDomain·audience"} (vesta public setup)" }; return null }
     if (config.port == serverPort) { log.error { "publicAccess.port가 server.port와 같아 열지 않습니다" }; return null }
+    if (config.mode !in setOf("cloudflare", "direct")) { log.error { "publicAccess.mode는 cloudflare·direct 중 하나입니다: ${config.mode}" }; return null }
+    if (config.direct) return PublicGate(config.port, config.hostname.lowercase(), verifier = null, ownerAdmin = config.ownerAdmin)
     val http = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(5)).build()
     val verifier = AccessVerifier(config.teamDomain, config.audience, fetchKeys = { url ->
         kotlinx.coroutines.Dispatchers.IO.let { io ->

@@ -1006,6 +1006,7 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 | ID | 기능 | 우선순위 | 설명 |
 |----|------|----------|------|
+| P-01b | 직접 공개 (공유기) | P1 | Cloudflare 없이 공유기 포트포워딩(443·80) + DDNS(iptime 등). 이 Mac의 Caddy가 HTTPS(Let's Encrypt)를 받아 바깥 입구로 넘긴다(`scripts/direct-https.sh`, `publicAccess.mode: direct`). Access가 없으므로 IP별 요청·로그인 제한, 바깥 로그인은 12자 이상 비밀번호. 8787은 계속 이 Mac 안에서만 |
 | P-01 | Cloudflare Tunnel | P1 | 집 Mac에서 Cloudflare로 나가는 연결만(공유기 포트 개방 없음), 내 도메인(`vesta.내도메인`), 방화벽·요청 수 제한·DDoS 방어. `cloudflared`를 launchd로 (`scripts/cloudflare-tunnel.sh`) |
 | P-02 | Cloudflare Access | P1 | 터널 앞 로그인 관문: 초대한 이메일만(일회용 코드·Google 로그인), 50명까지 무료. Vesta 로그인은 그 뒤에 한 번 더 |
 | P-03 | 지인 계정 | P1 | 초대 = 사용자 추가(M20 초대 안내) + Access 허용 목록. 기본 역할 GUEST(대화·웹 검색), 주인이 MEMBER로 올릴 수 있음. 사용자 수 한도를 설정으로(`users.maxUsers`, 지금 5) |
@@ -2704,3 +2705,23 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 실제 도메인·Zero Trust 팀·API 토큰으로 `setup` → 터널 → `invite` → 휴대폰 로그인까지 해 보지 않았다(Cloudflare API 호출 형식은 문서와 가짜 응답으로만 확인).
 - P-05(웹 UI를 Pages에 따로 올리기)와 P-07(멈췄을 때 상태 페이지)은 P2라 하지 않았다. 지금은 Vesta가 웹 UI를 직접 보여 주고, 집 서버가 멈추면 Cloudflare 오류 화면(502·530)이 보인다.
 - 웹 UI 사용자 화면에는 이메일을 아직 보여 주지 않는다(터미널 `vesta user list`).
+
+#### 직접 모드 (P-01b, 공유기 포트포워딩 + DDNS)
+- 계기: 사용자가 iptime DDNS(`munbc8308.iptime.org`)와 8787 포트포워딩을 해 두었는데 연결되지 않았다.
+  - 원인은 방화벽(꺼져 있음)이 아니다. 서버가 `127.0.0.1`에만 열려 있어 공유기가 넘긴 요청을 받을 곳이 없었다.
+  - 8787을 바로 여는 대신 아래처럼 만들었다. 8787을 열면 평문 HTTP(비밀번호가 그대로 지나감)이고, `/v1`·CLI 토큰 API가 인터넷에 열린다.
+- 구조: 바깥 443 → 공유기 → 이 Mac의 Caddy(HTTPS, Let's Encrypt 자동 발급·갱신, HSTS) → 바깥 입구 `127.0.0.1:8788`(같은 공개 관문) → Vesta.
+- 관문 (Access가 없으므로):
+  - IP별 요청 600/분, 로그인 10번/10분.
+  - 바깥 로그인은 12자 이상 비밀번호만 받는다. 입력 길이만 보므로 계정에 대해 알려 주지 않는다.
+  - `/api/health`는 바깥에 열지 않는다. Host·`/v1`·Bearer 거부와 관리 기능 막기는 같다.
+  - IP는 앞단이 넘긴 `X-Forwarded-For` 첫 값이다(Caddy는 받은 값을 버리고 실제 접속 IP로 쓴다). cloudflare 모드는 `Cf-Connecting-IP`.
+- 명령:
+  - `vesta public setup --direct --hostname <주소>`
+  - `scripts/direct-https.sh <주소>`(Caddy 설치·Caddyfile·launchd `dev.vesta.caddy`, `off`)
+  - `vesta public invite <이름>`(이메일 없이)
+  - `vesta public status`: Caddy 서비스, 바깥 `/v1`이 HTTPS 404인지, 바깥 8787이 닫혔는지.
+- 확인:
+  - 단위 테스트(직접 모드 로그인·짧은 비밀번호·IP 제한·관리 막기, 제한기 창·크기).
+  - 실제 Mac: 입구 `/v1` 404, 짧은 비밀번호 401 안내, LAN 80 → https 308, LAN 8787 닫힘.
+  - Let's Encrypt 발급은 공유기에 443 포워딩이 없어 "Timeout during connect"로 실패했다. Caddy가 계속 다시 시도한다.

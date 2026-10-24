@@ -22,24 +22,32 @@ data class VestaConfig(
 )
 
 /**
- * 지인 공개 (PROJECT.md 7.20, M26). Cloudflare Tunnel(`cloudflared`)이 [port]로만 들어오고, 그 앞에 Cloudflare Access 로그인이 있다.
- * 이 포트로 온 요청은 Access 토큰(JWT)을 확인하고, 토큰 API(`/v1`·CLI Bearer)는 받지 않는다. 설정: `vesta public setup`
+ * 지인 공개 (PROJECT.md 7.20, M26). 바깥 요청은 [port](127.0.0.1)로만 들어오고, 토큰 API(`/v1`·CLI Bearer)는 받지 않는다. 설정: `vesta public setup`
+ * - `cloudflare`: Cloudflare Tunnel(`cloudflared`) + Access 로그인. Access 토큰(JWT)을 다시 확인한다
+ * - `direct`: 공유기 포트포워딩(443) + DDNS. 이 Mac의 Caddy가 HTTPS(Let's Encrypt)를 받아 넘긴다. Access가 없으므로 IP별 요청·로그인 제한과 긴 비밀번호로 막는다
  */
 data class PublicAccessConfig(
     val enabled: Boolean = false,
-    /** 터널이 넘겨주는 곳 (127.0.0.1에서만 연다) */
+    val mode: String = "cloudflare",
+    /** 터널·Caddy가 넘겨주는 곳 (127.0.0.1에서만 연다) */
     val port: Int = 8788,
-    /** 바깥 주소 (`vesta.내도메인`) */
+    /** 바깥 주소 (`vesta.내도메인`, `이름.iptime.org`) */
     val hostname: String = "",
-    /** Access 팀 도메인 (`<팀>.cloudflareaccess.com`) */
+    /** (cloudflare) Access 팀 도메인 (`<팀>.cloudflareaccess.com`) */
     val teamDomain: String = "",
-    /** Access 앱의 AUD 태그 */
+    /** (cloudflare) Access 앱의 AUD 태그 */
     val audience: String = "",
     /** 바깥에서도 Mac 주인이 관리 기능(사용자·설정·학습·자가 개선)을 쓸지. 기본은 이 Mac(·Tailscale)에서만 */
     val ownerAdmin: Boolean = false,
 ) {
     /** 터널을 열 수 있을 만큼 채워졌는지 */
-    val ready: Boolean get() = enabled && hostname.isNotBlank() && teamDomain.isNotBlank() && audience.isNotBlank()
+    val ready: Boolean get() = enabled && hostname.isNotBlank() && (direct || teamDomain.isNotBlank() && audience.isNotBlank())
+    val direct: Boolean get() = mode == "direct"
+
+    companion object {
+        /** 직접 모드: 바깥 로그인 비밀번호 최소 길이 (계정 잠금은 5번마다라, 약한 비밀번호는 인터넷에서 버티지 못한다) */
+        const val DIRECT_MIN_PASSWORD = 12
+    }
 }
 
 /**
