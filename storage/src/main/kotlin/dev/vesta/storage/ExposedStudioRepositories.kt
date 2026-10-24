@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.max
@@ -271,6 +272,15 @@ class ExposedRunRepository(private val db: Database, private val clock: Clock = 
         RunEvents.selectAll().where { (RunEvents.run eq run) and (RunEvents.seq greater afterSeq) }.orderBy(RunEvents.seq).map {
             RunEvent(run, it[RunEvents.seq], it[RunEvents.at], it[RunEvents.kind], it[RunEvents.title], it[RunEvents.detail])
         }
+    }
+
+    // 단계(run_event)는 CASCADE로 함께 지워진다
+    override suspend fun delete(user: UserId, id: Long): Boolean = db.tx {
+        AgentRuns.deleteWhere { (AgentRuns.id eq id) and (AgentRuns.userId eq user.value) and (AgentRuns.status neq RunStatus.RUNNING.name) } > 0
+    }
+
+    override suspend fun deleteFinished(user: UserId): Int = db.tx {
+        AgentRuns.deleteWhere { (AgentRuns.userId eq user.value) and (AgentRuns.status neq RunStatus.RUNNING.name) }
     }
 
     override suspend fun abandonRunning(): Int = db.tx {

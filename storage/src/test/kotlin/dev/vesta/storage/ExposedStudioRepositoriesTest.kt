@@ -54,6 +54,22 @@ class ExposedStudioRepositoriesTest : FunSpec({
         runs.list(owner, 10).map { it.id } shouldBe listOf(b.id, a.id)
         runs.abandonRunning() shouldBe 1
         runs.get(b.id)!!.status shouldBe RunStatus.FAILED
+
+        // 지우기: 본인 것·끝난 것만, 단계도 함께. 대화를 지우면 그 대화의 실행도
+        val other = org.jetbrains.exposed.v1.jdbc.transactions.transaction(db.db) { Users.insertAndGetId { it[name] = "mina"; it[role] = dev.vesta.core.UserRole.MEMBER } }.value.let(::UserId)
+        runs.delete(other, a.id) shouldBe false
+        runs.delete(owner, a.id) shouldBe true
+        runs.events(a.id) shouldBe emptyList()
+        val running = runs.start(owner, null, "CHAT", null, "도는 중")
+        runs.delete(owner, running.id) shouldBe false
+        runs.deleteFinished(owner) shouldBe 1
+        runs.list(owner, 10).map { it.id } shouldBe listOf(running.id)
+        val sessions = ExposedSessionRepository(db.db)
+        val chat = sessions.create(owner, dev.vesta.core.ChannelType.WEB, "t")
+        val inChat = runs.start(owner, chat.id, "CHAT", null, "대화 안")
+        runs.finish(inChat.id, RunStatus.DONE, null)
+        sessions.delete(owner, chat.id) shouldBe true
+        runs.get(inChat.id) shouldBe null
     }
 
     test("팀: 같은 이름이면 고치고, 멤버 순서를 지킨다") {

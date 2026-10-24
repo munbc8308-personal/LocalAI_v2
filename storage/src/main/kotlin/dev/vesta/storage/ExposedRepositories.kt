@@ -77,6 +77,8 @@ class ExposedSessionRepository(
         // 메시지·피드백은 CASCADE. 라우팅·도구 기록은 세션 ID로만 묶여 있어 따로 지운다
         RoutingLogs.deleteWhere { RoutingLogs.sessionId eq id.value }
         ToolRuns.deleteWhere { ToolRuns.sessionId eq id.value }
+        // 이 대화의 실행 기록(에이전트 탭)도. 단계는 CASCADE
+        AgentRuns.deleteWhere { (AgentRuns.sessionId eq id.value) and (AgentRuns.userId eq userId.value) }
         ChannelBindings.update({ ChannelBindings.sessionId eq id.value }) { it[sessionId] = null }
         Sessions.deleteWhere { (Sessions.id eq id.value) and (Sessions.userId eq userId.value) } > 0
     }

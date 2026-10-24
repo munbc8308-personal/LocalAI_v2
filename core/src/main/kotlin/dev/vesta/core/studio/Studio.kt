@@ -122,6 +122,10 @@ interface RunRepository {
     suspend fun events(run: Long, afterSeq: Int = 0): List<RunEvent>
     /** 서버가 꺼지면서 끝나지 못한 실행 정리 */
     suspend fun abandonRunning(): Int
+    /** [user]의 실행 하나와 그 단계를 지운다. 아직 도는 실행은 지우지 않는다 */
+    suspend fun delete(user: UserId, id: Long): Boolean = false
+    /** [user]의 끝난 실행을 모두 지운다. 지운 수 */
+    suspend fun deleteFinished(user: UserId): Int = 0
 }
 
 /**

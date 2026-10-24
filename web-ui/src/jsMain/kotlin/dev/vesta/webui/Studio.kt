@@ -124,13 +124,42 @@ fun StudioView() {
         }
         // 실행 목록 + 타임라인
         Div({ classes("card") }) {
-            Div({ classes("row") }) { Span { B { Text("실행") } }; Button({ classes("link", "small"); onClick { loadRuns() } }) { Text("새로 고침") } }
+            Div({ classes("row") }) {
+                Span { B { Text("실행") } }
+                Span {
+                    Button({ classes("link", "small"); onClick { loadRuns() } }) { Text("새로 고침") }
+                    if (runs.any { it.status != "RUNNING" }) Button({
+                        classes("link", "small", "danger")
+                        onClick {
+                            if (kotlinx.browser.window.confirm("끝난 실행 기록을 모두 지울까요? 대화는 남습니다. 되돌릴 수 없습니다.")) scope.launch {
+                                runCatching { Http.delete("/api/runs") }
+                                    .onSuccess { if (detail?.run?.status != "RUNNING") { selected = null; detail = null }; loadRuns() }
+                                    .onFailure { error = it.message }
+                            }
+                        }
+                    }) { Text("모두 지우기") }
+                }
+            }
             if (runs.isEmpty()) P({ classes("muted", "small") }) { Text("아직 실행이 없습니다. 대화하거나 일을 맡기면 여기에 쌓입니다.") }
             runs.take(30).forEach { r ->
                 Div({ classes("run"); if (r.id == selected) classes("selected"); onClick { open(r.id) } }) {
                     Div({ classes("row", "small") }) {
                         Span { B { Text(if (r.agent == "TEAM") "팀 ${r.customAgent}" else r.customAgent ?: agentLabel(r.agent)) }; Text(" · ${r.input.take(60)}") }
-                        Span({ classes(statusClass(r.status)) }) { Text(statusLabel(r.status)) }
+                        Span {
+                            Span({ classes(statusClass(r.status)) }) { Text(statusLabel(r.status)) }
+                            if (r.status != "RUNNING") Button({
+                                classes("link", "small", "remove")
+                                attr("aria-label", "실행 기록 지우기")
+                                onClick { event ->
+                                    event.stopPropagation()
+                                    scope.launch {
+                                        runCatching { Http.delete("/api/runs/${r.id}") }
+                                            .onSuccess { runs.removeAll { it.id == r.id }; if (selected == r.id) { selected = null; detail = null } }
+                                            .onFailure { error = it.message }
+                                    }
+                                }
+                            }) { Text("🗑") }
+                        }
                     }
                 }
             }

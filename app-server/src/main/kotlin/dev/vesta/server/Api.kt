@@ -682,6 +682,18 @@ fun Application.vestaApi(deps: ServerDeps) {
                         }
                     }
                 }
+                // 실행 기록 지우기 (본인 것, 끝난 것만). 대화는 남는다
+                delete {
+                    val user = call.principal(deps) ?: return@delete
+                    val studio = deps.studio ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    call.respondJson(HttpStatusCode.OK, """{"removed":${studio.runRepo.deleteFinished(user.userId)}}""")
+                }
+                delete("/{id}") {
+                    val user = call.principal(deps) ?: return@delete
+                    val studio = deps.studio ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
+                    val removed = call.parameters["id"]?.toLongOrNull()?.let { studio.runRepo.delete(user.userId, it) } ?: false
+                    call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
+                }
                 get("/{id}") {
                     val user = call.principal(deps) ?: return@get
                     val studio = deps.studio ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"스튜디오를 쓸 수 없습니다"}""")
