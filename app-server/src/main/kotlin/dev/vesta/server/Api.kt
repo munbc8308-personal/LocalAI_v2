@@ -241,9 +241,12 @@ fun Application.vestaApi(deps: ServerDeps) {
             post("/login") {
                 val auth = deps.auth ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"웹 로그인이 꺼져 있음"}""")
                 val dto = ApiJson.decodeFromString(LoginDto.serializer(), call.receiveText())
+                // 바깥에서는 비밀번호를 보기 전에 계정 이메일이 Access 이메일과 같은지 본다: 다르면 틀린 비밀번호와 같은 답.
+                // 비밀번호가 맞는지 알려 주지 않고, 남의 계정 잠금 횟수도 올리지 않는다 (보안 검토)
+                if (!call.publicLoginAllowed(deps, dto.name)) return@post call.respondJson(HttpStatusCode.Unauthorized, """{"error":"비밀번호가 맞지 않습니다"}""")
                 when (val result = auth.login(dto.name, dto.password, call.request.header(HttpHeaders.UserAgent))) {
                     is LoginResult.Ok -> {
-                        // 바깥에서는 Access 이메일이 이 계정의 이메일과 같아야 한다 (M26)
+                        // 위에서 확인했지만 한 번 더 (M26)
                         call.publicMismatch(deps, result.session.user)?.let { message ->
                             auth.logout(result.token)
                             return@post call.respondJson(HttpStatusCode.Forbidden, buildJsonObject { put("error", message) }.toString())
@@ -978,6 +981,14 @@ private suspend fun ApplicationCall.publicMismatch(deps: ServerDeps, user: UserC
     val email = deps.userEmail(user.userId)
     if (email != null && email.equals(access, ignoreCase = true)) return null
     return "이 Cloudflare 로그인($access)은 이 Vesta 계정에 연결돼 있지 않습니다. Mac 주인에게 vesta user email 로 연결을 부탁하세요"
+}
+
+/** 바깥 로그인: 로그인하려는 계정(이름을 비우면 Mac 주인)의 이메일이 Access 이메일과 같은지. 이 Mac·Tailscale에서 온 요청이면 true */
+private suspend fun ApplicationCall.publicLoginAllowed(deps: ServerDeps, name: String?): Boolean {
+    val access = attributes.getOrNull(ACCESS_EMAIL) ?: return true
+    val login = name?.trim()?.takeIf { it.isNotBlank() }
+    val id = if (login == null) deps.owner.userId else deps.users?.find(login)?.id ?: return false
+    return deps.userEmail(id)?.equals(access, ignoreCase = true) == true
 }
 
 /**

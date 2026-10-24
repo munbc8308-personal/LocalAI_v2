@@ -173,8 +173,13 @@ class PublicAccessTest : FunSpec({
         application { vestaApi(deps) }
         val minaJwt = access.token(email = "mina@example.com")
         val ownerJwt = access.token(email = "owner@example.com")
-        // mina의 Access 로그인으로 주인 계정에 들어갈 수 없다 (비밀번호를 알아도)
-        client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"password":"correct horse"}""") }.status shouldBe HttpStatusCode.Forbidden
+        // mina의 Access 로그인으로 주인 계정에 들어갈 수 없다. 비밀번호가 맞아도 틀린 것과 같은 답이고, 주인 계정 잠금도 쌓이지 않는다
+        val right = client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"password":"correct horse"}""") }
+        val wrong = client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"password":"wrong pass"}""") }
+        right.status shouldBe HttpStatusCode.Unauthorized
+        right.bodyAsText() shouldBe wrong.bodyAsText()
+        client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"name":"ghost","password":"x"}""") }.bodyAsText() shouldBe wrong.bodyAsText()
+        repeat(6) { client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"name":"owner","password":"x"}""") } }
 
         val login = client.post("/api/login") { header("Host", HOST); header(ACCESS_HEADER, minaJwt); setBody("""{"name":"mina","password":"mina-pass-1"}""") }
         login.status shouldBe HttpStatusCode.OK
