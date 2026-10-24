@@ -41,11 +41,14 @@ vesta uninstall      # 지우기 (데이터는 남길지 묻는다)
 
 초대한 사람만 주소 하나로 접속합니다. 방법은 두 가지입니다.
 
-### 공유기 + DDNS (예: iptime)
+### 공유기 + DDNS (DuckDNS, 무료)
+
+iptime DDNS(`*.iptime.org`)는 인증서 발급이 막혀 있어(CAA) HTTPS를 쓸 수 없습니다. duckdns.org에서 이름을 만듭니다.
 
 ```sh
-vesta public setup --direct --hostname 이름.iptime.org
-scripts/direct-https.sh 이름.iptime.org      # HTTPS (Caddy, Let's Encrypt)
+scripts/duckdns.sh 이름                       # 토큰(키체인)·5분마다 공인 IP 갱신
+vesta public setup --direct --hostname 이름.duckdns.org
+scripts/direct-https.sh 이름.duckdns.org      # HTTPS (Caddy, Let's Encrypt)
 vesta public invite mina                     # 초대 (기본 손님)
 vesta public status
 ```

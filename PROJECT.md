@@ -1006,7 +1006,7 @@ M22 에이전트 스튜디오(7.16)에 합친다: 사용자 정의 에이전트�
 
 | ID | 기능 | 우선순위 | 설명 |
 |----|------|----------|------|
-| P-01b | 직접 공개 (공유기) | P1 | Cloudflare 없이 공유기 포트포워딩(443·80) + DDNS(iptime 등). 이 Mac의 Caddy가 HTTPS(Let's Encrypt)를 받아 바깥 입구로 넘긴다(`scripts/direct-https.sh`, `publicAccess.mode: direct`). Access가 없으므로 IP별 요청·로그인 제한, 바깥 로그인은 12자 이상 비밀번호. 8787은 계속 이 Mac 안에서만 |
+| P-01b | 직접 공개 (공유기) | P1 | Cloudflare 없이 공유기 포트포워딩(443·80) + DDNS(DuckDNS: `*.iptime.org`는 CAA 때문에 인증서 불가). 이 Mac의 Caddy가 HTTPS(Let's Encrypt)를 받아 바깥 입구로 넘긴다(`scripts/direct-https.sh`, `publicAccess.mode: direct`). Access가 없으므로 IP별 요청·로그인 제한, 바깥 로그인은 12자 이상 비밀번호. 8787은 계속 이 Mac 안에서만 |
 | P-01 | Cloudflare Tunnel | P1 | 집 Mac에서 Cloudflare로 나가는 연결만(공유기 포트 개방 없음), 내 도메인(`vesta.내도메인`), 방화벽·요청 수 제한·DDoS 방어. `cloudflared`를 launchd로 (`scripts/cloudflare-tunnel.sh`) |
 | P-02 | Cloudflare Access | P1 | 터널 앞 로그인 관문: 초대한 이메일만(일회용 코드·Google 로그인), 50명까지 무료. Vesta 로그인은 그 뒤에 한 번 더 |
 | P-03 | 지인 계정 | P1 | 초대 = 사용자 추가(M20 초대 안내) + Access 허용 목록. 기본 역할 GUEST(대화·웹 검색), 주인이 MEMBER로 올릴 수 있음. 사용자 수 한도를 설정으로(`users.maxUsers`, 지금 5) |
@@ -2724,4 +2724,11 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 확인:
   - 단위 테스트(직접 모드 로그인·짧은 비밀번호·IP 제한·관리 막기, 제한기 창·크기).
   - 실제 Mac: 입구 `/v1` 404, 짧은 비밀번호 401 안내, LAN 80 → https 308, LAN 8787 닫힘.
-  - Let's Encrypt 발급은 공유기에 443 포워딩이 없어 "Timeout during connect"로 실패했다. Caddy가 계속 다시 시도한다.
+  - 처음 Let's Encrypt 발급은 공유기에 443 포워딩이 없어 "Timeout during connect"로 실패했다.
+  - 포워딩 뒤에는 `urn:ietf:params:acme:error:caa`로 실패했다. `iptime.org` CAA가 `issue "letsencrypt.org; accounturi=<iptime 계정>; validationmethods=dns-01"`, `issuewild ";"`라서 iptime 계정만 받을 수 있고 다른 CA도 막힌다. → `*.iptime.org`는 HTTPS 불가. `setup --direct`가 거부한다.
+- **DuckDNS** (CAA 제한 없음, 무료):
+  - `scripts/duckdns.sh <이름>`: 토큰을 숨겨 받아 키체인 `dev.vesta.duckdns`/`api-token`에 넣는다(`security -i` 표준 입력).
+  - `~/.vesta/bin/duckdns-update.sh`(700)를 만들어 launchd `dev.vesta.duckdns`로 5분마다 실행한다. 토큰이 든 주소는 `curl -K -` 표준 입력으로 넘긴다(ps에 안 보임). `ip=`를 비우면 DuckDNS가 요청한 공인 IP로 맞춘다.
+  - 실제(`munbc8308.duckdns.org`):
+    - Caddy가 TLS-ALPN으로 인증서를 받았다(Let's Encrypt YE1, 2027-01-22까지, 자동 갱신).
+    - 바깥 HTTPS: `/` 200, `/api/health`·`/v1/models` 404, `/api/me` 401, HSTS. `vesta public status`는 모두 ✓.

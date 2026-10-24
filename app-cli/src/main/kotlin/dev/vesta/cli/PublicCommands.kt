@@ -86,12 +86,18 @@ class PublicSetupCommand : CliktCommand(name = "setup") {
         val host = (hostname ?: current.hostname).trim().lowercase()
         if (!HOSTNAME.matches(host)) { echo("--hostname 이 필요합니다 (예: vesta.example.com, 이름.iptime.org)", err = true); throw ProgramResult(1) }
         if (direct) {
+            if (host.endsWith(".iptime.org")) {
+                // iptime.org CAA는 iptime 계정(dns-01)만 인증서를 받게 막아 둔다 → HTTPS를 쓸 수 없다
+                echo("*.iptime.org 는 HTTPS 인증서를 받을 수 없습니다 (iptime.org의 CAA 제한). 무료 DuckDNS를 쓰세요: duckdns.org 에서 이름을 만들고 scripts/duckdns.sh <이름>", err = true)
+                throw ProgramResult(1)
+            }
             writePublicConfig(store.paths.configFile, PublicAccessConfig(enabled = true, mode = "direct", port = current.port, hostname = host, ownerAdmin = ownerAdmin || current.ownerAdmin))
             echo("설정을 저장했습니다: ${store.paths.configFile} (publicAccess, 직접 모드)")
             restartServer()
             val short = store.service.list().filter { it.hasPassword && it.name !in dev.vesta.identity.UserService.SYSTEM_USERS }.map { it.name }
             echo("")
             echo("바깥 로그인은 ${PublicAccessConfig.DIRECT_MIN_PASSWORD}자 이상 비밀번호만 받습니다 (짧으면 vesta user passwd <이름>, 주인은 vesta passwd)")
+            if (host.endsWith(".duckdns.org")) echo("공인 IP 갱신: 저장소의 scripts/duckdns.sh ${host.removeSuffix(".duckdns.org")}   (공유기는 DuckDNS를 갱신하지 못함)")
             echo("다음: 1) 저장소의 scripts/direct-https.sh $host   (HTTPS 인증서·Caddy)")
             echo("      2) 공유기 포트포워딩: 바깥 443 → 이 Mac(${lanAddress() ?: "이 Mac IP"}) 443, 바깥 80 → 80. 8787 포워딩은 지우세요")
             echo("      3) vesta public status")
@@ -292,8 +298,8 @@ internal fun publicChecks(config: PublicAccessConfig, serverPort: Int): List<Pai
     }.getOrNull()
     // 터널 입구: Access 토큰 없이 오면 403이어야 한다 (Host는 java HttpClient가 바꿀 수 없어 127.0.0.1로 보내 Host 거부도 403)
     when (val local = get("http://127.0.0.1:${config.port}/api/health")) {
-        null -> add("✗" to "터널 입구(127.0.0.1:${config.port})가 닫혀 있습니다: 서버가 공개 설정을 읽었는지 (vesta public setup이 다시 시작함, 로그 ~/.vesta/logs/server.err.log)")
-        else -> if (local.first == 403) add("✓" to "터널 입구가 열려 있고, Access 토큰 없는 요청을 막습니다") else add("✗" to "터널 입구가 토큰 없는 요청에 ${local.first}로 답합니다 (403이어야 함)")
+        null -> add("✗" to "바깥 입구(127.0.0.1:${config.port})가 닫혀 있습니다: 서버가 공개 설정을 읽었는지 (vesta public setup이 다시 시작함, 로그 ~/.vesta/logs/server.err.log)")
+        else -> if (local.first == 403) add("✓" to "바깥 입구(127.0.0.1:${config.port})가 열려 있고, 공개 주소가 아닌 요청을 막습니다") else add("✗" to "바깥 입구가 공개 주소가 아닌 요청에 ${local.first}로 답합니다 (403이어야 함)")
     }
     if (config.direct) { addAll(directChecks(config, ::get)); return@buildList }
     val agent = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.cloudflared.plist")
@@ -316,10 +322,23 @@ internal fun publicChecks(config: PublicAccessConfig, serverPort: Int): List<Pai
 private fun directChecks(config: PublicAccessConfig, get: (String) -> Pair<Int, String?>?): List<Pair<String, String>> = buildList {
     val agent = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.caddy.plist")
     add(if (agent.exists()) "✓" to "HTTPS 서비스 등록됨 (dev.vesta.caddy)" else "✗" to "HTTPS 서비스가 없습니다: scripts/direct-https.sh ${config.hostname}")
+    if (config.hostname.endsWith(".duckdns.org")) {
+        val ddns = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.duckdns.plist")
+        val last = Path.of(System.getProperty("user.home"), ".vesta", "logs", "duckdns.log").takeIf { it.exists() }?.readText()?.lines()?.lastOrNull { it.isNotBlank() }
+        when {
+            !ddns.exists() -> add("!" to "DuckDNS 공인 IP 갱신이 없습니다: 집 IP가 바뀌면 끊깁니다 (scripts/duckdns.sh ${config.hostname.removeSuffix(".duckdns.org")})")
+            last != null && "실패" in last -> add("!" to "DuckDNS 갱신 실패: $last")
+            else -> add("✓" to "DuckDNS 공인 IP 갱신 중 (5분마다)")
+        }
+    }
     // 바깥 주소로 이 Mac에서 접속 (공유기가 같은 망 안의 요청도 포워딩해 주는 경우: iptime은 대부분 됨)
     when (val api = get("https://${config.hostname}/v1/models")) {
         null -> add("✗" to "https://${config.hostname} 에 연결하지 못했습니다: 공유기 포트포워딩(443 → 이 Mac 443)·인증서(~/.vesta/logs/caddy.err.log)를 확인하세요. 휴대폰 LTE로도 열어 보세요")
-        else -> if (api.first == 404) add("✓" to "바깥 주소가 HTTPS로 열리고, 토큰 API(/v1)는 막혀 있습니다") else add("✗" to "바깥 /v1 이 ${api.first}입니다 (404여야 함): 8787을 바로 포워딩하지 않았는지 확인")
+        else -> when (api.first) {
+            404 -> add("✓" to "바깥 주소가 HTTPS로 열리고, 토큰 API(/v1)는 막혀 있습니다")
+            502, 503, 504 -> add("✗" to "Caddy는 열렸지만 Vesta가 응답하지 않습니다 (HTTP ${api.first}): vesta status")
+            else -> add("✗" to "바깥 /v1 이 ${api.first}입니다 (404여야 함): 8787을 바로 포워딩하지 않았는지 확인")
+        }
     }
     when (val plain = get("http://${config.hostname}:8787/api/health")) {
         null -> add("✓" to "8787은 바깥에서 닫혀 있습니다")

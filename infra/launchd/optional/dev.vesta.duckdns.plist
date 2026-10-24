@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- DuckDNS 공인 IP 갱신 (PROJECT.md 7.20, M26). scripts/duckdns.sh가 갱신 스크립트를 만들고 등록한다. 5분마다 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vesta.duckdns</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__HOME__/.vesta/bin/duckdns-update.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.vesta/logs/duckdns.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.vesta/logs/duckdns.log</string>
+</dict>
+</plist>
