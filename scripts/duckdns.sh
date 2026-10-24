@@ -26,9 +26,13 @@ case "$NAME" in
 esac
 
 if ! /usr/bin/security find-generic-password -s dev.vesta.duckdns -a api-token -w >/dev/null 2>&1; then
-    [ -t 0 ] || { echo "토큰을 물어야 해서 터미널에서 실행하세요" >&2; exit 1; }
-    printf "DuckDNS 토큰 (duckdns.org 로그인 화면 위쪽 token, 입력이 보이지 않습니다): "
-    stty -echo; read -r TOKEN; stty echo; echo
+    if [ -t 0 ]; then
+        printf "DuckDNS 토큰 (duckdns.org 로그인 화면 위쪽 token, 입력이 보이지 않습니다): "
+        stty -echo; read -r TOKEN; stty echo; echo
+    else
+        # 터미널이 없으면(Claude Code의 ! 실행 등) macOS 입력 창으로 묻는다 (입력 숨김)
+        TOKEN=$(/usr/bin/osascript -e 'text returned of (display dialog "DuckDNS 토큰 (duckdns.org 로그인 화면 위쪽 token)" default answer "" with hidden answer with title "Vesta" buttons {"취소", "저장"} default button "저장")' 2>/dev/null) || { echo "취소했습니다" >&2; exit 1; }
+    fi
     case "$TOKEN" in
         ''|*[!a-zA-Z0-9-]*) echo "토큰 형식이 아닙니다" >&2; exit 1 ;;
     esac
