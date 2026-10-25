@@ -41,10 +41,13 @@ class ChatCommand : CliktCommand(name = "chat") {
 
     private val local by option("--local", help = "서버가 떠 있어도 이 프로세스에서 직접 실행 (임베디드)").flag()
     private val acceptWrites by option("--accept-writes", help = "파일 쓰기·수정은 묻지 않고 승인 (셸은 계속 묻는다). 대화 중 /accept로 바꾼다").flag()
+    private val acceptShell by option("--accept-shell", help = "셸 명령을 묻지 않고 실행 (차단 목록은 그대로). 이번 실행에만. 대화 중 /accept shell로 바꾼다").flag()
     private val noWorkspace by option("--no-workspace", help = "지금 폴더를 작업 폴더로 쓰지 않는다").flag()
 
     /** 이번 실행에서 파일 쓰기를 묻지 않고 승인할지 (/accept) */
     private var autoWrites = false
+    /** 이번 실행에서 셸을 묻지 않고 승인할지 (/accept shell). 저장하지 않는다 */
+    private var autoShell = false
 
     override fun run() = runBlocking {
         openBackend().use { backend ->
@@ -65,6 +68,8 @@ class ChatCommand : CliktCommand(name = "chat") {
 
             out.println(dim("Vesta · ${backend.description} · /help 명령 보기 · Ctrl+D 종료"))
             autoWrites = acceptWrites
+            autoShell = acceptShell
+            if (autoShell) out.println(red("셸 명령을 묻지 않고 실행합니다 (이번 실행에만, 차단 목록은 그대로). 끄기: /accept shell off"))
             val workspace = if (noWorkspace) null else Workspaces.current()?.let { ws ->
                 if (Workspaces.trusted(ws)) return@let ws
                 // 처음 보거나 바뀐 VESTA.md: 따를지 먼저 묻는다. 입력이 터미널이 아니면 묻지 않고 쓰지 않는다
@@ -87,7 +92,7 @@ class ChatCommand : CliktCommand(name = "chat") {
                 Workspaces.skippedSkills(ws).takeIf { it.isNotEmpty() }?.let { out.println(red("쓰지 않은 스킬 (형식 오류·숨은 문자·예약된 이름): ${it.joinToString()}")) }
                 out.println(dim("작업 폴더 ${Workspaces.display(ws.path)}" + (if (ws.instructions != null) " · ${Workspaces.FILE} 읽음" else "") +
                     (if (ws.skills.isNotEmpty()) " · 스킬 ${ws.skills.joinToString { "/" + it.name }}" else "") +
-                    if (autoWrites) " · 파일 쓰기 자동 승인" else ""))
+                    (if (autoWrites) " · 파일 쓰기 자동 승인" else "") + if (autoShell) " · 셸 자동 승인" else ""))
             }
             session?.let { printHistory(out, backend, it) }
             out.flush()
@@ -136,8 +141,14 @@ class ChatCommand : CliktCommand(name = "chat") {
                         }
                         "/history" -> session?.let { printHistory(out, backend, it) } ?: out.println(dim("아직 대화가 없습니다."))
                         "/accept" -> {
-                            autoWrites = when (arg?.lowercase()) { "on" -> true; "off" -> false; else -> !autoWrites }
-                            out.println(dim(if (autoWrites) "파일 쓰기·수정을 묻지 않고 승인합니다 (셸은 계속 묻습니다). 끄기: /accept off" else "파일 쓰기·수정도 매번 묻습니다."))
+                            val words = arg?.lowercase()?.split(Regex("\\s+")).orEmpty()
+                            if (words.firstOrNull() == "shell") {
+                                autoShell = when (words.getOrNull(1)) { "on" -> true; "off" -> false; else -> !autoShell }
+                                out.println(if (autoShell) red("셸 명령을 묻지 않고 실행합니다 (차단 목록은 그대로). 끄기: /accept shell off") else dim("셸 명령을 다시 매번 묻습니다."))
+                            } else {
+                                autoWrites = when (words.firstOrNull()) { "on" -> true; "off" -> false; else -> !autoWrites }
+                                out.println(dim(if (autoWrites) "파일 쓰기·수정을 묻지 않고 승인합니다. 끄기: /accept off" else "파일 쓰기·수정도 매번 묻습니다."))
+                            }
                         }
                     }
                     out.flush()
@@ -197,6 +208,10 @@ class ChatCommand : CliktCommand(name = "chat") {
                     if (event is AgentEvent.ApprovalRequested) {
                         val decision = if (autoWrites && AutoApprove.allows(event, workspace?.path)) {
                             out.println(dim("✓ 자동 승인 (파일 쓰기): ${event.details.title}"))
+                            dev.vesta.core.tools.ApprovalDecision.Approve
+                        } else if (autoShell && AutoApprove.shell(event)) {
+                            // 명령은 늘 보여 준다 (무엇이 돌았는지 사용자가 알게)
+                            out.println(dim("✓ 자동 승인 (셸): ${event.details.title}"))
                             dev.vesta.core.tools.ApprovalDecision.Approve
                         } else Approvals.ask(reader, out, event)
                         backend.resolveApproval(event.requestId, decision)
@@ -260,7 +275,8 @@ class ChatCommand : CliktCommand(name = "chat") {
             /이름 할 일       스킬 (~/.vesta/skills, 작업 폴더 .vesta/skills, 웹에서 만든 것). /skills 목록
             /agent 이름 할 일 사용자 정의·A2A 에이전트, /team 이름 할 일 팀. /agents 목록
             @컬렉션 질문      지정한 컬렉션에서 찾아 답하기 (@a,b 여러 개)
-            /accept [on|off] 파일 쓰기·수정을 묻지 않고 승인 (셸은 계속 묻는다)
+            /accept [on|off] 파일 쓰기·수정을 묻지 않고 승인
+            /accept shell [on|off] 셸 명령을 묻지 않고 실행 (이번 실행에만, 차단 목록은 그대로)
             /exit            종료 (Ctrl+D)
             생성 중 Ctrl+C    답변 중단 (그때까지 내용은 저장)
         """.trimIndent()

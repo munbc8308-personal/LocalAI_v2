@@ -10,11 +10,11 @@ import kotlin.time.TimeSource
 /**
  * 한 번만 묻고 끝내기 (`vesta -p "질문"`, PROJECT.md 7.14, M17). 작업 폴더·VESTA.md는 대화와 같다.
  * - 터미널이면 대화처럼 진행 상황·출처까지 보여 주고, 파이프·파일로 받으면 답만 내보낸다 (스크립트에서 쓰기 좋게)
- * - 승인: 파일 쓰기는 [acceptWrites]면 바로 승인. 그 밖(셸 포함)은 터미널에서 묻고, 터미널이 아니면 거부한다
+ * - 승인: 파일 쓰기는 [acceptWrites]면, 셸은 `acceptShell`이면 바로 승인. 그 밖은 터미널에서 묻고, 터미널이 아니면 거부한다
  * 오류로 끝나면 종료 코드 1
  */
 internal object PrintMode {
-    suspend fun run(question: String, acceptWrites: Boolean, local: Boolean, useWorkspace: Boolean): Int {
+    suspend fun run(question: String, acceptWrites: Boolean, local: Boolean, useWorkspace: Boolean, acceptShell: Boolean = false): Int {
         // JDK 21: 입출력이 터미널일 때만 null이 아니다
         val console = System.console()
         val backend = openBackend(local)
@@ -44,6 +44,7 @@ internal object PrintMode {
                 if (event is AgentEvent.ApprovalRequested) {
                     val decision = when {
                         acceptWrites && AutoApprove.allows(event, workspace?.path) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (파일 쓰기): ${event.details.title}".let { if (console != null) dim(it) else it }) }
+                        acceptShell && AutoApprove.shell(event) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (셸): ${event.details.title}".let { if (console != null) dim(it) else it }) }
                         console != null -> ask(console, err, event)
                         else -> ApprovalDecision.Deny("터미널이 아니라 승인할 수 없음").also {
                             err.println("거부: ${event.details.title} (" + if (acceptWrites) "자동 승인 범위 밖: 셸·실행되는 파일·작업 폴더 밖은 터미널에서 승인)" else "터미널에서 실행하거나, 작업 폴더 안 파일 쓰기면 --accept-writes)")

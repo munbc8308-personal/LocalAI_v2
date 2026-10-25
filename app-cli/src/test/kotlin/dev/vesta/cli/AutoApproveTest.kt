@@ -48,4 +48,10 @@ class AutoApproveTest : FunSpec({
         AutoApprove.allows(event("apply_patch", "README.md"), root.toString()) shouldBe false
         AutoApprove.allows(event("move_file", "a.txt", ".git/hooks/post-checkout"), root.toString()) shouldBe false
     }
+
+    test("셸 자동 승인은 run_shell(EXEC)만, 쓰기·MCP 도구는 해당 없음") {
+        AutoApprove.shell(event("run_shell", risk = RiskLevel.EXEC)) shouldBe true
+        AutoApprove.shell(event("write_file", "a.kt")) shouldBe false
+        AutoApprove.shell(event("mail_send", risk = RiskLevel.EXEC)) shouldBe false
+    }
 })

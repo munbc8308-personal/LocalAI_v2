@@ -18,7 +18,8 @@ class Vesta : CliktCommand(name = "vesta") {
     override val invokeWithoutSubcommand = true
 
     private val print by option("--print", "-p", help = "한 번만 묻고 답을 출력한 뒤 끝낸다 (지금 폴더가 작업 폴더)")
-    private val acceptWrites by option("--accept-writes", help = "파일 쓰기·수정은 묻지 않고 승인 (셸은 계속 묻는다)").flag()
+    private val acceptWrites by option("--accept-writes", help = "파일 쓰기·수정은 묻지 않고 승인").flag()
+    private val acceptShell by option("--accept-shell", help = "셸 명령을 묻지 않고 실행 (차단 목록은 그대로, 이번 실행에만)").flag()
     private val local by option("--local", help = "서버가 떠 있어도 이 프로세스에서 직접 실행").flag()
     private val noWorkspace by option("--no-workspace", help = "지금 폴더를 작업 폴더로 쓰지 않는다").flag()
 
@@ -26,12 +27,13 @@ class Vesta : CliktCommand(name = "vesta") {
         if (currentContext.invokedSubcommand != null) return
         val question = print
         if (question != null) {
-            val code = runBlocking { PrintMode.run(question, acceptWrites, local, !noWorkspace) }
+            val code = runBlocking { PrintMode.run(question, acceptWrites, local, !noWorkspace, acceptShell) }
             if (code != 0) throw ProgramResult(code)
             return
         }
         ChatCommand().parse(buildList {
             if (acceptWrites) add("--accept-writes")
+            if (acceptShell) add("--accept-shell")
             if (local) add("--local")
             if (noWorkspace) add("--no-workspace")
         })

@@ -30,6 +30,12 @@ internal object AutoApprove {
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * 셸 자동 승인 (`--accept-shell`·`/accept shell`, 사용자가 켤 때만): 셸 도구(run_shell)만. 차단 목록에 걸린 명령은 서버가 승인과 관계없이 실행하지 않는다.
+     * 다른 사용자의 셸(주인에게 넘어오는 승인)·MCP 도구는 여기로 오지 않거나 셸이 아니라 해당 없음
+     */
+    fun shell(event: AgentEvent.ApprovalRequested): Boolean = event.tool == "run_shell" && event.risk == RiskLevel.EXEC
+
     fun allows(event: AgentEvent.ApprovalRequested, workspace: String?): Boolean {
         if (workspace == null || event.risk != RiskLevel.WRITE || event.tool !in TOOLS) return false
         val root = runCatching { Path.of(workspace).toRealPath() }.getOrNull() ?: return false
