@@ -195,7 +195,10 @@ class DefaultConversationService(
         // 스킬 (`/이름 할 일`, K-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
         val skill = if (call == null) dev.vesta.core.skill.SkillCall.parse(input.text)?.let { c -> skills(user, workspace).firstOrNull { it.name == c.name }?.let { it to c } } else null
         // "이어서 해 줘" (가계부 앱 시험에서): 같은 대화의 직전 담당에게 그대로. 라우터에 맡기면 도구 없는 에이전트로 가서 한 척만 했다
-        val continued = if (call == null && skill == null && input.images.isEmpty() && CONTINUE.matches(input.text.trim())) lastDecision[session.id]?.takeIf { it.agent != AgentType.CHAT } else null
+        val continued = if (call == null && skill == null && input.images.isEmpty() && CONTINUE.matches(input.text.trim()))
+            // 서버를 다시 띄우면 직전 판정(메모리)이 없으니, 저장된 마지막 답의 에이전트로
+            (lastDecision[session.id] ?: all.lastOrNull { it.role == ChatRole.ASSISTANT && it.model != POLICY_MODEL && it.agent != null }?.agent
+                ?.let { RoutingDecision(it, 1.0, RoutingStage.EXPLICIT, question = input.text) })?.takeIf { it.agent != AgentType.CHAT && it.agent in allowed } else null
         val custom = call?.let { if (it.team) teams(user, it.name) else customAgents(user, it.name) }
             ?: skill?.first?.takeIf { it.agent == AgentType.TASK }?.let { skillAgent(user, it) }
             ?: continued?.customAgent?.let { name -> if (continued.team) teams(user, name) else customAgents(user, name) }

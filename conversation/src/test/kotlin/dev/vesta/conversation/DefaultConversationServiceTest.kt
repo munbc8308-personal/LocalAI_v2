@@ -62,9 +62,8 @@ private class MemoryMessages(private val media: MemoryMedia? = null) : MessageRe
     override suspend fun list(sessionId: SessionId) = items.filter { it.sessionId == sessionId }
 }
 
-private class ScriptedAgent(private val script: suspend kotlinx.coroutines.flow.FlowCollector<AgentEvent>.(AgentRequest) -> Unit) : Agent {
+private class ScriptedAgent(override val type: AgentType = AgentType.CHAT, private val script: suspend kotlinx.coroutines.flow.FlowCollector<AgentEvent>.(AgentRequest) -> Unit) : Agent {
     val requests = mutableListOf<AgentRequest>()
-    override val type = AgentType.CHAT
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         requests += request
         script(request)
@@ -163,9 +162,11 @@ class DefaultConversationServiceTest : FunSpec({
     }
 
     test("\"이어서 해 줘\"는 같은 대화의 직전 담당에게 (도구 없는 에이전트로 새지 않게)") {
-        val task = ScriptedAgent { emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
+        val task = ScriptedAgent(AgentType.TASK) { emit(AgentEvent.Token("했음")); emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
         val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
-        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.TASK to task, AgentType.CHAT to chat))
+        val sessions = MemorySessions()
+        val messages = MemoryMessages()
+        val service = DefaultConversationService(sessions, messages, mapOf(AgentType.TASK to task, AgentType.CHAT to chat))
         val session = service.send(user, ChannelType.CLI, null, UserInput("/task 파일 정리")).toList().filterIsInstance<AgentEvent.SessionReady>().single().sessionId
         service.send(user, ChannelType.CLI, session, UserInput("이어서 해 줘")).toList()
             .filterIsInstance<AgentEvent.Routed>().single().decision.agent shouldBe AgentType.TASK
@@ -174,6 +175,12 @@ class DefaultConversationServiceTest : FunSpec({
         task.requests.size shouldBe 3
         service.send(user, ChannelType.CLI, session, UserInput("이어서 다른 얘기 하자")).toList()
         chat.requests.size shouldBe 1
+        // 서버를 다시 띄워도 (새 서비스, 같은 저장소) 저장된 마지막 답의 에이전트로
+        val restarted = DefaultConversationService(sessions, messages, mapOf(AgentType.TASK to task, AgentType.CHAT to chat))
+        restarted.send(user, ChannelType.CLI, session, UserInput("/task 다시")).toList()
+        val again = DefaultConversationService(sessions, messages, mapOf(AgentType.TASK to task, AgentType.CHAT to chat))
+        again.send(user, ChannelType.CLI, session, UserInput("이어서 해 줘")).toList()
+            .filterIsInstance<AgentEvent.Routed>().single().decision.agent shouldBe AgentType.TASK
         // 새 대화에는 이을 것이 없다
         service.send(user, ChannelType.CLI, null, UserInput("이어서 해 줘")).toList()
         chat.requests.size shouldBe 2

@@ -91,27 +91,41 @@ class TaskAgent(
             var calls = emptyList<ToolCall>()
             val filter = ArtifactFilter()
             val leak = LeakedToolCall(available.keys)
-            inference.chat(
+            // 끝없이 쓰는 것 막기 (가계부 앱 시험: 한 단계에서 17만 자를 쓰다 10분 시간 제한에 걸렸다): 단계당 생성 한도, 같은 글 반복이면 멈춤
+            val seen = StringBuilder()
+            var checkedAt = 0
+            var finish: String? = null
+            var runaway = false
+            try { inference.chat(
                 ChatRequest(
                     model = spec.name,
                     messages = messages.toList(), // 이후 단계에서 목록이 바뀌어도 이 요청 내용은 그대로
                     temperature = spec.temperature ?: 0.2,
-                    maxTokens = spec.maxTokens,
+                    maxTokens = spec.maxTokens ?: STEP_TOKENS,
                     reasoningEffort = spec.reasoningEffort,
                     keepAlive = spec.keepAlive,
                     tools = available.values.map { it.spec },
                 ),
             ).collect { chunk ->
                 when (chunk) {
-                    is ChatChunk.Delta -> leak.accept(filter.accept(chunk.text)).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+                    is ChatChunk.Delta -> {
+                        seen.append(chunk.text)
+                        if (seen.length - checkedAt >= 1_000) { checkedAt = seen.length; if (Runaway.repeating(seen)) throw Runaway() }
+                        leak.accept(filter.accept(chunk.text)).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
+                    }
                     is ChatChunk.Reasoning -> emit(AgentEvent.Reasoning(chunk.text))
                     is ChatChunk.ToolCalls -> calls = chunk.calls
-                    is ChatChunk.Done -> usage = chunk.usage
+                    is ChatChunk.Done -> { usage = chunk.usage; finish = chunk.finishReason }
                 }
-            }
+            } } catch (_: Runaway) { runaway = true }
             (leak.accept(filter.flush()) + leak.flush()).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
             // 글로 새어 나온 호출이면 실제 호출로 (gemma4가 가끔 그런다)
             if (calls.isEmpty()) (leak.call?.let { listOf(it) } ?: leak.scan()).takeIf { it.isNotEmpty() }?.let { calls = it }
+            if (calls.isEmpty() && (runaway || finish == "length")) {
+                emit(AgentEvent.Token("\n\n(" + (if (runaway) "같은 글을 되풀이해서" else "한 번에 너무 길게 써서") + " 멈췄습니다. 큰 파일은 나눠 쓰게 하거나, \"이어서 해 줘\"로 다음 단계부터 다시 시켜 주세요.)"))
+                emit(AgentEvent.Done(type, spec.name, usage))
+                return@flow
+            }
             if (calls.isEmpty()) {
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))
@@ -130,7 +144,26 @@ class TaskAgent(
         emit(AgentEvent.Done(type, spec.name, usage))
     }
 
+    /** 같은 글 되풀이로 생성을 멈출 때 */
+    private class Runaway : RuntimeException() {
+        companion object {
+            /** 마지막 200자가 최근 6,000자 안에 네 번 넘게 나오면 되풀이 */
+            fun repeating(s: CharSequence): Boolean {
+                if (s.length < 3_000) return false
+                val tail = s.subSequence(s.length - 200, s.length).toString()
+                if (tail.isBlank()) return false
+                val window = s.subSequence((s.length - 6_000).coerceAtLeast(0), s.length).toString()
+                var count = 0
+                var at = window.indexOf(tail)
+                while (at >= 0) { count++; at = window.indexOf(tail, at + 1) }
+                return count >= 4
+            }
+        }
+    }
+
     private companion object {
+        /** 단계 하나의 생성 한도 (토큰). 200줄 파일 하나는 넉넉히 쓴다 */
+        const val STEP_TOKENS = 8_192
         /** 예약 실행 안내 (M29 S-05) */
         const val UNATTENDED = "예약 실행: 지켜보는 사람이 없어 파일 쓰기·옮기기·셸·보내기 도구가 없다. 그런 일은 하지 않았으면 했다고 말하지 말고, \"예약 실행에서는 할 수 없으니 직접 대화에서 시켜 달라\"고 알린다. 읽기·검색으로 할 수 있는 것만 한다."
         const val DENIED = "거부됨"

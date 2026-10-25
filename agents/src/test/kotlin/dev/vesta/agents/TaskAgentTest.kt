@@ -106,6 +106,17 @@ class TaskAgentTest : FunSpec({
         delegated.single().tainted shouldBe true
     }
 
+    test("같은 글을 되풀이하면 그 단계를 멈추고 알린다, 단계마다 생성 한도를 둔다") {
+        val loop = List(200) { ChatChunk.Delta("같은 문장을 계속 되풀이하는 중입니다. 같은 문장을 계속 되풀이하는 중입니다. ") }
+        val model = ScriptedModel(listOf(loop + ChatChunk.Done("stop", null)))
+        val events = TaskAgent(model, models, ToolRegistry(emptyList()), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "되풀이해서 멈췄습니다"
+        model.requests.single().maxTokens shouldBe 8_192
+        val long = ScriptedModel(listOf(listOf(ChatChunk.Delta("아주 긴 파일…"), ChatChunk.Done("length", null))))
+        TaskAgent(long, models, ToolRegistry(emptyList()), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+            .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "너무 길게 써서 멈췄습니다"
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)
