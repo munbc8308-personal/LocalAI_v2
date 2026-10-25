@@ -86,6 +86,9 @@ class TaskAgent(
         var usage: Usage? = null
         val taint = Taint(request.tainted)
         val denied = mutableListOf<String>()
+        // 마지막 답의 "빌드 성공·테스트 통과·파일 수정"을 도구 기록과 맞춰 본다. 안 맞으면 한 번 되돌려 확인시킨다
+        val claims = ClaimCheck()
+        var rechecked = false
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
@@ -130,6 +133,17 @@ class TaskAgent(
                 return@flow
             }
             if (calls.isEmpty()) {
+                val unverified = claims.unverified(text.toString())
+                if (unverified.isNotEmpty() && !rechecked && step < maxSteps) {
+                    rechecked = true
+                    emit(AgentEvent.Status("확인되지 않은 주장이 있어 다시 확인합니다"))
+                    emit(AgentEvent.Token("\n\n"))
+                    messages += ChatMessage(ChatRole.ASSISTANT, text.toString())
+                    messages += ChatMessage(ChatRole.USER, "[시스템 확인] 방금 답에 이번 작업의 실행 기록으로 확인되지 않은 주장이 있다:\n" +
+                        unverified.joinToString("\n") { "- $it" } + "\n도구로 실제로 실행해 확인하라(실패하면 고친다). 확인할 수 없으면 답에서 그 주장을 빼고 사실대로 다시 보고하라.")
+                    continue
+                }
+                if (unverified.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행 기록으로 확인되지 않은 주장: " + unverified.joinToString("; ")))
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))
                 emit(AgentEvent.Done(type, spec.name, usage))
@@ -139,6 +153,7 @@ class TaskAgent(
             messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
             for (call in calls) {
                 val result = runTool(call, request, context, taint, available)
+                claims.record(call.name, runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())), !result.isError, result.output)
                 if (result.summary == DENIED) denied += available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name
                 messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
             }

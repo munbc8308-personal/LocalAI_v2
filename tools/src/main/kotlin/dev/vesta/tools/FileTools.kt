@@ -192,7 +192,7 @@ class WriteFileTool(private val sandbox: PathSandbox) : Tool {
         return ApprovalDetails(
             title = "파일 쓰기 ($action): ${target?.let(sandbox::display) ?: path} · ${size(content.toByteArray().size.toLong())}",
             body = content.take(2_000) + if (content.length > 2_000) "\n… (${content.length}자 중 2,000자만 표시)" else "",
-            warning = if (exists && mode == "overwrite") "기존 파일을 덮어씁니다" else null,
+            warning = if (exists && mode == "overwrite") listOfNotNull("기존 파일을 덮어씁니다", target?.let { shrink(it, content) }).joinToString(" · ") else null,
             targets = listOfNotNull(target?.toString()),
         )
     }
@@ -209,9 +209,20 @@ class WriteFileTool(private val sandbox: PathSandbox) : Tool {
             else -> return@withContext fail("mode는 create / overwrite / append")
         }
         file.parent?.createDirectories()
+        // 덮어쓰기로 크게 줄면 모델에게 알린다 (가계부 앱 시험: 빌드를 통과시키려고 155줄 화면을 51줄로 줄여 기능을 지웠다)
+        val shrunk = if (arguments.string("mode") == "overwrite" && file.exists()) shrink(file, content) else null
         if (arguments.string("mode") == "append") Files.writeString(file, content, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
         else file.writeText(content)
-        ToolResult("저장함: ${sandbox.display(file)} (${size(file.fileSize())})")
+        ToolResult("저장함: ${sandbox.display(file)} (${size(file.fileSize())})" +
+            (shrunk?.let { "\n주의: $it. 요청받은 기능을 지운 것이면 되살리고, 일부러 뺐으면 답에 무엇을 뺐는지 밝혀라." } ?: ""))
+    }
+
+    /** 기존 파일보다 크게 줄었으면 경고 한 줄 (20줄 이상 파일이 40% 넘게 줄 때) */
+    private fun shrink(file: java.nio.file.Path, content: String): String? {
+        if (!file.exists()) return null
+        val before = runCatching { Files.readAllLines(file).size }.getOrDefault(0)
+        val after = content.lines().size
+        return if (before >= 20 && after < before * 0.6) "기존 ${before}줄 → ${after}줄로 크게 줄어듦" else null
     }
 }
 

@@ -121,6 +121,30 @@ class TaskAgentTest : FunSpec({
             .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "너무 길게 써서 멈췄습니다"
     }
 
+    test("확인되지 않은 주장은 한 번 되돌려 확인시키고, 그래도 안 맞으면 답 끝에 표시") {
+        val shell = RecordingTool("run_shell", RiskLevel.READ)
+        // 1) 테스트 없이 "통과" → 되돌림 → 2) 테스트를 실행 → 3) 통과 보고: 표시 없음
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("테스트 모두 통과했어"), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("t1", "run_shell", """{"command":"xcodebuild test"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("실행해 보니 테스트 모두 통과했어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(shell)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        shell.calls.size shouldBe 1
+        model.requests[1].messages.last().content shouldContain "[시스템 확인]"
+        events.filterIsInstance<AgentEvent.Status>().any { it.text == "확인되지 않은 주장이 있어 다시 확인합니다" } shouldBe true
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }.contains("※ 실행 기록으로") shouldBe false
+
+        // 다시 확인시켜도 실행하지 않으면 표시를 붙인다 (되돌리기는 한 번만)
+        val stubborn = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("빌드 성공했어"), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.Delta("빌드 성공했어"), ChatChunk.Done("stop", null)),
+        ))
+        TaskAgent(stubborn, models, ToolRegistry(listOf(shell)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+            .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "※ 실행 기록으로 확인되지 않은 주장: 빌드 성공"
+        stubborn.requests.size shouldBe 2
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)

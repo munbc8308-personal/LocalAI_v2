@@ -107,4 +107,18 @@ class ApplyPatchToolTest : FunSpec({
         tool.execute(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", patch) }, ctx).output shouldContain "검사 실패"
         tool.execute(buildJsonObject { put("repo", "~/Documents/repo"); put("patch", "--- a/../x\n+++ b/../x\n@@ -0,0 +1 @@\n+x\n") }, ctx).output shouldContain "밖"
     }
+
+    test("덮어쓰기로 크게 줄면 승인 화면과 결과에 알린다 (가계부 시험: 155줄 → 51줄)") {
+        val home = createTempDirectory("home").toRealPath()
+        val file = home.resolve("List.swift")
+        java.nio.file.Files.writeString(file, (1..155).joinToString("\n") { "line $it" })
+        val tool = WriteFileTool(PathSandbox(listOf(home.toString()), home))
+        val args = kotlinx.serialization.json.buildJsonObject {
+            put("path", kotlinx.serialization.json.JsonPrimitive(file.toString()))
+            put("content", kotlinx.serialization.json.JsonPrimitive((1..51).joinToString("\n") { "x $it" }))
+            put("mode", kotlinx.serialization.json.JsonPrimitive("overwrite"))
+        }
+        tool.describe(args).warning!!.contains("155줄 → 51줄") shouldBe true
+        tool.execute(args, ToolContext(UserContext(UserId(1), UserRole.OWNER))).output.contains("기능을 지운 것이면") shouldBe true
+    }
 })
