@@ -133,7 +133,7 @@ class SchedulerTest : FunSpec({
         }
         val sessions = SessionStore()
         val sent = mutableListOf<String>()
-        val scheduler = Scheduler(store, chat, sessions, { UserRole.OWNER }, deliver = { _, t -> sent += t; 1 }, clock = clock, zone = zone, keepRuns = 2)
+        val scheduler = Scheduler(store, chat, sessions, { UserRole.OWNER }, deliver = { _, t, _ -> sent += t; 1 }, clock = clock, zone = zone, keepRuns = 2)
         scheduler.add(me, ChannelType.TELEGRAM, "매일 11시 오늘 날씨 알려 줘").getOrThrow()
         scheduler.add(me, ChannelType.WEB, "오늘 11시 파일 정리해 줘").getOrThrow()
         scheduler.tick() shouldBe 0
@@ -222,6 +222,22 @@ class SchedulerTest : FunSpec({
         store.delete(me, once.id)
         scheduler.run(once, manual = true) shouldBe null
         chat.inputs.size shouldBe 2
+    }
+
+    test("로컬 자료가 든 답인지 보낼 때 알린다 (메신저 allowLocalSources)") {
+        val store = ScheduleStore()
+        val chat = FakeConversation { input ->
+            if ("파일" in input.text) emit(AgentEvent.Routed(dev.vesta.core.decision.RoutingDecision(AgentType.TASK, 1.0, dev.vesta.core.decision.RoutingStage.RULE, question = input.text)))
+            emit(AgentEvent.Token("답"))
+        }
+        val flags = mutableListOf<Boolean>()
+        val clock = TestClock(at(10, 20))
+        val scheduler = Scheduler(store, chat, SessionStore(), { UserRole.OWNER }, deliver = { _, _, local -> flags += local; 1 }, clock = clock, zone = zone)
+        scheduler.add(me, ChannelType.TELEGRAM, "오늘 11시 날씨").getOrThrow()
+        scheduler.add(me, ChannelType.TELEGRAM, "오늘 11시 파일 목록").getOrThrow()
+        clock.now = at(11, 0)
+        scheduler.tick()
+        flags shouldBe listOf(false, true)
     }
 
     test("사용자당 개수 한도") {

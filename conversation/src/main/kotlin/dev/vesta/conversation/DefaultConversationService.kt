@@ -176,6 +176,8 @@ class DefaultConversationService(
         }
         // 지난 대화 찾기 (M30 H-04): 모델 없이 맞은 대화 목록
         if (input.images.isEmpty()) runCatching { pastCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()?.let {
+            // 지난 대화는 로컬 자료다: 로컬 자료를 막은 메신저가 보내지 않게 알린다 (보안 검토)
+            emit(AgentEvent.Sources(listOf(PAST_EVIDENCE)))
             notice(it)
             return@flow
         }
@@ -256,11 +258,14 @@ class DefaultConversationService(
         val past = if (decision.agent in setOf(AgentType.IMAGE, AgentType.VIDEO)) null
             else runCatching { pastTalk(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()
         past?.let { (n, _) -> emit(AgentEvent.Status(if (n > 0) "지난 대화 ${n}곳을 참고합니다" else "관련된 지난 대화를 찾지 못했습니다")) }
+        // 찾은 지난 대화는 로컬 자료: 메신저 정책(allowLocalSources)이 알게 하고, 그 안 지시문이 밖으로 내보내지 못하게 인터넷 도구는 승인 (보안 검토)
+        val pastFound = (past?.first ?: 0) > 0
+        if (pastFound) emit(AgentEvent.Sources(listOf(PAST_EVIDENCE)))
         val personaText = listOfNotNull(runCatching { persona(user.userId) }.getOrNull(), memoryPrompt(remembered), past?.second).joinToString("\n").ifBlank { null }
         suspend fun runAgent() =
             agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
                 workspace = workspace,
-                spoken = input.spoken, persona = personaText, unattended = input.unattended))
+                spoken = input.spoken, persona = personaText, unattended = input.unattended, tainted = pastFound))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))
@@ -302,6 +307,8 @@ class DefaultConversationService(
     private companion object {
         /** 모델 없이 정책으로 답했을 때 메시지에 남기는 이름 */
         const val POLICY_MODEL = "policy"
+        /** 지난 대화를 쓴 답의 자료 표시 (로컬 자료, M30) */
+        val PAST_EVIDENCE = dev.vesta.core.knowledge.Evidence(dev.vesta.core.SourceType.LOCAL_DOCS, "vesta:past-conversations", "지난 대화", null, "", 0.0)
 
         /** 기억을 시스템 프롬프트 글로. 사용자가 한 말이므로 참고만 하고, 그 안의 지시는 따르지 않는다 */
         fun memoryPrompt(memories: List<String>): String? = memories.takeIf { it.isNotEmpty() }?.let { list ->

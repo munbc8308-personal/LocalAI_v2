@@ -248,14 +248,14 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** 지난 대화 검색 (M30) */
     val conversationSearch = dev.vesta.storage.ExposedConversationSearch(database.db)
     val pastTalk = dev.vesta.memory.PastTalk(conversationSearch)
-    @Volatile var scheduleDeliver: suspend (dev.vesta.core.schedule.Schedule, String) -> Int = { _, _ -> 0 }
+    @Volatile var scheduleDeliver: suspend (dev.vesta.core.schedule.Schedule, String, Boolean) -> Int = { _, _, _ -> 0 }
     val schedules: dev.vesta.scheduler.Scheduler by lazy {
         dev.vesta.scheduler.Scheduler(
             repo = scheduleRepository,
             conversation = conversation,
             sessions = sessions,
             roleOf = { userRepository.get(it)?.role },
-            deliver = { s, text -> scheduleDeliver(s, text) },
+            deliver = { s, text, local -> scheduleDeliver(s, text, local) },
             deleteSession = { user, id -> mediaStore.deleteSession(user, id.value); sessions.delete(user, id) },
             background = jobScope,
         )

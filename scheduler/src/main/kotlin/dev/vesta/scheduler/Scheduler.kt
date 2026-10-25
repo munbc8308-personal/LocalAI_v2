@@ -46,8 +46,8 @@ class Scheduler(
     private val sessions: SessionRepository,
     /** 지금 이 사용자의 역할 (없는 사용자면 null) */
     private val roleOf: suspend (UserId) -> UserRole?,
-    /** 결과를 만든 곳으로 (메신저면 연결된 대화방에). 보낸 대화방 수 */
-    private val deliver: suspend (Schedule, String) -> Int = { _, _ -> 0 },
+    /** 결과를 만든 곳으로 (메신저면 연결된 대화방에). 셋째 값은 로컬 자료(문서·파일·지난 대화)가 들어간 답인가. 보낸 대화방 수 */
+    private val deliver: suspend (Schedule, String, Boolean) -> Int = { _, _, _ -> 0 },
     /** 오래된 실행 대화 지우기 (미디어 포함) */
     private val deleteSession: suspend (UserId, SessionId) -> Unit = { u, s -> sessions.delete(u, s) },
     private val clock: Clock = Clock.systemDefaultZone(),
@@ -115,12 +115,16 @@ class Scheduler(
         val answer = StringBuilder()
         var error: String? = null
         var denied = false
+        var local = false
         val finished = withTimeoutOrNull(timeout.toMillis()) {
             conversation.send(user, s.channel, session.id, UserInput(s.task, unattended = true)).collect { e ->
                 when (e) {
                     is AgentEvent.Token -> answer.append(e.text)
                     is AgentEvent.ApprovalRequested -> { denied = true; conversation.resolveApproval(user, e.requestId, ApprovalDecision.Deny(DENY)) }
                     is AgentEvent.Error -> error = e.message
+                    // 메신저 정책(allowLocalSources)을 따르게, 로컬 자료가 든 답인지 본다 (ChannelBot과 같은 기준)
+                    is AgentEvent.Routed -> if (e.decision.agent in LOCAL_AGENTS) local = true
+                    is AgentEvent.Sources -> if (e.evidence.any { it.source != dev.vesta.core.SourceType.WEB }) local = true
                     else -> Unit
                 }
             }
@@ -134,7 +138,7 @@ class Scheduler(
         }.trim()
         val text = "⏰ ${s.parsed?.describe().orEmpty()} · ${s.task}\n\n$body" +
             if (denied) "\n\n(승인이 필요한 단계는 예약 실행에서 하지 않았습니다. 직접 대화에서 시켜 주세요.)" else ""
-        runCatching { deliver(s, text) }.onFailure { log.warn(it) { "예약 결과 보내기 실패: ${s.id}" } }
+        runCatching { deliver(s, text, local) }.onFailure { log.warn(it) { "예약 결과 보내기 실패: ${s.id}" } }
         repo.trimRuns(s.id, keepRuns).forEach { old -> runCatching { deleteSession(s.user, old) } }
         ScheduleOutcome(session.id, text, ok, denied, body.lineSequence().lastOrNull { it.isNotBlank() }.orEmpty().trim())
     }
@@ -236,6 +240,7 @@ class Scheduler(
 
     companion object {
         const val MAX_TASK = 1_000
+        private val LOCAL_AGENTS = setOf(dev.vesta.core.AgentType.DOCS, dev.vesta.core.AgentType.CODE, dev.vesta.core.AgentType.TASK, dev.vesta.core.AgentType.PERSONAL)
         /** 이만큼 넘게 놓친 실행은 건너뛴다 (S-05) */
         val LATE: Duration = Duration.ofHours(1)
         const val DENY = "예약 실행은 승인이 필요한 단계를 하지 않습니다"

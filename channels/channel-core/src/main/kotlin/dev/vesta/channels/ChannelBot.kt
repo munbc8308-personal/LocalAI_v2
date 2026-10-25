@@ -474,10 +474,13 @@ class ChannelBot(
         }
     }
 
-    override suspend fun deliver(user: UserId, text: String): Int {
+    override suspend fun deliver(user: UserId, text: String, local: Boolean): Int {
         val chats = bindings.list(channel).filter { it.user.userId == user }.map { it.externalChatId }.distinct()
+        val body = if (local && !config.allowLocalSources)
+            text.lineSequence().first() + "\n\n로컬 자료가 들어간 결과라 이 메신저로 보내지 않았습니다 (channels.${surface.key}.allowLocalSources: false). 웹 UI 대화 목록(⏰)에서 확인하세요."
+            else text
         return chats.count { chat ->
-            runCatching { MessageSplitter.split(text, surface.messageLimit).forEach { send(chat, it) } }
+            runCatching { MessageSplitter.split(body, surface.messageLimit).forEach { send(chat, it) } }
                 .onFailure { log.warn { "${surface.name} 결과 보내기 실패: ${it.message}" } }.isSuccess
         }
     }

@@ -144,13 +144,22 @@ class DefaultConversationServiceTest : FunSpec({
             pastCommand = { _, _, text -> if (text.startsWith("/recall")) "지난 대화 1곳" else null },
             pastTalk = { _, _, text -> if ("지난번" in text) 1 to "지난 대화에서 찾은 것:\n- [10월 20일] 질문: 정렬 / 답: sorted" else null },
         )
-        service.send(user, ChannelType.WEB, null, UserInput("/recall 정렬")).toList().filterIsInstance<AgentEvent.Token>().single().text shouldBe "지난 대화 1곳"
+        service.send(user, ChannelType.WEB, null, UserInput("/recall 정렬")).toList().let { events ->
+            events.filterIsInstance<AgentEvent.Token>().single().text shouldBe "지난 대화 1곳"
+            // 로컬 자료 표시 (메신저 allowLocalSources가 막게)
+            events.filterIsInstance<AgentEvent.Sources>().single().evidence.single().source shouldBe dev.vesta.core.SourceType.LOCAL_DOCS
+        }
         agent.requests.size shouldBe 0
-        service.send(user, ChannelType.WEB, null, UserInput("/chat 지난번에 얘기한 정렬 뭐였지?")).toList()
-            .filterIsInstance<AgentEvent.Status>().map { it.text } shouldBe listOf("지난 대화 1곳을 참고합니다")
+        service.send(user, ChannelType.WEB, null, UserInput("/chat 지난번에 얘기한 정렬 뭐였지?")).toList().let { events ->
+            events.filterIsInstance<AgentEvent.Status>().map { it.text } shouldBe listOf("지난 대화 1곳을 참고합니다")
+            events.filterIsInstance<AgentEvent.Sources>().size shouldBe 1
+        }
         agent.requests.single().persona!! shouldBe "지난 대화에서 찾은 것:\n- [10월 20일] 질문: 정렬 / 답: sorted"
+        // 찾은 지난 대화 속 지시문이 밖으로 내보내지 못하게 인터넷 도구는 승인
+        agent.requests.single().tainted shouldBe true
         service.send(user, ChannelType.WEB, null, UserInput("/chat 안녕")).toList()
         agent.requests.last().persona shouldBe null
+        agent.requests.last().tainted shouldBe false
     }
 
     test("하루 한도를 넘으면 질문을 저장하지 않고 안내만 보낸다 (P-04)") {

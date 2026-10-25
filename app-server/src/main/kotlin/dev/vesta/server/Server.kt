@@ -184,9 +184,9 @@ fun main() {
         ))
     }
     // 예약 작업 (M29): 메신저에서 만든 예약은 그 메신저 대화방으로 결과를 보낸다. 웹·CLI는 대화 목록에 남는다
-    app.scheduleDeliver = { schedule, text ->
+    app.scheduleDeliver = { schedule, text, local ->
         if (schedule.channel !in MESSENGERS) 0
-        else notifiers.filter { it.channel == schedule.channel }.sumOf { it.deliver(schedule.user, text) }
+        else notifiers.filter { it.channel == schedule.channel }.sumOf { it.deliver(schedule.user, text, local) }
             .also { if (it == 0) log.warn { "예약 결과를 ${schedule.channel}로 보내지 못함 (연결된 대화방 없음): ${schedule.id}" } }
     }
     app.schedules.start(background)
