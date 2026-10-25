@@ -42,9 +42,12 @@ internal class LeakedToolCall(private val names: Set<String>) {
         return if (call != null) "" else clean(text)
     }
 
-    /** 설명 글 사이에 `call:이름{…}`로 새어 나온 호출들 (아는 도구만, 순서대로) */
+    /**
+     * 설명 글 사이에 `call:이름{…}`로 새어 나온 호출들 (아는 도구만, 순서대로).
+     * 코드 블록(```)·인용(>) 안의 것은 예시나 읽은 글의 인용이라 뺀다. 이렇게 살린 호출은 [INLINE_ID]로 시작해 TaskAgent가 읽기 말고는 승인을 받는다 (보안 검토)
+     */
     fun scan(): List<ToolCall> {
-        val text = raw.toString()
+        val text = masked(raw.toString())
         val calls = mutableListOf<ToolCall>()
         var from = 0
         while (true) {
@@ -52,7 +55,7 @@ internal class LeakedToolCall(private val names: Set<String>) {
             val name = m.groupValues[1]
             val open = m.range.last
             val close = closing(text, open) ?: break
-            if (name in names) toCall(name, text.substring(open + 1, close))?.let { calls += it }
+            if (name in names) toCall(name, text.substring(open + 1, close), INLINE_ID)?.let { calls += it }
             from = close + 1
         }
         return calls
@@ -77,8 +80,16 @@ internal class LeakedToolCall(private val names: Set<String>) {
         return null
     }
 
+    /** 코드 블록·인용 줄을 같은 길이의 공백으로 (위치는 그대로 두고 찾지 않게) */
+    private fun masked(text: String): String {
+        val out = StringBuilder(text)
+        Regex("```.*?(```|$)", RegexOption.DOT_MATCHES_ALL).findAll(text).forEach { m -> for (i in m.range) if (out[i] != '\n') out[i] = ' ' }
+        Regex("(?m)^\\s*>.*$").findAll(text).forEach { m -> for (i in m.range) out[i] = ' ' }
+        return out.toString()
+    }
+
     /** gemma 꼴 인자(`key:<|"|>값<|"|>,n:5`) → JSON. 문자열 안은 그대로 두고, 밖의 키에만 따옴표를 붙인다 */
-    private fun toCall(name: String, body: String): ToolCall? {
+    private fun toCall(name: String, body: String, prefix: String = "leaked-"): ToolCall? {
         val out = StringBuilder("{")
         var i = 0
         var expectKey = true
@@ -108,15 +119,17 @@ internal class LeakedToolCall(private val names: Set<String>) {
         }
         out.append('}')
         val args = runCatching { Json.parseToJsonElement(out.toString()) as JsonObject }.getOrNull() ?: return null
-        return ToolCall("leaked-" + System.nanoTime(), name, args.toString())
+        return ToolCall(prefix + System.nanoTime(), name, args.toString())
     }
 
     private fun clean(text: String) = text.replace(Q, "\"").replace(END, "")
 
-    private companion object {
-        const val Q = "<|\"|>"
-        val PATTERN = Regex("^(?:<\\|tool_call>)?(?:call:)?([A-Za-z0-9_]+)\\{(.*)}\\s*(?:<tool_call\\|>)?\\s*$", RegexOption.DOT_MATCHES_ALL)
-        val INLINE = Regex("(?:<\\|tool_call>)?call:([A-Za-z0-9_]+)\\{")
-        val END = Regex("<\\|?tool_call\\|?>")
+    companion object {
+        /** 설명 글에서 살린 호출의 ID 머리 */
+        const val INLINE_ID = "leaked-inline-"
+        private const val Q = "<|\"|>"
+        private val PATTERN = Regex("^(?:<\\|tool_call>)?(?:call:)?([A-Za-z0-9_]+)\\{(.*)}\\s*(?:<tool_call\\|>)?\\s*$", RegexOption.DOT_MATCHES_ALL)
+        private val INLINE = Regex("(?:<\\|tool_call>)?call:([A-Za-z0-9_]+)\\{")
+        private val END = Regex("<\\|?tool_call\\|?>")
     }
 }

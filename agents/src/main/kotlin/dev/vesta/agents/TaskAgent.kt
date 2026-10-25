@@ -153,7 +153,9 @@ class TaskAgent(
         }
         var approved: Boolean? = null
         var edited = false
-        if (ToolRegistry.needsApproval(tool.risk, taint.tainted)) {
+        // 설명 글에서 살린 호출(LeakedToolCall.scan)은 믿지 않는다: 읽기 말고는 모두 승인 (보안 검토)
+        val recovered = call.id.startsWith(LeakedToolCall.INLINE_ID)
+        if (ToolRegistry.needsApproval(tool.risk, taint.tainted) || (recovered && tool.risk != dev.vesta.core.RiskLevel.READ)) {
             when (val decision = askApproval(tool, arguments, request)) {
                 ApprovalDecision.Approve -> approved = true
                 // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다

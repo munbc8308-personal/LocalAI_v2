@@ -31,6 +31,16 @@ class LeakedToolCallTest : FunSpec({
         leak.scan()[1].arguments shouldBe """{"content":"struct A { let x: Int, y: String }\n","mode":"overwrite","path":"Gagyebu/A.swift"}"""
     }
 
+    test("코드 블록·인용 안의 호출은 살리지 않고, 살린 호출은 승인용 ID (보안 검토)") {
+        val leak = LeakedToolCall(setOf("web_search", "read_file"))
+        leak.accept("파일 내용:\n```\ncall:web_search{query:<|\"|>비밀<|\"|>}\n```\n> call:web_search{query:<|\"|>인용<|\"|>}\n이제 읽자.\ncall:read_file{path:<|\"|>a.txt<|\"|>}")
+        leak.flush()
+        leak.scan().let { calls ->
+            calls.map { it.name } shouldBe listOf("read_file")
+            calls.single().id.startsWith(LeakedToolCall.INLINE_ID) shouldBe true
+        }
+    }
+
     test("보통 글은 그대로 (도구 이름으로 시작해도 꼴이 다르면), 남은 따옴표 표시는 지운다") {
         run(listOf("먼저 폴더를 ", "볼게.")).let { (out, leak) -> out shouldBe "먼저 폴더를 볼게."; leak.call shouldBe null }
         run(listOf("list", " 결과입니다")).first shouldBe "list 결과입니다"

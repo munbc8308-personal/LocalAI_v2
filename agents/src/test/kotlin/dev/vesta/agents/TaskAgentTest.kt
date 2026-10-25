@@ -71,6 +71,21 @@ class TaskAgentTest : FunSpec({
     fun turns(vararg calls: List<ToolCall>) = calls.map { listOf(ChatChunk.Delta("계획"), ChatChunk.ToolCalls(it), ChatChunk.Done("tool_calls", null)) } +
         listOf(listOf(ChatChunk.Delta("완료했습니다"), ChatChunk.Done("stop", null)))
 
+    test("설명 글에 새어 나온 호출: 읽기는 바로, 인터넷은 승인을 받고 실행 (보안 검토)") {
+        val read = RecordingTool("read_file", RiskLevel.READ)
+        val web = RecordingTool("web_search", RiskLevel.NETWORK)
+        val q = "<|\"|>"
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("먼저 읽자.\ncall:read_file{path:${q}a.txt${q}}\ncall:web_search{query:${q}x${q}}"), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.Delta("끝"), ChatChunk.Done("stop", null)),
+        ))
+        val broker = AutoBroker(ApprovalDecision.Deny("거부"))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(read, web)), broker).handle(request).toList()
+        read.calls.size shouldBe 1
+        web.calls.size shouldBe 0
+        events.filterIsInstance<AgentEvent.ApprovalRequested>().single().tool shouldBe "web_search"
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)
