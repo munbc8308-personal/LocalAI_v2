@@ -111,7 +111,7 @@ class TaskAgent(
             }
             (leak.accept(filter.flush()) + leak.flush()).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
             // 글로 새어 나온 호출이면 실제 호출로 (gemma4가 가끔 그런다)
-            if (calls.isEmpty()) leak.call?.let { calls = listOf(it) }
+            if (calls.isEmpty()) (leak.call?.let { listOf(it) } ?: leak.scan()).takeIf { it.isNotEmpty() }?.let { calls = it }
             if (calls.isEmpty()) {
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))

@@ -194,8 +194,11 @@ class DefaultConversationService(
         val call = dev.vesta.core.studio.CustomCall.parse(input.text)
         // 스킬 (`/이름 할 일`, K-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
         val skill = if (call == null) dev.vesta.core.skill.SkillCall.parse(input.text)?.let { c -> skills(user, workspace).firstOrNull { it.name == c.name }?.let { it to c } } else null
+        // "이어서 해 줘" (가계부 앱 시험에서): 같은 대화의 직전 담당에게 그대로. 라우터에 맡기면 도구 없는 에이전트로 가서 한 척만 했다
+        val continued = if (call == null && skill == null && input.images.isEmpty() && CONTINUE.matches(input.text.trim())) lastDecision[session.id]?.takeIf { it.agent != AgentType.CHAT } else null
         val custom = call?.let { if (it.team) teams(user, it.name) else customAgents(user, it.name) }
             ?: skill?.first?.takeIf { it.agent == AgentType.TASK }?.let { skillAgent(user, it) }
+            ?: continued?.customAgent?.let { name -> if (continued.team) teams(user, name) else customAgents(user, name) }
         if (call != null && custom == null) {
             val notice = if (call.team) "'${call.name}' 팀이 없거나 리더 에이전트가 지워졌습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
                 else "'${call.name}' 에이전트가 없습니다. 웹 UI 에이전트 탭에서 만들 수 있습니다."
@@ -205,6 +208,7 @@ class DefaultConversationService(
         }
         val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name, team = call.team)
             else if (skill != null) RoutingDecision(skill.first.agent, 1.0, RoutingStage.EXPLICIT, question = skill.first.expand(skill.second.arguments), skill = skill.first.name)
+            else if (continued != null) continued.copy(question = input.text, stage = RoutingStage.EXPLICIT, confidence = 1.0, requested = null)
             else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
@@ -317,6 +321,8 @@ class DefaultConversationService(
         }
 
         /** `/skills`·`/agents` (메신저 `!skills`) */
+        /** 하던 일을 이어 가라는 말 (직전 담당에게 그대로) */
+        val CONTINUE = Regex("^(이어서|계속|마저|continue)(\\s*(해|진행|작업|하자|해\\s*줘|해\\s*주세요|진행해\\s*줘|해\\s*봐))?[.!~ ]*$", RegexOption.IGNORE_CASE)
         val LISTING = Regex("^[/!](skills|agents)\\s*$", RegexOption.IGNORE_CASE)
 
         /** 글 없이 이미지만 보냈을 때 */

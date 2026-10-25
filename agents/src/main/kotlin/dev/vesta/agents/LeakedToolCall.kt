@@ -8,10 +8,13 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * 글로 새어 나온 도구 호출 살리기 (M30에서 발견). gemma4가 가끔 도구 호출을 구조화된 호출 대신 글로 낸다:
  * `search_conversations{query:<|"|>파이썬 정렬<|"|>}<tool_call|>` (앞의 `<|tool_call>call:`은 있거나 없음).
- * 턴 첫머리가 이 꼴일 수 있는 동안은 글을 내보내지 않고 모았다가, 이 꼴이 맞으면 호출로 바꾸고 아니면 그대로 내보낸다
+ * - 턴 첫머리가 이 꼴일 수 있는 동안은 글을 내보내지 않고 모았다가, 맞으면 [call]로 바꾼다
+ * - 설명 글 **뒤에** `call:이름{…}`가 나오는 경우도 있다(가계부 앱 시험): 그건 이미 내보냈으므로 [scan]이 턴 끝에 원문에서 찾는다
  */
 internal class LeakedToolCall(private val names: Set<String>) {
     private val head = StringBuilder()
+    /** 이 턴에 받은 원문 전체 (따옴표 표시 `<|"|>`를 바꾸기 전) */
+    private val raw = StringBuilder()
     private var decided = false
     private var holding = false
     var call: ToolCall? = null
@@ -19,6 +22,7 @@ internal class LeakedToolCall(private val names: Set<String>) {
 
     /** 내보낼 글자 (아직 판단 중이면 빈 문자열) */
     fun accept(piece: String): String {
+        raw.append(piece)
         if (decided) return if (holding) { head.append(piece); "" } else clean(piece)
         head.append(piece)
         val t = head.toString().trimStart().removePrefix("<|tool_call>").removePrefix("call:")
@@ -34,26 +38,85 @@ internal class LeakedToolCall(private val names: Set<String>) {
         val text = head.toString()
         if (!holding && decided) return ""
         decided = true
-        call = parse(text)
+        call = PATTERN.find(text.trim())?.let { m -> m.groupValues[1].takeIf { it in names }?.let { name -> toCall(name, m.groupValues[2]) } }
         return if (call != null) "" else clean(text)
     }
 
-    private fun parse(text: String): ToolCall? {
-        val m = PATTERN.find(text.trim()) ?: return null
-        val name = m.groupValues[1].takeIf { it in names } ?: return null
-        val body = STRING.replace(m.groupValues[2]) { JsonPrimitive(it.groupValues[1]).toString() }
-            .replace(KEY) { "${it.groupValues[1]}\"${it.groupValues[2]}\":" }
-        val args = runCatching { Json.parseToJsonElement("{$body}") as JsonObject }.getOrNull() ?: return null
+    /** 설명 글 사이에 `call:이름{…}`로 새어 나온 호출들 (아는 도구만, 순서대로) */
+    fun scan(): List<ToolCall> {
+        val text = raw.toString()
+        val calls = mutableListOf<ToolCall>()
+        var from = 0
+        while (true) {
+            val m = INLINE.find(text, from) ?: break
+            val name = m.groupValues[1]
+            val open = m.range.last
+            val close = closing(text, open) ?: break
+            if (name in names) toCall(name, text.substring(open + 1, close))?.let { calls += it }
+            from = close + 1
+        }
+        return calls
+    }
+
+    /** [open]의 `{`에 맞는 `}` 위치. `<|"|>…<|"|>` 안의 괄호는 세지 않는다 */
+    private fun closing(text: String, open: Int): Int? {
+        var depth = 0
+        var i = open
+        while (i < text.length) {
+            if (text.startsWith(Q, i)) {
+                val end = text.indexOf(Q, i + Q.length).takeIf { it >= 0 } ?: return null
+                i = end + Q.length
+                continue
+            }
+            when (text[i]) {
+                '{' -> depth++
+                '}' -> { depth--; if (depth == 0) return i }
+            }
+            i++
+        }
+        return null
+    }
+
+    /** gemma 꼴 인자(`key:<|"|>값<|"|>,n:5`) → JSON. 문자열 안은 그대로 두고, 밖의 키에만 따옴표를 붙인다 */
+    private fun toCall(name: String, body: String): ToolCall? {
+        val out = StringBuilder("{")
+        var i = 0
+        var expectKey = true
+        while (i < body.length) {
+            when {
+                body.startsWith(Q, i) -> {
+                    val end = body.indexOf(Q, i + Q.length).takeIf { it >= 0 } ?: return null
+                    out.append(JsonPrimitive(body.substring(i + Q.length, end)).toString())
+                    i = end + Q.length
+                    expectKey = false
+                }
+                expectKey && (body[i].isLetter() || body[i] == '_') -> {
+                    val colon = body.indexOf(':', i).takeIf { it > i } ?: return null
+                    val key = body.substring(i, colon).trim()
+                    if (!key.all { it.isLetterOrDigit() || it == '_' }) return null
+                    out.append('"').append(key).append("\":")
+                    i = colon + 1
+                    expectKey = false
+                }
+                else -> {
+                    val c = body[i]
+                    out.append(c)
+                    if (c == ',' || c == '{') expectKey = true else if (!c.isWhitespace()) expectKey = false
+                    i++
+                }
+            }
+        }
+        out.append('}')
+        val args = runCatching { Json.parseToJsonElement(out.toString()) as JsonObject }.getOrNull() ?: return null
         return ToolCall("leaked-" + System.nanoTime(), name, args.toString())
     }
 
-    private fun clean(text: String) = text.replace(QUOTE, "\"").replace(END, "")
+    private fun clean(text: String) = text.replace(Q, "\"").replace(END, "")
 
     private companion object {
+        const val Q = "<|\"|>"
         val PATTERN = Regex("^(?:<\\|tool_call>)?(?:call:)?([A-Za-z0-9_]+)\\{(.*)}\\s*(?:<tool_call\\|>)?\\s*$", RegexOption.DOT_MATCHES_ALL)
-        val STRING = Regex("<\\|\"\\|>(.*?)<\\|\"\\|>", RegexOption.DOT_MATCHES_ALL)
-        val KEY = Regex("(^|[,{]\\s*)([A-Za-z_][A-Za-z0-9_]*)\\s*:")
-        val QUOTE = Regex("<\\|\"\\|>")
+        val INLINE = Regex("(?:<\\|tool_call>)?call:([A-Za-z0-9_]+)\\{")
         val END = Regex("<\\|?tool_call\\|?>")
     }
 }
