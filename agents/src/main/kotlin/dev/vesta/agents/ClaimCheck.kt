@@ -48,6 +48,25 @@ internal class ClaimCheck {
         }
     }.distinct()
 
+    /** 빌드·테스트가 이번 실행에서 성공했고 그 뒤 파일을 고치지 않았는지 (계획 항목 완료 확인, M32 J-05). 아니면 그 이유 */
+    fun verified(check: dev.vesta.core.plan.PlanCheck): String? {
+        val command = when (check) {
+            dev.vesta.core.plan.PlanCheck.NONE -> return null
+            dev.vesta.core.plan.PlanCheck.BUILD -> BUILD_COMMAND
+            dev.vesta.core.plan.PlanCheck.TEST -> TEST_COMMAND
+        }
+        val name = if (check == dev.vesta.core.plan.PlanCheck.TEST) "테스트" else "빌드"
+        val lastWrite = steps.lastOrNull { it.tool in WRITES }?.index ?: -1
+        val runs = steps.filter { s -> s.tool == SHELL && s.command?.let { command.containsMatchIn(it) } == true }
+        val good = runs.lastOrNull { it.ok && !FAILED.containsMatchIn(it.output) }
+        return when {
+            runs.isEmpty() -> "이번 실행에서 $name 명령을 실행한 기록이 없음"
+            good == null -> "$name 명령이 성공한 기록이 없음 (마지막: ${summary(runs.last())})"
+            good.index < lastWrite -> "$name 가 성공한 뒤 파일을 다시 고쳤음"
+            else -> null
+        }
+    }
+
     private fun summary(s: Step) = (if (s.ok) "" else "실패, ") +
         (s.output.lineSequence().firstOrNull { FAILED.containsMatchIn(it) } ?: s.output.lineSequence().lastOrNull { it.isNotBlank() }.orEmpty()).trim().take(100)
 

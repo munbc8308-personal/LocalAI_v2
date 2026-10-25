@@ -169,6 +169,47 @@ class TaskAgentTest : FunSpec({
         write.calls.size shouldBe 2
     }
 
+    test("작업 계획 (M32): 목록 만들기·확인 안 된 빌드 완료 거부·남은 할 일 표시, 이어서는 남은 일부터, 다 끝나면 알림") {
+        val store = mutableMapOf<dev.vesta.core.SessionId, dev.vesta.core.plan.TaskPlan>()
+        val plans = object : dev.vesta.core.plan.PlanRepository {
+            override suspend fun get(session: dev.vesta.core.SessionId) = store[session]
+            override suspend fun save(session: dev.vesta.core.SessionId, plan: dev.vesta.core.plan.TaskPlan) { store[session] = plan }
+            override suspend fun clear(session: dev.vesta.core.SessionId) { store.remove(session) }
+        }
+        val write = RecordingTool("write_file", RiskLevel.READ)
+        fun plan(vararg items: String) = ToolCall("p" + items.size, "update_plan", """{"items":[${items.joinToString(",")}]}""")
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(plan("""{"text":"화면 쓰기","status":"in_progress"}""", """{"text":"빌드 통과","status":"pending","check":"build"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w", "write_file", """{"path":"A.swift","content":"x"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(plan("""{"text":"화면 쓰기","status":"done"}""", """{"text":"빌드 통과","status":"done"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("화면을 썼어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(request).toList()
+        model.requests[0].tools.map { it.name } shouldContain "update_plan"
+        model.requests[1].messages[0].content shouldContain "[~] 화면 쓰기"
+        model.requests[3].messages.last().content shouldContain "거부: \"빌드 통과\"은 done으로 못 바꿈: 이번 실행에서 빌드 명령을 실행한 기록이 없음"
+        store.getValue(session.id).items.map { it.status } shouldBe listOf(dev.vesta.core.plan.PlanStatus.DONE, dev.vesta.core.plan.PlanStatus.IN_PROGRESS)
+        events.filterIsInstance<AgentEvent.Status>().map { it.text } shouldContain "할 일 0/2 · 지금: 화면 쓰기"
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "남은 할 일 (1개"
+
+        // 이어서: 남은 일부터
+        val continued = request.copy(routing = dev.vesta.core.decision.RoutingDecision(dev.vesta.core.AgentType.TASK, 1.0, dev.vesta.core.decision.RoutingStage.EXPLICIT, question = "이어서", continued = true))
+        val next = ScriptedModel(listOf(listOf(ChatChunk.Delta("빌드는 아직이야"), ChatChunk.Done("stop", null))))
+        TaskAgent(next, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(continued).toList()
+        next.requests.single().messages.last().content shouldContain "다음 할 일: 빌드 통과"
+        next.requests.single().messages[0].content shouldContain "작업 목표: 회의록 찾아서 요약 저장해 줘"
+
+        // 새 작업 요청이면 계획을 새로 (지난 계획은 지움)
+        TaskAgent(ScriptedModel(listOf(listOf(ChatChunk.Delta("끝"), ChatChunk.Done("stop", null)))), models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(request).toList()
+        store[session.id] shouldBe null
+        // 다 끝난 계획을 이어서 하라면 모델 없이 알린다
+        store[session.id] = dev.vesta.core.plan.TaskPlan("목표", listOf(dev.vesta.core.plan.PlanItem("a", dev.vesta.core.plan.PlanStatus.DONE)))
+        val idle = ScriptedModel(emptyList())
+        TaskAgent(idle, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(continued).toList()
+            .filterIsInstance<AgentEvent.Token>().single().text shouldContain "할 일을 모두 끝냈습니다"
+        idle.requests.size shouldBe 0
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)

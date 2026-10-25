@@ -211,7 +211,7 @@ class DefaultConversationService(
         }
         val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name, team = call.team)
             else if (skill != null) RoutingDecision(skill.first.agent, 1.0, RoutingStage.EXPLICIT, question = skill.first.expand(skill.second.arguments), skill = skill.first.name)
-            else if (continued != null) continued.copy(question = input.text, stage = RoutingStage.EXPLICIT, confidence = 1.0, requested = null)
+            else if (continued != null) continued.copy(question = input.text, stage = RoutingStage.EXPLICIT, confidence = 1.0, requested = null, continued = true)
             else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }

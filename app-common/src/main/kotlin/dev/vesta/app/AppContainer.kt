@@ -249,6 +249,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 예약 작업 (M29): 때가 되면 새 대화로 그 사용자 질문을 보낸다(사람 없는 실행). 메신저로 보내기는 서버가 [scheduleDeliver]에 넣는다.
      * 실행기 시작은 서버가 [dev.vesta.scheduler.Scheduler.start]로
      */
+    /** 작업 계획 (M32): 대화별 할 일 목록 */
+    val planRepository = dev.vesta.storage.ExposedPlanRepository(database.db)
     val scheduleRepository = dev.vesta.storage.ExposedScheduleRepository(database.db)
     /** 지난 대화 검색 (M30) */
     val conversationSearch = dev.vesta.storage.ExposedConversationSearch(database.db)
@@ -411,6 +413,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 toolsFor = { request -> toolsFor(request.user, request.workspace) },
                 judge = judge,
                 escalation = escalation,
+                plans = planRepository,
             ),
             AgentType.IMAGE to (imageGenerator?.let { generator ->
                 dev.vesta.agents.ImageAgent(
@@ -527,6 +530,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in skill.tools } },
         judge = judge,
         escalation = escalation,
+        plans = planRepository,
     )
 
     /** `/skills`·`/agents` 목록 */

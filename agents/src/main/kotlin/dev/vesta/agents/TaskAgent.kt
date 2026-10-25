@@ -64,6 +64,8 @@ class TaskAgent(
     private val modelRole: ModelRole = ModelRole.GENERAL,
     /** 이 에이전트만의 생각 모드 (none·low·medium·high). null이면 모델 설정을 따른다 (가계부 앱 시험: 여러 단계 작업은 생각을 켜야 길을 덜 잃는다) */
     private val reasoningEffort: String? = null,
+    /** 대화별 작업 계획 (M32 7.26). 없으면 update_plan 도구를 주지 않는다 */
+    private val plans: dev.vesta.core.plan.PlanRepository? = null,
 ) : Agent {
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
@@ -78,9 +80,27 @@ class TaskAgent(
         val rulesNow = if (request.unattended) effectiveRules.lineSequence().filterNot { "파일을 쓰거나" in it }.joinToString("\n") + "\n- $UNATTENDED" else effectiveRules
         val system = Prompts.system(request, clock, zone) + "\n" + rulesNow
         if (available.isNotEmpty()) emit(AgentEvent.Status("도구: ${available.keys.joinToString()}"))
-        val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, system))
+        // 작업 계획 (M32): "이어서"면 이 대화의 계획을 이어 쓰고, 새 작업 요청이면 새로 시작한다
+        val sessionId = request.session.id
+        val continued = request.routing?.continued == true
+        var plan = plans?.let { repo -> if (continued) repo.get(sessionId) else { repo.clear(sessionId); null } }
+        val goal = plan?.goal ?: request.history.lastOrNull()?.content.orEmpty().take(2_000)
+        if (continued && plan != null && plan.remaining.isEmpty()) {
+            emit(AgentEvent.Token("이 대화의 할 일을 모두 끝냈습니다.\n${plan.render()}\n새로 시킬 일이 있으면 말해 주세요."))
+            emit(AgentEvent.Done(type, spec.name, null))
+            return@flow
+        }
+        fun systemNow() = system + (if (plans == null) "" else "\n" + PLAN_RULES) +
+            (plan?.let { "\n\n작업 목표: $goal\n할 일 목록:\n${it.render()}" } ?: "")
+        val messages = mutableListOf(ChatMessage(ChatRole.SYSTEM, systemNow()))
         messages += HistoryWindow.fit(request.history, ChatAgent.DEFAULT_CONTEXT_CHARS).let { h ->
-            if (!request.unattended || h.isEmpty()) h else h.dropLast(1) + h.last().copy(content = h.last().content + "\n\n[$UNATTENDED]")
+            val next = plan?.remaining?.firstOrNull()?.text
+            when {
+                h.isEmpty() -> h
+                request.unattended -> h.dropLast(1) + h.last().copy(content = h.last().content + "\n\n[$UNATTENDED]")
+                continued && next != null -> h.dropLast(1) + h.last().copy(content = h.last().content + "\n\n[시스템] 할 일 목록의 남은 일부터 이어서 하라. 다음 할 일: $next. 목록에 없는 일은 하지 않는다.")
+                else -> h
+            }
         }
         val context = ToolContext(request.user)
         var usage: Usage? = null
@@ -93,6 +113,7 @@ class TaskAgent(
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
+            messages[0] = ChatMessage(ChatRole.SYSTEM, systemNow())
             var text = StringBuilder()
             var calls = emptyList<ToolCall>()
             var finish: String? = null
@@ -108,7 +129,7 @@ class TaskAgent(
                 val thinking = effortNow != null && effortNow != "none"
                 val pending = StringBuilder()
                 val filter = ArtifactFilter()
-                val leak = LeakedToolCall(available.keys)
+                val leak = LeakedToolCall(available.keys + if (plans != null) setOf(PlanTool.NAME) else emptySet())
                 // 끝없이 쓰는 것 막기 (가계부 앱 시험: 한 단계에서 17만 자를 쓰다 10분 시간 제한에 걸렸다): 단계당 생성 한도, 같은 글 반복이면 멈춤
                 val seen = StringBuilder()
                 var checkedAt = 0
@@ -126,7 +147,7 @@ class TaskAgent(
                         maxTokens = spec.maxTokens ?: if (thinking) STEP_TOKENS * 2 else STEP_TOKENS,
                         reasoningEffort = effortNow,
                         keepAlive = spec.keepAlive,
-                        tools = available.values.map { it.spec },
+                        tools = available.values.map { it.spec } + if (plans != null) listOf(PlanTool.spec) else emptyList(),
                     ),
                 ).collect { chunk ->
                     when (chunk) {
@@ -180,12 +201,23 @@ class TaskAgent(
                 if (unverified.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행 기록으로 확인되지 않은 주장: " + unverified.joinToString("; ")))
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))
+                // 남은 할 일이 있으면 알린다 ("이어서 해 줘"로 이어 간다)
+                plan?.remaining?.takeIf { it.isNotEmpty() }?.let { left ->
+                    emit(AgentEvent.Token("\n\n남은 할 일 (${left.size}개, \"이어서 해 줘\"로 이어 감):\n" + left.joinToString("\n") { "- ${it.text}" }))
+                }
                 emit(AgentEvent.Done(type, spec.name, usage))
                 return@flow
             }
             if (text.isNotEmpty()) emit(AgentEvent.Token("\n"))
             messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
             for (call in calls) {
+                if (call.name == PlanTool.NAME && plans != null) {
+                    val args = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap()))
+                    val (next, out) = PlanTool.apply(plan, goal, args) { claims.verified(it) }
+                    if (next != null) { plan = next; runCatching { plans.save(sessionId, next) }; emit(AgentEvent.Status(next.progress())) }
+                    messages += ChatMessage(ChatRole.TOOL, out, toolCallId = call.id)
+                    continue
+                }
                 val result = runTool(call, request, context, taint, available)
                 claims.record(call.name, runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())), !result.isError, result.output)
                 if (result.summary == DENIED) denied += available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name
@@ -216,6 +248,10 @@ class TaskAgent(
     }
 
     private companion object {
+        /** 작업 계획 규칙 (M32 J-03) */
+        const val PLAN_RULES = """- 두 단계 이상 걸리는 작업이면 먼저 update_plan으로 할 일 목록을 만든다. 빌드·테스트로 확인할 항목은 check를 build·test로 둔다. 항목을 시작하면 in_progress, 끝나면 done으로 바꾼다.
+- 할 일 목록에 없는 일은 하지 않는다. 꼭 필요한 일이 새로 생기면 목록에 더하고 이유를 말한다. 사용자가 요청하지 않은 기능은 만들지 않는다 ("이어서 해 줘"는 새 기능을 만들라는 뜻이 아니다).
+- 남은 일이 있는데 멈춰야 하면 무엇이 남았는지 보고한다."""
         /** "…할게"처럼 하겠다고만 하고 끝난 글 (마지막 문장) */
         val INTENT = Regex("(할게|하겠어|하겠습니다|진행할게|시작할게|작성할게|생성할게|만들게|고칠게|수정할게|실행할게|확인할게|읽을게|볼게)[.!)\\s]*$")
         /** 단계 하나의 생성 한도 (토큰). 200줄 파일 하나는 넉넉히 쓴다 */

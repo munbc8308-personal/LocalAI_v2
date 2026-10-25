@@ -445,3 +445,13 @@ object ScheduleRuns : LongIdTable("schedule_run") {
     val sessionId = varchar("session_id", 36)
     val at = timestamp("at")
 }
+
+/** 작업 계획 (M32 J-01, v28): 대화마다 하나. 항목은 줄마다 `상태|확인|글` */
+object TaskPlans : org.jetbrains.exposed.v1.core.Table("task_plan") {
+    val sessionId = reference("session_id", Sessions.id, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
+    val goal = text("goal")
+    val items = text("items")
+    val updatedAt = timestamp("updated_at")
+    override val primaryKey = PrimaryKey(sessionId)
+}
+
