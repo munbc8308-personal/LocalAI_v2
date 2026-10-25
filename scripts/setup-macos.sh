@@ -62,4 +62,7 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 docker compose -f "$ROOT/infra/searxng/compose.yaml" up -d
 
+step "셸 격리 실행 이미지 (vesta-shell, PROJECT.md 7.25)"
+"$ROOT/scripts/shell-sandbox.sh"
+
 step "인프라 완료 (Vesta 빌드·서비스는 scripts/install-vesta.sh, 한 번에 하려면 install.sh)"

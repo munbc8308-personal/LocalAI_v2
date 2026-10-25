@@ -92,6 +92,8 @@ fun main() {
     val training = trainingEndpoints(app, background)
     // 서버가 꺼지면서 끝나지 못한 실행 정리 (M22)
     kotlinx.coroutines.runBlocking { app.runRepository.abandonRunning() }
+    // 셸 격리 실행 (M31 X-05): 서버가 꺼지며 남은 컨테이너 지우기
+    Thread { app.shellContainer.cleanup().takeIf { it > 0 }?.let { log.info { "남은 셸 컨테이너 ${it}개를 지움" } } }.start()
     // 주간 자가 개선 (M16): 알림·승인 버튼·설정이 바뀌면 다시 시작. 봇은 아래에서 띄운다
     var notifiers: List<dev.vesta.channels.ChannelNotifier> = emptyList()
     val evolution = EvolutionDesk(

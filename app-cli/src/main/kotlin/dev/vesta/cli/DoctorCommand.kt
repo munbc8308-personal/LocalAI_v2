@@ -83,6 +83,7 @@ internal class Doctor(private val home: Path = Path.of(System.getProperty("user.
             section = "엔진·모델"; engines(config, http)
             section = "Vesta"; vesta(config, http, db)
             section = "메신저 (선택)"; messengers(config)
+            section = "셸"; shell(config)
             section = "선택 기능"; optional(config)
         } finally {
             http.close()
@@ -219,6 +220,19 @@ internal class Doctor(private val home: Path = Path.of(System.getProperty("user.
         channel("Telegram", config.channels.telegram.enabled, BotTokens.read("telegram") != null, "vesta telegram token")
         channel("Discord", config.channels.discord.enabled, BotTokens.read("discord") != null, "vesta discord token")
         channel("Slack", config.channels.slack.enabled, BotTokens.read("slack") != null && BotTokens.read("slack", account = BotTokens.APP) != null, "vesta slack token")
+    }
+
+    /** 셸 격리 실행 (M31 X-06) */
+    private fun shell(config: VestaConfig) {
+        val docker = "/opt/homebrew/bin/docker"
+        val host = "unix://$home/.colima/default/docker.sock"
+        val problem = dev.vesta.tools.ShellContainer.defaultProbe(docker, host, config.tools.shellImage)
+        when {
+            !config.tools.shellEnabled -> off("셸", "꺼짐 (tools.shellEnabled)", null)
+            config.tools.shellMode == "host" -> warn("셸", "Mac에서 직접 실행 (격리 없음)", "tools.shellMode: sandbox (MEMBER 셸은 그래도 격리: " + (if (problem == null) "준비됨" else "준비 안 됨") + ")")
+            problem == null -> ok("셸", "격리 실행 (${config.tools.shellImage}, 네트워크 없음·허용 폴더 하나만)")
+            else -> fail("셸", problem.removePrefix("격리 실행을 쓸 수 없습니다: "), if ("이미지" in problem) "scripts/shell-sandbox.sh" else "colima start")
+        }
     }
 
     private fun optional(config: VestaConfig) {

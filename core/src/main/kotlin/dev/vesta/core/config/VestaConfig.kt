@@ -273,6 +273,10 @@ data class ToolsConfig(
     val allowedPaths: List<String> = listOf("~/Documents", "~/Desktop", "~/Downloads"),
     val shellEnabled: Boolean = true,
     val shellTimeoutSeconds: Long = 60,
+    /** 셸을 어디서 돌리나 (M31 X-03): `sandbox`(기본, 컨테이너) · `host`(이 Mac에서 직접). MEMBER 셸은 이 값과 관계없이 늘 격리 */
+    val shellMode: String = "sandbox",
+    /** 격리 실행 이미지 (scripts/shell-sandbox.sh가 만든다) */
+    val shellImage: String = "vesta-shell",
     /** 도구 결과를 모델에 넘길 최대 글자 수 (넘으면 잘라 낸다) */
     val maxOutputChars: Int = 12_000,
     /** 에이전트 한 번에 도구를 부를 수 있는 최대 단계 (T-02) */

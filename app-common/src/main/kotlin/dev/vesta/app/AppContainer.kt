@@ -175,8 +175,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         },
     )
 
-    /** 도구 모음. 셸은 [shell]일 때만 (역할 정책 U-06) */
-    private fun tools(sandbox: PathSandbox, shell: Boolean) = ToolRegistry(
+    /** 셸 격리 실행 (M31): 설정이 host가 아니면 컨테이너. MEMBER는 늘 이것 */
+    val shellContainer = dev.vesta.tools.ShellContainer(image = config.tools.shellImage)
+    val shellSandboxed: Boolean get() = config.tools.shellMode != "host"
+
+    /** 도구 모음. 셸은 [shell]일 때만 (역할 정책 U-06). [member]면 셸은 늘 격리 */
+    private fun tools(sandbox: PathSandbox, shell: Boolean, member: Boolean = false) = ToolRegistry(
         buildList {
             add(CurrentTimeTool())
             add(ListFilesTool(sandbox))
@@ -193,7 +197,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             add(MakeDirectoryTool(sandbox))
             add(MoveFileTool(sandbox))
             add(dev.vesta.tools.ApplyPatchTool(sandbox))
-            if (shell && config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars))
+            if (shell && config.tools.shellEnabled) add(ShellTool(sandbox, config.tools.shellTimeoutSeconds, config.tools.maxOutputChars,
+                container = shellContainer.takeIf { member || shellSandboxed }))
         },
     )
     val toolRegistry = tools(sandbox, shell = true)
@@ -313,7 +318,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 if (home.parent != root) return emptyList()
                 runCatching { java.nio.file.Files.createDirectories(home) }
                 // 셸은 자기 폴더 안에서만, 실행마다 Mac 주인 승인 (TaskAgent가 주인에게 넘긴다, M20)
-                tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = config.users.memberShell)
+                tools(PathSandbox(listOf(home.toString()) + config.users.paths[name].orEmpty()), shell = config.users.memberShell, member = true)
             }.all.filter { dev.vesta.identity.RolePolicy.allowsRisk(user.role, it.risk) || (config.users.memberShell && it is ShellTool) }
         }
     }

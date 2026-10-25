@@ -20,15 +20,20 @@ import java.util.concurrent.TimeUnit
  * - 차단 목록: 승인해도 실행하지 않는 명령 (sudo, rm -rf /, 디스크 포맷, 원격 스크립트 실행 …)
  * - 작업 폴더는 허용 폴더 안. 타임아웃(기본 60초) 후 프로세스 트리째 종료. 출력 길이 제한. 백그라운드 실행 금지.
  * - 환경 변수는 최소한만 넘긴다 (API 키·토큰 등 제외).
+ * - 격리 실행 (M31, 7.25): [container]가 있으면 컨테이너 안에서 돈다 — 네트워크 없음, 작업 폴더가 든 허용 폴더 하나만 같은 경로로 붙임,
+ *   권한 없음, 루트 읽기 전용. 컨테이너를 쓸 수 없으면 실행하지 않는다 (Mac에서 직접으로 바꾸지 않는다)
  */
 class ShellTool(
     private val sandbox: PathSandbox,
     private val timeoutSeconds: Long,
     private val maxOutputChars: Int,
+    private val container: ShellContainer? = null,
 ) : Tool {
     override val spec = ToolSpec(
         "run_shell",
-        "셸 명령을 실행한다 (/bin/zsh). 매번 사용자 승인이 필요하다. 파일 정리·빌드·검색처럼 다른 도구로 안 되는 일에만 쓴다. " +
+        (if (container != null) "셸 명령을 격리된 Linux 컨테이너(Debian, /bin/zsh)에서 실행한다. 네트워크가 없고, 작업 폴더가 든 허용 폴더만 보이며, macOS 명령(brew·open·say·pbcopy 등)은 없다. "
+            else "셸 명령을 실행한다 (/bin/zsh). ") +
+            "매번 사용자 승인이 필요하다. 파일 정리·빌드·검색처럼 다른 도구로 안 되는 일에만 쓴다. " +
             "백그라운드 실행(&)·sudo는 쓸 수 없다. 타임아웃 ${timeoutSeconds}초.",
         schema(
             "command" to prop("string", "실행할 명령"),
@@ -42,8 +47,9 @@ class ShellTool(
     override fun describe(arguments: JsonObject): ApprovalDetails {
         val command = arguments.string("command").orEmpty()
         return ApprovalDetails(
-            title = "셸 실행: $command",
-            body = "명령: $command\n작업 폴더: ${arguments.string("cwd")}\n이유: ${arguments.string("reason") ?: "(없음)"}",
+            title = (if (container != null) "셸 실행 (격리): " else "셸 실행 (Mac에서 직접): ") + command,
+            body = "명령: $command\n작업 폴더: ${arguments.string("cwd")}\n이유: ${arguments.string("reason") ?: "(없음)"}" +
+                if (container != null) "\n실행 위치: 컨테이너 (네트워크 없음, 이 허용 폴더만 보임)" else "\n실행 위치: 이 Mac (격리 없음)",
             warning = blocked(command)?.let { "차단 목록에 걸림 — 승인해도 실행하지 않음: $it" }
                 ?: if (DANGEROUS.containsMatchIn(command)) "파일 삭제·덮어쓰기가 포함된 명령입니다" else null,
         )
@@ -57,9 +63,15 @@ class ShellTool(
             is PathSandbox.Check.Ok -> c.path
         }
         if (!cwd.toFile().isDirectory) return fail("작업 폴더가 없음: ${sandbox.display(cwd)}")
+        // 격리: 작업 폴더가 든 허용 폴더(가장 안쪽) 하나만 붙인다
+        val run = container?.let { c ->
+            c.unavailable()?.let { return fail(it) }
+            val root = sandbox.roots.filter { cwd.startsWith(it) }.maxByOrNull { it.nameCount } ?: return fail("허용 폴더 밖")
+            c.command(root, cwd, command)
+        }
 
         return withContext(Dispatchers.IO) {
-            val process = ProcessBuilder("/bin/zsh", "-f", "-c", command)
+            val process = ProcessBuilder(run?.argv ?: listOf("/bin/zsh", "-f", "-c", command))
                 .directory(cwd.toFile())
                 .redirectErrorStream(true)
                 .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
@@ -70,12 +82,15 @@ class ShellTool(
                     env.putAll(keep)
                     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
                     env["TERM"] = "dumb"
+                    run?.env?.let { env.putAll(it) }
                 }
                 .start()
             coroutineScope {
                 val output = async { process.inputStream.bufferedReader().use { reader -> readLimited(reader, maxOutputChars) } }
                 val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
                 if (!finished) {
+                    // 컨테이너는 docker 클라이언트를 죽여도 남으므로 이름으로 끝낸다
+                    run?.let { container?.kill(it.name) }
                     process.descendants().forEach { it.destroyForcibly() }
                     process.destroyForcibly()
                 }

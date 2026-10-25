@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 계획, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v6.2, 2026-10-25)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 구현, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v6.2, 2026-10-25)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -62,7 +62,7 @@
 | v5.9 | 2026-10-25 | **M28 스킬 자동 생성**(7.22): `SkillSmith`(memory 모듈), schema v25(`skill.status·origin·run_id`, `user_settings.skill_auto`), 쉬는 때 초안·`/skillify`·`/skills approve|drop`, 웹 에이전트 탭 "제안된 스킬"·스킬 제안 켜기, 모델 없이 답한 명령 턴은 대화 맥락에서 뺌. Hermes 비교 2번. 13.38 진행 기록 |
 | v6.0 | 2026-10-25 | **M29 예약 작업**(7.23): `scheduler` 모듈(`Scheduler`), `core.schedule.When`(규칙으로 읽는 예약 시각), schema v26(`schedule`·`schedule_run`), `/schedule`·`/schedules`, 사람 없는 실행(`unattended`: 쓰기·셸 도구를 주지 않음 + 승인 자동 거부), 메신저로 결과(`ChannelNotifier.deliver`), `/api/schedules`·웹 상태 탭 "예약"·`vesta schedule`. Hermes 비교 3번. 13.39 진행 기록 |
 | v6.1 | 2026-10-25 | **M30 지난 대화 검색**(7.24): schema v27 `messages_fts`(trigram, 트리거), `ExposedConversationSearch`, `memory.PastTalk`(신호·낱말·`/recall`·프롬프트), 작업 도구 `search_conversations`, `/api/sessions/search`·웹 대화 목록 검색 칸. 글로 새어 나온 도구 호출 살리기(`LeakedToolCall`). Hermes 비교 4번. 13.40 진행 기록 |
-| v6.2 | 2026-10-25 | **계획 추가**: M31 셸 격리 실행(7.25, X-01~X-07). Colima 컨테이너(네트워크 없음·작업 폴더만·권한 없음), `tools.shellMode`, MEMBER는 늘 격리. Hermes 비교 5번 |
+| v6.2 | 2026-10-25 | **M31 셸 격리 실행**(7.25): `ShellContainer`(Colima `docker run --rm`: 네트워크 없음·권한 없음·읽기 전용·허용 폴더 하나만), `vesta-shell` 이미지(`infra/shell/Dockerfile`·`scripts/shell-sandbox.sh`), `tools.shellMode`(sandbox 기본·host), MEMBER는 늘 격리, 승인 제목·도구 설명, 시작 때 남은 컨테이너 정리, doctor. Hermes 비교 5번. 13.41 진행 기록 |
 | v4.6 | 2026-10-23 | **M22 4단계 스킬**: 스킬(K-01, SKILL.md 꼴: 작업 폴더 `.vesta/skills`·`~/.vesta/skills`·웹, schema v20 `skill`), `/이름 할 일`(K-02, `$ARGUMENTS`, 메신저 `!이름`), `/skills`·`/agents` 목록, 안전(K-06: 도구 ∩ 역할 도구, 작업 폴더 스킬은 VESTA.md와 함께 해시 승인, 숨은 문자 거부). M22 완료. 13.26 진행 기록 |
 | v4.5 | 2026-10-23 | **M22 3단계 A2A**: `a2a` 모듈(Agent Card·JSON-RPC, A2A 1.0과 0.3 둘 다, 스트리밍), A2A 에이전트 등록(A-15, schema v18 `a2a_agent`, Mac 주인만, 미리 보기 경고), `/agent 이름`·팀 멤버로 사용, 로컬 데이터를 읽은 흐름에서 보내면 승인. 공식 a2a-sdk 1.2.3 echo 에이전트로 확인. 13.25 진행 기록 |
 | v4.4 | 2026-10-23 | **M22 2단계 팀**: 팀(A-14, schema v17 `agent_team`: 리더 + 멤버 1~6, 모두 사용자 정의 에이전트), 리더의 `delegate` 도구(멤버는 할 일만 받아 따로 맥락에서 일하고 답을 돌려줌, 한 단계), 멤버 단계·승인은 리더 흐름으로, 타임라인 들여쓰기, `/team 이름 할 일`. 13.24 진행 기록 |
@@ -1107,7 +1107,7 @@ Hermes Agent는 지난 대화를 FTS5로 찾고 모델이 요약한다(2026-10-2
 2. 웹 검색 칸·API, 작업 에이전트 도구
 3. (나중에) 요약·의미 검색(H-07)
 
-### 7.25 셸 격리 실행 (Shell Sandbox) — 계획 (M31)
+### 7.25 셸 격리 실행 (Shell Sandbox) — 구현 (M31, X-01~X-06. X-07은 나중에)
 **목적**: 셸 명령을 승인한 뒤에도 Mac 전체가 아니라 **격리된 컨테이너 안**에서만 돌게 한다. 실수로 승인하거나, 문서·웹 글 속 지시문에 속아 승인해도 피해가 작업 폴더 안에 머문다.
 Hermes Agent는 터미널을 Docker·SSH 등 격리 환경에서 돌린다(2026-10-25 비교의 5번). Vesta는 SearXNG 때문에 이미 쓰는 Colima(Docker)를 쓴다. 비용 없음.
 
@@ -1505,7 +1505,7 @@ app-cli / app-server
 | **M28. 스킬 자동 생성 (구현)** | 도구를 여러 번 쓴 실행에서 스킬 초안 만들기(쉬는 때·`/skillify`), 겹침 막기, 승인해야 쓰기, 경계 (7.22) | 끝낸 일이 "제안된 스킬"로 올라오고, 승인하면 `/이름 할 일` 한 줄로 같은 일을 다시 한다 |
 | **M29. 예약 작업 (구현)** | 정한 때에 스스로 일하고 결과를 만든 곳으로 보내기, 규칙으로 읽는 예약 시각, 승인 단계 자동 거부 (7.23) | `/schedule 매일 8시 …`로 만든 일이 그 시각에 돌고 결과가 메신저로 온다 |
 | **M30. 지난 대화 검색 (구현)** | 대화 전문 색인(FTS5 trigram), 본인 대화 찾기, "지난번에 …" 질문에 찾은 대화를 참고, `/recall`·웹 검색 칸·작업 도구 (7.24) | "지난번에 얘기한 …"에 그때 대화를 찾아 답하고, 웹에서 예전 대화를 검색해 연다 |
-| **M31. 셸 격리 실행 (예정)** | 셸을 컨테이너 안에서(네트워크 없음·작업 폴더만·권한 없음), 모드(sandbox·host), MEMBER는 늘 격리, 점검 (7.25) | 승인한 셸 명령이 작업 폴더 밖·홈·네트워크에 닿지 못한다 |
+| **M31. 셸 격리 실행 (구현)** | 셸을 컨테이너 안에서(네트워크 없음·작업 폴더만·권한 없음), 모드(sandbox·host), MEMBER는 늘 격리, 점검 (7.25) | 승인한 셸 명령이 작업 폴더 밖·홈·네트워크에 닿지 못한다 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -3012,3 +3012,27 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 
 #### 다음
 - H-07 요약·의미 검색. Hermes 비교 남은 것: 셸 격리 실행.
+
+### 13.41 M31 셸 격리 실행 진행 기록 (2026-10-25)
+
+#### 계기
+- Hermes Agent 비교의 5번: Hermes는 터미널을 Docker 같은 격리 환경에서 돌린다. Vesta 셸은 매번 승인하지만, 승인하면 이 Mac에서 그대로 돌았다.
+
+#### 완료 (X-01~X-06)
+- **이미지**: `infra/shell/Dockerfile` — `debian:bookworm-slim`(다이제스트 고정) + bash·zsh·git·python3·make·ripgrep·jq·file·zip·tzdata 등. `scripts/shell-sandbox.sh`(만들기·`check`), `setup-macos.sh`가 함께 만든다.
+- **실행기**: `tools.ShellContainer`.
+  - `docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --user <내 UID:GID> --memory 1g --memory-swap 1g --cpus 2 --pids-limit 256 --read-only --tmpfs /tmp`.
+  - 작업 폴더가 든 허용 폴더(가장 안쪽) **하나만** 같은 경로로 붙인다. 환경 변수는 `TZ`·`HOME=/tmp`만.
+  - 쓸 수 있는지(docker·Colima·이미지)를 30초씩 기억해 확인한다. 못 쓰면 실행하지 않고 고치는 법을 답한다(직접 실행으로 바꾸지 않음).
+  - 시간 초과면 `docker kill 이름`. 서버가 시작할 때 남은 `vesta-shell-*` 컨테이너를 지운다.
+- **ShellTool**: `container`가 있으면 격리. 도구 설명에 "Linux 컨테이너·네트워크 없음·macOS 명령 없음", 승인 제목 "셸 실행 (격리)" / "셸 실행 (Mac에서 직접)", 본문에 실행 위치. 매번 승인·차단 목록은 그대로.
+- **모드**: `tools.shellMode`(`sandbox` 기본, `host`). MEMBER 셸은 설정과 관계없이 늘 격리.
+- **점검**: `vesta doctor`의 [셸] — 격리 준비됨 / Mac에서 직접(손볼 것) / 못 씀(고칠 것: `colima start`·`scripts/shell-sandbox.sh`).
+
+#### 확인
+- **테스트**: 인자(네트워크·권한·읽기 전용·UID·붙이는 폴더 하나·환경 변수), 못 쓸 때 실행 안 함·승인 제목·도구 설명, **실제 격리**(이 Mac의 Colima): 허용 폴더에 쓰기 됨, `~/.vesta`·`~/Library` 안 보임, 네트워크 `unreachable`, `/etc` 쓰기 `Read-only`, 시간 초과 뒤 남은 컨테이너 없음. 전체 테스트 통과.
+- **실제 Mac**: 컨테이너 시작 0.05~0.09초(처음 한 번 7초). 서버의 `run_shell` 설명이 격리 꼴로 바뀌었다. `vesta doctor` [셸] ✓.
+- 대화에서 실제로 셸을 승인해 보는 것은 하지 않았다(승인은 사용자가 할 일).
+
+#### 다음
+- X-07 네트워크 켜기(승인 화면에 따로). macOS 명령이 꼭 필요하면 `tools.shellMode: host`.
