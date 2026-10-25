@@ -76,7 +76,8 @@ data class ApprovalDetails(
 
 sealed interface ApprovalDecision {
     data object Approve : ApprovalDecision
-    data class Deny(val reason: String = "사용자가 거부함") : ApprovalDecision
+    /** [timedOut]: 사람이 답하지 않아 시간 초과로 거부 (M32 J-09: 작업 에이전트는 그 실행을 멈춘다) */
+    data class Deny(val reason: String = "사용자가 거부함", val timedOut: Boolean = false) : ApprovalDecision
     /** 셸 명령 수정 후 승인 (T-07) */
     data class ApproveEdited(val editedArguments: JsonObject) : ApprovalDecision
 }

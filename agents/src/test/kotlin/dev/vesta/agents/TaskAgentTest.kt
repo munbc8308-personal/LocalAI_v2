@@ -228,6 +228,64 @@ class TaskAgentTest : FunSpec({
         idle.requests.size shouldBe 0
     }
 
+    test("작업 계획 첫 시험에서 (J-08): 빌드가 실행 기록으로 확인되면 앞 항목을 시스템이 done으로, 목록을 안 고치고 끝내면 한 번 되돌린다") {
+        val store = mutableMapOf<dev.vesta.core.SessionId, dev.vesta.core.plan.TaskPlan>()
+        val plans = object : dev.vesta.core.plan.PlanRepository {
+            override suspend fun get(session: dev.vesta.core.SessionId) = store[session]
+            override suspend fun save(session: dev.vesta.core.SessionId, plan: dev.vesta.core.plan.TaskPlan) { store[session] = plan }
+            override suspend fun clear(session: dev.vesta.core.SessionId) { store.remove(session) }
+        }
+        val shell = object : Tool {
+            override val spec = ToolSpec("run_shell", "셸", buildJsonObject { })
+            override val risk = RiskLevel.EXEC
+            override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("** BUILD SUCCEEDED **\n[종료 코드 0]")
+        }
+        store[session.id] = dev.vesta.core.plan.TaskPlan("목표", listOf(
+            dev.vesta.core.plan.PlanItem("빌드 오류 고치기", dev.vesta.core.plan.PlanStatus.IN_PROGRESS, dev.vesta.core.plan.PlanCheck.BUILD),
+            dev.vesta.core.plan.PlanItem("화면 고치기"),
+            dev.vesta.core.plan.PlanItem("테스트 통과", check = dev.vesta.core.plan.PlanCheck.TEST),
+        ))
+        val continued = request.copy(routing = dev.vesta.core.decision.RoutingDecision(dev.vesta.core.AgentType.TASK, 1.0, dev.vesta.core.decision.RoutingStage.EXPLICIT, question = "이어서", continued = true))
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("s", "run_shell", """{"command":"xcodebuild -scheme G build"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("빌드 됐어"), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.Delta("화면은 아직"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(shell)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(continued).toList()
+        store.getValue(session.id).items.map { it.status } shouldBe listOf(dev.vesta.core.plan.PlanStatus.DONE, dev.vesta.core.plan.PlanStatus.PENDING, dev.vesta.core.plan.PlanStatus.PENDING)
+        events.filterIsInstance<AgentEvent.Status>().map { it.text } shouldContain "할 일 1/3 · 지금: 화면 고치기 (실행 기록으로 확인)"
+        model.requests[1].messages[0].content shouldContain "[x] 빌드 오류 고치기"
+        model.requests[2].messages.last().content shouldContain "[시스템] 이번 실행에서 한 일을 할 일 목록에 반영하지 않았다"
+        model.requests.size shouldBe 3
+    }
+
+    test("같은 도구를 같은 인자로 세 번째 부르면 실행하지 않는다 (J-10)") {
+        val search = RecordingTool("search_files", RiskLevel.READ)
+        val same = ToolCall("a", "search_files", """{"name":"*App.swift*"}""")
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(same)), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(same.copy(id = "b"))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(same.copy(id = "c", arguments = """{ "name": "*App.swift*" }"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("끝"), ChatChunk.Done("stop", null)),
+        ))
+        TaskAgent(model, models, ToolRegistry(listOf(search)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        search.calls.size shouldBe 2
+        model.requests[3].messages.last().content shouldContain "실행하지 않았다: 방금 같은 도구를 같은 인자로 2번 연달아"
+    }
+
+    test("승인이 시간 초과로 거부되면 다음 호출로 넘어가지 않고 멈춘다 (J-09)") {
+        val write = RecordingTool("write_file", RiskLevel.WRITE)
+        val broker = AutoBroker(ApprovalDecision.Deny("5분 동안 응답이 없어 거부", timedOut = true))
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w1", "write_file", "{}"), ToolCall("w2", "write_file", """{"x":1}"""))), ChatChunk.Done("tool_calls", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(write)), broker).handle(request).toList()
+        broker.opened shouldBe 1
+        write.calls.size shouldBe 0
+        model.requests.size shouldBe 1
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "응답이 없어 멈췄습니다"
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)

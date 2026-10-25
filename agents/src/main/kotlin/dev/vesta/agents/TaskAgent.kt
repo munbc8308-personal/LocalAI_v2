@@ -111,6 +111,28 @@ class TaskAgent(
         val claims = ClaimCheck()
         var rechecked = false
         var nudged = false
+        // 목록 갱신 강제 (J-08): 이번 실행에서 도구를 썼는데 update_plan을 한 번도 안 불렀으면 끝내기 전에 한 번 되돌린다
+        var planTouched = false
+        var worked = false
+        var planNudged = false
+        // 같은 호출 되풀이 막기 (J-10): 바로 앞 호출과 같은 도구·인자가 몇 번 이어졌나
+        var lastCall: String? = null
+        var repeats = 0
+        // 빌드·테스트 항목 자동 완료 (J-08): 앞에서부터 남은 항목이 build·test이고 실행 기록으로 확인되면 done
+        suspend fun FlowCollector<AgentEvent>.autoComplete() {
+            val current = plan ?: return
+            var items = current.items
+            while (true) {
+                val i = items.indexOfFirst { it.status == dev.vesta.core.plan.PlanStatus.PENDING || it.status == dev.vesta.core.plan.PlanStatus.IN_PROGRESS }
+                if (i < 0 || items[i].check == dev.vesta.core.plan.PlanCheck.NONE || claims.verified(items[i].check) != null) break
+                items = items.toMutableList().also { it[i] = it[i].copy(status = dev.vesta.core.plan.PlanStatus.DONE) }
+            }
+            if (items == current.items) return
+            val saved = current.copy(items = items, tainted = current.tainted || taint.tainted)
+            plan = saved
+            runCatching { plans?.save(sessionId, saved) }
+            emit(AgentEvent.Status(saved.progress() + " (실행 기록으로 확인)"))
+        }
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
@@ -199,6 +221,14 @@ class TaskAgent(
                         unverified.joinToString("\n") { "- $it" } + "\n도구로 실제로 실행해 확인하라(실패하면 고친다). 확인할 수 없으면 답에서 그 주장을 빼고 사실대로 다시 보고하라.")
                     continue
                 }
+                if (plan?.remaining?.isNotEmpty() == true && worked && !planTouched && !planNudged && step < maxSteps) {
+                    planNudged = true
+                    emit(AgentEvent.Status("할 일 목록을 고치게 합니다"))
+                    emit(AgentEvent.Token("\n\n"))
+                    messages += ChatMessage(ChatRole.ASSISTANT, text.toString())
+                    messages += ChatMessage(ChatRole.USER, "[시스템] 이번 실행에서 한 일을 할 일 목록에 반영하지 않았다. update_plan으로 끝낸 항목은 done, 하고 있는 항목은 in_progress로 바꾸고, 남은 일을 이어서 하거나 무엇이 남았는지 보고하라.")
+                    continue
+                }
                 if (unverified.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행 기록으로 확인되지 않은 주장: " + unverified.joinToString("; ")))
                 // 모델이 거부된 작업을 했다고 말하더라도 사용자가 알 수 있게 시스템이 직접 붙인다
                 if (denied.isNotEmpty()) emit(AgentEvent.Token("\n\n※ 실행하지 않은 작업 (승인 거부): " + denied.distinct().joinToString("; ")))
@@ -214,6 +244,8 @@ class TaskAgent(
             for (call in calls) {
                 if (call.name == PlanTool.NAME && plans != null) {
                     val args = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap()))
+                    planTouched = true
+                    lastCall = null
                     val (next, out) = PlanTool.apply(plan, goal, args) { claims.verified(it) }
                     if (next != null) {
                         val saved = next.copy(tainted = plan?.tainted == true || taint.tainted)
@@ -224,11 +256,32 @@ class TaskAgent(
                     messages += ChatMessage(ChatRole.TOOL, out, toolCallId = call.id)
                     continue
                 }
+                val key = call.name + " " + runCatching { Json.parseToJsonElement(call.arguments).toString() }.getOrDefault(call.arguments)
+                repeats = if (key == lastCall) repeats + 1 else 1
+                lastCall = key
+                if (repeats >= 3) {
+                    emit(AgentEvent.Status("같은 호출을 ${repeats}번째 해서 실행하지 않았습니다: ${call.name}"))
+                    messages += ChatMessage(ChatRole.TOOL, "실행하지 않았다: 방금 같은 도구를 같은 인자로 ${repeats - 1}번 연달아 불렀다. 결과는 위와 같다. 같은 호출을 되풀이하지 말고 다음 할 일로 넘어가라.", toolCallId = call.id)
+                    continue
+                }
                 val result = runTool(call, request, context, taint, available)
+                if (!result.isError) worked = true
                 claims.record(call.name, runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())), !result.isError, result.output)
                 if (result.summary == DENIED) denied += available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name
                 messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
+                // 승인 시간 초과 (J-09): 지켜보는 사람이 없으니 다음 호출로 넘어가 또 기다리지 않고 멈춘다
+                if (result.summary == TIMED_OUT) {
+                    emit(AgentEvent.Token("\n\n(승인 요청에 ${approvalTimeoutSeconds / 60}분 동안 응답이 없어 멈췄습니다. 실행하지 않은 작업: " +
+                        (available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name) +
+                        ". \"이어서 해 줘\"로 다시 시켜 주세요.)"))
+                    plan?.remaining?.takeIf { it.isNotEmpty() }?.let { left ->
+                        emit(AgentEvent.Token("\n\n남은 할 일 (${left.size}개):\n" + left.joinToString("\n") { "- ${it.text}" }))
+                    }
+                    emit(AgentEvent.Done(type, spec.name, usage))
+                    return@flow
+                }
             }
+            autoComplete()
         }
         emit(AgentEvent.Token("\n(도구 사용이 ${maxSteps}단계를 넘어 멈췄습니다. 이어서 하려면 다시 요청해 주세요.)"))
         emit(AgentEvent.Done(type, spec.name, usage))
@@ -265,6 +318,7 @@ class TaskAgent(
         /** 예약 실행 안내 (M29 S-05) */
         const val UNATTENDED = "예약 실행: 지켜보는 사람이 없어 파일 쓰기·옮기기·셸·보내기 도구가 없다. 그런 일은 하지 않았으면 했다고 말하지 말고, \"예약 실행에서는 할 수 없으니 직접 대화에서 시켜 달라\"고 알린다. 읽기·검색으로 할 수 있는 것만 한다."
         const val DENIED = "거부됨"
+        const val TIMED_OUT = "응답 없음"
     }
 
     /** 이번 작업에서 로컬 데이터를 읽었는지 */
@@ -297,7 +351,7 @@ class TaskAgent(
                         "실행되지 않았다. 사용자가 승인을 거부했다(${decision.reason}). 이 작업은 일어나지 않았으므로 했다고 말하지 말고, " +
                             "하지 않았다고 사용자에게 알린다. 다른 방법이 필요하면 사용자에게 묻는다.",
                         isError = true,
-                        summary = DENIED,
+                        summary = if (decision.timedOut) TIMED_OUT else DENIED,
                     )
                     emit(AgentEvent.ToolFinished(call.id, tool.spec.name, ok = false, summary = "$DENIED (${decision.reason})"))
                     runLog?.record(request.user, request.session.id, tool.spec.name, arguments.toString(), tool.risk, false, denied, 0)
@@ -376,7 +430,7 @@ class TaskAgent(
             ),
         )
         val decision = withTimeoutOrNull(approvalTimeoutSeconds.seconds) { pending.result.await() }
-            ?: ApprovalDecision.Deny("${approvalTimeoutSeconds / 60}분 동안 응답이 없어 거부")
+            ?: ApprovalDecision.Deny("${approvalTimeoutSeconds / 60}분 동안 응답이 없어 거부", timedOut = true)
         approvals.close(pending.id)
         return decision
     }
