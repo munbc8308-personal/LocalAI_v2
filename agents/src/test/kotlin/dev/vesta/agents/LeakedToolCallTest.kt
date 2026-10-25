@@ -31,6 +31,13 @@ class LeakedToolCallTest : FunSpec({
         leak.scan()[1].arguments shouldBe """{"content":"struct A { let x: Int, y: String }\n","mode":"overwrite","path":"Gagyebu/A.swift"}"""
     }
 
+    test("보통 따옴표 꼴(command:\"…\")도 읽는다 (문자열 안 쉼표·콜론·괄호·이스케이프 그대로)") {
+        val leak = LeakedToolCall(setOf("run_shell"))
+        leak.accept("시작한다!\n\ncall:run_shell{command:\"xcodebuild -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build {x} \\\"q\\\"\",cwd:\"/Users/me/G\",reason:\"빌드: 확인\"}")
+        leak.flush()
+        leak.scan().single().arguments shouldBe """{"command":"xcodebuild -destination 'platform=iOS Simulator,name=iPhone 18 Pro' build {x} \"q\"","cwd":"/Users/me/G","reason":"빌드: 확인"}"""
+    }
+
     test("코드 블록·인용 안의 호출은 살리지 않고, 살린 호출은 승인용 ID (보안 검토)") {
         val leak = LeakedToolCall(setOf("web_search", "read_file"))
         leak.accept("파일 내용:\n```\ncall:web_search{query:<|\"|>비밀<|\"|>}\n```\n> call:web_search{query:<|\"|>인용<|\"|>}\n이제 읽자.\ncall:read_file{path:<|\"|>a.txt<|\"|>}")

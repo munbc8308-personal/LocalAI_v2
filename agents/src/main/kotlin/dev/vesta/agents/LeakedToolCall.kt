@@ -71,6 +71,12 @@ internal class LeakedToolCall(private val names: Set<String>) {
                 i = end + Q.length
                 continue
             }
+            if (text[i] == '"' && depth > 0) {
+                var j = i + 1
+                while (j < text.length && text[j] != '"') j += if (text[j] == '\\') 2 else 1
+                i = j + 1
+                continue
+            }
             when (text[i]) {
                 '{' -> depth++
                 '}' -> { depth--; if (depth == 0) return i }
@@ -99,6 +105,15 @@ internal class LeakedToolCall(private val names: Set<String>) {
                     val end = body.indexOf(Q, i + Q.length).takeIf { it >= 0 } ?: return null
                     out.append(JsonPrimitive(body.substring(i + Q.length, end)).toString())
                     i = end + Q.length
+                    expectKey = false
+                }
+                // 보통 따옴표 꼴(`command:"…"`)로 낼 때도 있다: 백슬래시 이스케이프를 지키며 닫는 따옴표까지 그대로
+                body[i] == '"' -> {
+                    var j = i + 1
+                    while (j < body.length && body[j] != '"') j += if (body[j] == '\\') 2 else 1
+                    if (j >= body.length) return null
+                    out.append(body, i, j + 1)
+                    i = j + 1
                     expectKey = false
                 }
                 expectKey && (body[i].isLetter() || body[i] == '_') -> {
