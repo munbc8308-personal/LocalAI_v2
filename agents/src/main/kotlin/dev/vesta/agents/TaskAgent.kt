@@ -155,7 +155,8 @@ class TaskAgent(
         var edited = false
         // 설명 글에서 살린 호출(LeakedToolCall.scan)은 믿지 않는다: 읽기 말고는 모두 승인 (보안 검토)
         val recovered = call.id.startsWith(LeakedToolCall.INLINE_ID)
-        if (ToolRegistry.needsApproval(tool.risk, taint.tainted) || (recovered && tool.risk != dev.vesta.core.RiskLevel.READ)) {
+        // 나눠 맡기기는 READ지만 맡은 에이전트가 인터넷·쓰기 도구를 쓰므로 살린 호출이면 승인
+        if (ToolRegistry.needsApproval(tool.risk, taint.tainted) || (recovered && (tool.risk != dev.vesta.core.RiskLevel.READ || tool is dev.vesta.core.tools.DelegatingTool))) {
             when (val decision = askApproval(tool, arguments, request)) {
                 ApprovalDecision.Approve -> approved = true
                 // 수정본은 바꾼 인자만 담아 올 수 있으므로 원래 인자에 덮어쓴다
@@ -177,7 +178,7 @@ class TaskAgent(
         val start = TimeSource.Monotonic.markNow()
         val result = runCatching {
             // 나눠 맡기기(팀, M22): 맡은 에이전트의 단계·승인 요청을 이 흐름으로 그대로 흘린다
-            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted)) { emit(it) } else tool.execute(arguments, context)
+            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted || recovered)) { emit(it) } else tool.execute(arguments, context)
         }.getOrElse {
             if (it is kotlinx.coroutines.CancellationException) throw it
             log.warn(it) { "도구 실패: ${tool.spec.name}" }

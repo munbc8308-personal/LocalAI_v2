@@ -86,6 +86,26 @@ class TaskAgentTest : FunSpec({
         events.filterIsInstance<AgentEvent.ApprovalRequested>().single().tool shouldBe "web_search"
     }
 
+    test("설명 글에서 살린 나눠 맡기기도 승인 (맡은 에이전트가 인터넷·쓰기를 쓰므로, 보안 검토)") {
+        val delegated = mutableListOf<AgentRequest>()
+        val delegate = object : dev.vesta.core.tools.DelegatingTool {
+            override val spec = ToolSpec("delegate", "delegate", buildJsonObject { })
+            override val risk = RiskLevel.READ
+            override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("안 씀")
+            override suspend fun delegate(arguments: JsonObject, request: AgentRequest, emit: suspend (AgentEvent) -> Unit): ToolResult { delegated += request; return ToolResult("받음") }
+        }
+        val q = "<|\"|>"
+        fun model() = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("맡기자.\ncall:delegate{member:${q}a${q},task:${q}x${q}}"), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.Delta("끝"), ChatChunk.Done("stop", null)),
+        ))
+        TaskAgent(model(), models, ToolRegistry(listOf(delegate)), AutoBroker(ApprovalDecision.Deny("거부"))).handle(request).toList()
+            .filterIsInstance<AgentEvent.ApprovalRequested>().single().tool shouldBe "delegate"
+        delegated.size shouldBe 0
+        TaskAgent(model(), models, ToolRegistry(listOf(delegate)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        delegated.single().tainted shouldBe true
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)
