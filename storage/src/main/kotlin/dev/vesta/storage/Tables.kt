@@ -452,6 +452,7 @@ object TaskPlans : org.jetbrains.exposed.v1.core.Table("task_plan") {
     val goal = text("goal")
     val items = text("items")
     val updatedAt = timestamp("updated_at")
+    val tainted = bool("tainted").default(false)
     override val primaryKey = PrimaryKey(sessionId)
 }
 

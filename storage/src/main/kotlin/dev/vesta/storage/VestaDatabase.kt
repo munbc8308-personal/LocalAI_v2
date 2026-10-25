@@ -56,6 +56,9 @@ class VestaDatabase private constructor(val db: Database) {
         exec("CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content); END")
         exec("CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END")
         if (!hadMessagesFts) exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+        // v28: task_plan.tainted (보안 검토로 더함. 표는 위 create가 만든다)
+        val planColumns = exec("PRAGMA table_info(task_plan)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
+        if ("tainted" !in planColumns) exec("ALTER TABLE task_plan ADD COLUMN tainted BOOLEAN DEFAULT 0 NOT NULL")
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
             log.info { "schema $current -> $CURRENT_VERSION" }

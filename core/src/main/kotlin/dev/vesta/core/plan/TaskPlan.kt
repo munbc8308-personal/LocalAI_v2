@@ -13,7 +13,13 @@ data class PlanItem(val text: String, val status: PlanStatus = PlanStatus.PENDIN
 /**
  * 작업 계획 (PROJECT.md 7.26, M32): 대화 하나에 하나. [goal]은 처음 작업 요청 글
  */
-data class TaskPlan(val goal: String, val items: List<PlanItem>, val updatedAt: Instant = Instant.EPOCH) {
+data class TaskPlan(
+    val goal: String,
+    val items: List<PlanItem>,
+    val updatedAt: Instant = Instant.EPOCH,
+    /** 로컬 데이터를 읽은 뒤(오염된 실행에서) 만들거나 바꾼 계획: 이어 가는 실행도 처음부터 인터넷 도구에 승인을 받는다 (보안 검토) */
+    val tainted: Boolean = false,
+) {
     val remaining: List<PlanItem> get() = items.filter { it.status == PlanStatus.PENDING || it.status == PlanStatus.IN_PROGRESS }
     val done: Int get() = items.count { it.status == PlanStatus.DONE || it.status == PlanStatus.SKIPPED }
 

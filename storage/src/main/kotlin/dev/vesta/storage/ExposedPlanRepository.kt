@@ -22,7 +22,7 @@ class ExposedPlanRepository(private val db: Database, private val clock: Clock =
 
     override suspend fun get(session: SessionId): TaskPlan? = io {
         TaskPlans.selectAll().where { TaskPlans.sessionId eq session.value }.firstOrNull()?.let { row ->
-            TaskPlan(row[TaskPlans.goal], row[TaskPlans.items].lines().filter { it.isNotBlank() }.mapNotNull(::item), row[TaskPlans.updatedAt])
+            TaskPlan(row[TaskPlans.goal], row[TaskPlans.items].lines().filter { it.isNotBlank() }.mapNotNull(::item), row[TaskPlans.updatedAt], row[TaskPlans.tainted])
         }
     }
 
@@ -32,6 +32,7 @@ class ExposedPlanRepository(private val db: Database, private val clock: Clock =
             it[goal] = plan.goal.take(4_000)
             it[items] = plan.items.joinToString("\n") { i -> "${i.status.name}|${i.check.name}|${i.text.replace('\n', ' ')}" }
             it[updatedAt] = clock.instant()
+            it[tainted] = plan.tainted
         }
         Unit
     }
