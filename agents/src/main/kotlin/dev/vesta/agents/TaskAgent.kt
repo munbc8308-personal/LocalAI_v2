@@ -89,44 +89,78 @@ class TaskAgent(
         // 마지막 답의 "빌드 성공·테스트 통과·파일 수정"을 도구 기록과 맞춰 본다. 안 맞으면 한 번 되돌려 확인시킨다
         val claims = ClaimCheck()
         var rechecked = false
+        var nudged = false
 
         for (step in 1..maxSteps) {
             emit(AgentEvent.Status(if (step == 1) "계획 중" else "다음 단계 ($step)"))
-            val text = StringBuilder()
+            var text = StringBuilder()
             var calls = emptyList<ToolCall>()
-            val filter = ArtifactFilter()
-            val leak = LeakedToolCall(available.keys)
-            // 끝없이 쓰는 것 막기 (가계부 앱 시험: 한 단계에서 17만 자를 쓰다 10분 시간 제한에 걸렸다): 단계당 생성 한도, 같은 글 반복이면 멈춤
-            val seen = StringBuilder()
-            var checkedAt = 0
             var finish: String? = null
             var runaway = false
-            try { inference.chat(
-                ChatRequest(
-                    model = spec.name,
-                    messages = messages.toList(), // 이후 단계에서 목록이 바뀌어도 이 요청 내용은 그대로
-                    temperature = spec.temperature ?: 0.2,
-                    // 생각 토큰도 생성 한도에 들어가므로 생각을 켜면 한도를 두 배로
-                    maxTokens = spec.maxTokens ?: if (effort(spec) != null && effort(spec) != "none") STEP_TOKENS * 2 else STEP_TOKENS,
-                    reasoningEffort = effort(spec),
-                    keepAlive = spec.keepAlive,
-                    tools = available.values.map { it.spec },
-                ),
-            ).collect { chunk ->
-                when (chunk) {
-                    is ChatChunk.Delta -> {
-                        seen.append(chunk.text)
-                        if (seen.length - checkedAt >= 1_000) { checkedAt = seen.length; if (Runaway.repeating(seen)) throw Runaway() }
-                        leak.accept(filter.accept(chunk.text)).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
-                    }
-                    is ChatChunk.Reasoning -> emit(AgentEvent.Reasoning(chunk.text))
-                    is ChatChunk.ToolCalls -> calls = chunk.calls
-                    is ChatChunk.Done -> { usage = chunk.usage; finish = chunk.finishReason }
+            // 생각 모드 단계는 글을 모아 두었다가 낸다: 되풀이·길이 초과·"할게"만 하고 멈추면 버리고 생각 없이 다시 (가계부 시험: 생각 모드에서 큰 파일 쓰기 호출이 자주 망가졌다)
+            var effortNow = effort(spec)
+            var retried = false
+            while (true) {
+                text = StringBuilder()
+                calls = emptyList()
+                finish = null
+                runaway = false
+                val thinking = effortNow != null && effortNow != "none"
+                val pending = StringBuilder()
+                val filter = ArtifactFilter()
+                val leak = LeakedToolCall(available.keys)
+                // 끝없이 쓰는 것 막기 (가계부 앱 시험: 한 단계에서 17만 자를 쓰다 10분 시간 제한에 걸렸다): 단계당 생성 한도, 같은 글 반복이면 멈춤
+                val seen = StringBuilder()
+                var checkedAt = 0
+                suspend fun out(piece: String) {
+                    if (piece.isEmpty()) return
+                    text.append(piece)
+                    if (thinking) pending.append(piece) else emit(AgentEvent.Token(piece))
                 }
-            } } catch (_: Runaway) { runaway = true }
-            (leak.accept(filter.flush()) + leak.flush()).takeIf { it.isNotEmpty() }?.let { text.append(it); emit(AgentEvent.Token(it)) }
-            // 글로 새어 나온 호출이면 실제 호출로 (gemma4가 가끔 그런다)
-            if (calls.isEmpty()) (leak.call?.let { listOf(it) } ?: leak.scan()).takeIf { it.isNotEmpty() }?.let { calls = it }
+                try { inference.chat(
+                    ChatRequest(
+                        model = spec.name,
+                        messages = messages.toList(), // 이후 단계에서 목록이 바뀌어도 이 요청 내용은 그대로
+                        temperature = spec.temperature ?: 0.2,
+                        // 생각 토큰도 생성 한도에 들어가므로 생각을 켜면 한도를 두 배로
+                        maxTokens = spec.maxTokens ?: if (thinking) STEP_TOKENS * 2 else STEP_TOKENS,
+                        reasoningEffort = effortNow,
+                        keepAlive = spec.keepAlive,
+                        tools = available.values.map { it.spec },
+                    ),
+                ).collect { chunk ->
+                    when (chunk) {
+                        is ChatChunk.Delta -> {
+                            seen.append(chunk.text)
+                            if (seen.length - checkedAt >= 1_000) { checkedAt = seen.length; if (Runaway.repeating(seen)) throw Runaway() }
+                            out(leak.accept(filter.accept(chunk.text)))
+                        }
+                        is ChatChunk.Reasoning -> emit(AgentEvent.Reasoning(chunk.text))
+                        is ChatChunk.ToolCalls -> calls = chunk.calls
+                        is ChatChunk.Done -> { usage = chunk.usage; finish = chunk.finishReason }
+                    }
+                } } catch (_: Runaway) { runaway = true }
+                out(leak.accept(filter.flush()) + leak.flush())
+                // 글로 새어 나온 호출이면 실제 호출로 (gemma4가 가끔 그런다)
+                if (calls.isEmpty()) (leak.call?.let { listOf(it) } ?: leak.scan()).takeIf { it.isNotEmpty() }?.let { calls = it }
+                val stalled = calls.isEmpty() && (runaway || finish == "length" || INTENT.containsMatchIn(text.toString().trim().takeLast(160)))
+                if (thinking && stalled && !retried) {
+                    retried = true
+                    effortNow = "none"
+                    emit(AgentEvent.Status("생각 없이 다시 시도합니다"))
+                    continue
+                }
+                if (pending.isNotEmpty()) emit(AgentEvent.Token(pending.toString()))
+                break
+            }
+            // "…할게"라고만 하고 도구를 부르지 않았으면 한 번 다그친다
+            if (calls.isEmpty() && !runaway && finish != "length" && !nudged && step < maxSteps && INTENT.containsMatchIn(text.toString().trim().takeLast(160))) {
+                nudged = true
+                emit(AgentEvent.Token("\n"))
+                messages += ChatMessage(ChatRole.ASSISTANT, text.toString())
+                messages += ChatMessage(ChatRole.USER, "[시스템] 말로만 하지 말고 지금 바로 해당 도구를 불러 실행하라. 할 일이 끝났으면 실행한 결과만 보고하라.")
+                continue
+            }
             if (calls.isEmpty() && (runaway || finish == "length")) {
                 emit(AgentEvent.Token("\n\n(" + (if (runaway) "같은 글을 되풀이해서" else "한 번에 너무 길게 써서") + " 멈췄습니다. 큰 파일은 나눠 쓰게 하거나, \"이어서 해 줘\"로 다음 단계부터 다시 시켜 주세요.)"))
                 emit(AgentEvent.Done(type, spec.name, usage))
@@ -182,6 +216,8 @@ class TaskAgent(
     }
 
     private companion object {
+        /** "…할게"처럼 하겠다고만 하고 끝난 글 (마지막 문장) */
+        val INTENT = Regex("(할게|하겠어|하겠습니다|진행할게|시작할게|작성할게|생성할게|만들게|고칠게|수정할게|실행할게|확인할게|읽을게|볼게)[.!)\\s]*$")
         /** 단계 하나의 생성 한도 (토큰). 200줄 파일 하나는 넉넉히 쓴다 */
         const val STEP_TOKENS = 8_192
         /** 예약 실행 안내 (M29 S-05) */

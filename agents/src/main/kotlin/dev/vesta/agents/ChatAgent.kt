@@ -50,13 +50,32 @@ class ChatAgent(
 
 /** 최근 대화부터 거꾸로 담아 글자 수 상한 안에 맞춘다. 마지막 사용자 입력은 항상 넣는다. */
 internal object HistoryWindow {
+    /** 같은 줄(빈 줄 제외)이 세 번 넘게 나오면 두 번째 뒤로는 지우고 몇 번 되풀이했는지 남긴다 */
+    fun collapse(text: String): String {
+        val lines = text.lines()
+        val counts = lines.filter { it.isNotBlank() }.groupingBy { it.trim() }.eachCount()
+        if (counts.values.none { it > 3 }) return text
+        val seen = mutableMapOf<String, Int>()
+        val out = lines.filter { line ->
+            val key = line.trim()
+            if (key.isEmpty()) return@filter true
+            val n = (seen[key] ?: 0) + 1
+            seen[key] = n
+            n <= 2
+        }
+        val note = counts.filter { it.value > 3 }.entries.joinToString("; ") { "\"${it.key.take(40)}\" ${it.value}번" }
+        return out.joinToString("\n").replace(Regex("\n{3,}"), "\n\n") + "\n(같은 줄 되풀이 생략: $note)"
+    }
+
     /** 메시지 하나가 기록에서 차지할 수 있는 최대 글자 */
     const val PER_MESSAGE = 8_000
 
     fun fit(history: List<ChatMessage>, maxChars: Int): List<ChatMessage> {
         val result = ArrayDeque<ChatMessage>()
         var used = 0
-        for ((index, original) in history.asReversed().withIndex()) {
+        for ((index, raw) in history.asReversed().withIndex()) {
+            // 지난 답에 같은 줄이 되풀이돼 있으면 접는다 (되풀이 글이 다음 요청에서 또 되풀이를 부르지 않게)
+            val original = if (index > 0) raw.copy(content = collapse(raw.content)) else raw
             // 아주 긴 지난 메시지 하나(끝없이 쓴 답 등)가 앞 맥락을 모두 밀어내지 않게 앞뒤만 남긴다. 지금 질문(첨부 파일 등)은 그대로
             val message = if (index > 0 && original.content.length > PER_MESSAGE) original.copy(content = original.content.take(PER_MESSAGE / 2) +
                 "\n…(${original.content.length - PER_MESSAGE}자 생략)…\n" + original.content.takeLast(PER_MESSAGE / 2)) else original

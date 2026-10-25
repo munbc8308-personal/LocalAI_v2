@@ -145,6 +145,30 @@ class TaskAgentTest : FunSpec({
         stubborn.requests.size shouldBe 2
     }
 
+    test("생각 모드 단계가 되풀이로 망가지면 그 글은 버리고 생각 없이 다시, \"할게\"만 하면 한 번 다그친다") {
+        val write = RecordingTool("write_file", RiskLevel.READ)
+        val loop = List(200) { ChatChunk.Delta("파일을 생성할게. 지출/수입에 따라 바뀌도록 구현할 거야. ") }
+        val model = ScriptedModel(listOf(
+            loop + ChatChunk.Done("stop", null),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w1", "write_file", """{"path":"A.swift","content":"x"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("A.swift를 썼어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), reasoningEffort = "medium").handle(request).toList()
+        model.requests.map { it.reasoningEffort } shouldBe listOf("medium", "none", "medium")
+        write.calls.size shouldBe 1
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }.contains("생성할게") shouldBe false
+
+        // 생각 없이도 "할게"만 하고 끝나면 다그쳐서 실제로 부르게
+        val lazy = ScriptedModel(listOf(
+            listOf(ChatChunk.Delta("이제 A.swift를 작성할게."), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w2", "write_file", """{"path":"A.swift","content":"y"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("A.swift를 작성했어"), ChatChunk.Done("stop", null)),
+        ))
+        TaskAgent(lazy, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        lazy.requests[1].messages.last().content shouldContain "[시스템] 말로만 하지 말고"
+        write.calls.size shouldBe 2
+    }
+
     test("읽기 도구는 승인 없이, 쓰기 도구는 승인 후 실행하고 결과를 모델에 돌려준다") {
         val read = RecordingTool("read_file", RiskLevel.READ)
         val write = RecordingTool("write_file", RiskLevel.WRITE)
