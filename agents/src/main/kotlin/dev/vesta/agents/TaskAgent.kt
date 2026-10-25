@@ -62,6 +62,8 @@ class TaskAgent(
     private val escalation: dev.vesta.core.tools.ApprovalEscalation? = null,
     /** 쓸 모델 (사용자 정의 에이전트는 코드 모델도 고를 수 있다, M22) */
     private val modelRole: ModelRole = ModelRole.GENERAL,
+    /** 이 에이전트만의 생각 모드 (none·low·medium·high). null이면 모델 설정을 따른다 (가계부 앱 시험: 여러 단계 작업은 생각을 켜야 길을 덜 잃는다) */
+    private val reasoningEffort: String? = null,
 ) : Agent {
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
@@ -101,8 +103,9 @@ class TaskAgent(
                     model = spec.name,
                     messages = messages.toList(), // 이후 단계에서 목록이 바뀌어도 이 요청 내용은 그대로
                     temperature = spec.temperature ?: 0.2,
-                    maxTokens = spec.maxTokens ?: STEP_TOKENS,
-                    reasoningEffort = spec.reasoningEffort,
+                    // 생각 토큰도 생성 한도에 들어가므로 생각을 켜면 한도를 두 배로
+                    maxTokens = spec.maxTokens ?: if (effort(spec) != null && effort(spec) != "none") STEP_TOKENS * 2 else STEP_TOKENS,
+                    reasoningEffort = effort(spec),
                     keepAlive = spec.keepAlive,
                     tools = available.values.map { it.spec },
                 ),
@@ -143,6 +146,8 @@ class TaskAgent(
         emit(AgentEvent.Token("\n(도구 사용이 ${maxSteps}단계를 넘어 멈췄습니다. 이어서 하려면 다시 요청해 주세요.)"))
         emit(AgentEvent.Done(type, spec.name, usage))
     }
+
+    private fun effort(spec: dev.vesta.core.config.ModelSpec) = reasoningEffort ?: spec.reasoningEffort
 
     /** 같은 글 되풀이로 생성을 멈출 때 */
     private class Runaway : RuntimeException() {

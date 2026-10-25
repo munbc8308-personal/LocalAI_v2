@@ -391,7 +391,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             AgentType.PERSONAL to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
-                maxToolOutputChars = config.tools.maxOutputChars,
+                maxToolOutputChars = config.tools.maxOutputChars, reasoningEffort = config.tools.taskReasoning,
                 type = AgentType.PERSONAL,
                 rules = Prompts.PERSONAL_RULES,
                 // D11로 고른 앱 그룹의 Orchard 도구만 준다
@@ -407,7 +407,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             AgentType.TASK to TaskAgent(
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
-                maxToolOutputChars = config.tools.maxOutputChars,
+                maxToolOutputChars = config.tools.maxOutputChars, reasoningEffort = config.tools.taskReasoning,
                 toolsFor = { request -> toolsFor(request.user, request.workspace) },
                 judge = judge,
                 escalation = escalation,
@@ -464,7 +464,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         return TaskAgent(
             inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
             maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
-            maxToolOutputChars = config.tools.maxOutputChars,
+            maxToolOutputChars = config.tools.maxOutputChars, reasoningEffort = config.tools.taskReasoning,
             rules = rules,
             toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in def.tools } + listOfNotNull(delegate) },
             judge = judge,
@@ -522,7 +522,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     private fun skillAgent(skill: dev.vesta.core.skill.Skill): dev.vesta.core.agent.Agent = TaskAgent(
         inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
         maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
-        maxToolOutputChars = config.tools.maxOutputChars,
+        maxToolOutputChars = config.tools.maxOutputChars, reasoningEffort = config.tools.taskReasoning,
         rules = Prompts.TASK_RULES + "\n\n이번 요청은 스킬 '/${skill.name}'이다. 요청 첫머리의 [스킬] 지침대로 일한다.",
         toolsFor = { request -> toolsFor(request.user, request.workspace).filter { it.spec.name in skill.tools } },
         judge = judge,

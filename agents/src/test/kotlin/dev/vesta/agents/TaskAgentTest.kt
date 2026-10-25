@@ -112,6 +112,10 @@ class TaskAgentTest : FunSpec({
         val events = TaskAgent(model, models, ToolRegistry(emptyList()), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
         events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "되풀이해서 멈췄습니다"
         model.requests.single().maxTokens shouldBe 8_192
+        // 이 에이전트만 생각을 켜면 그 값으로, 생성 한도는 두 배
+        val thinking = ScriptedModel(listOf(listOf(ChatChunk.Delta("끝"), ChatChunk.Done("stop", null))))
+        TaskAgent(thinking, models, ToolRegistry(emptyList()), AutoBroker(ApprovalDecision.Approve), reasoningEffort = "medium").handle(request).toList()
+        thinking.requests.single().let { it.reasoningEffort shouldBe "medium"; it.maxTokens shouldBe 16_384 }
         val long = ScriptedModel(listOf(listOf(ChatChunk.Delta("아주 긴 파일…"), ChatChunk.Done("length", null))))
         TaskAgent(long, models, ToolRegistry(emptyList()), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
             .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "너무 길게 써서 멈췄습니다"

@@ -277,6 +277,8 @@ data class ToolsConfig(
     val shellMode: String = "sandbox",
     /** 격리 실행 이미지 (scripts/shell-sandbox.sh가 만든다) */
     val shellImage: String = "vesta-shell",
+    /** 작업 에이전트(도구를 쓰는 에이전트)만의 생각 모드: none·low·medium·high. 비우면 모델 설정 (models.general.reasoningEffort) */
+    val taskReasoning: String? = null,
     /** 도구 결과를 모델에 넘길 최대 글자 수 (넘으면 잘라 낸다) */
     val maxOutputChars: Int = 12_000,
     /** 에이전트 한 번에 도구를 부를 수 있는 최대 단계 (T-02) */
