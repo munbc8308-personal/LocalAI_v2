@@ -3134,3 +3134,8 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **pstack 31개**: `scripts/vendor-pstack.py`로 cursor/plugins `99b609a` 에서 가져옴. 원칙 24개·tdd·blast-radius·correct는 `agent: task`(read_file·list_files·search_files·write_file·apply_patch·run_shell, 역할 도구와 겹치는 것만·승인 그대로), unslop·sharpen·bro·in-your-own-words는 `agent: chat`. 링크는 `글(/이름)`, `PSTACK-LICENSE`(MIT)·`PSTACK-SOURCE` 같이 둠. 원본도 몇몇 원칙(exhaust-the-design-space 등)은 본문이 한두 줄이다.
 - 뺀 26개: 서브에이전트(poteto-mode·swarm·arena·no-comments·figure-it-out·ketchup…), node 스크립트(statechart·teach·benchmark-checklist…), Cursor 전용(setup-pstack·make-bot-ui…), references 폴더가 본문인 것(why·how·architect·interrogate…), 이름이 예약어인 recall.
 - **테스트**: BuiltinSkillsTest 2개(31개·에이전트·링크·긴 이름 호출, 웹 이름 32자). 전체 테스트 통과.
+
+#### 2차 시험 (2026-10-26, 기본 카테고리·₩ 중복·월 한국어)
+- 테스트 스킴은 정답 형식을 알려 주자 한 번에 45초로 통과(3/3, 실행 기록으로 완료). 스크린샷 평가에서 기본 카테고리가 없어 내역을 추가할 수 없음, `₩₩0`, `Oct 2026`을 찾아 다시 시켰다.
+- 4개 파일은 고쳤지만 `update_plan`은 목록을 만들 때 한 번뿐이라 0/6, "…찾아야 해."로 멈춤. J-08이 "이번 실행에서 한 번이라도 불렀나"를 봐서 목록 만들기도 부른 것으로 쳤다 → **마지막으로 목록을 고친 뒤 성공한 도구가 있으면** 되돌리도록 고침. "…아야/어야/해야 해"도 "할게"류처럼 다그친다.
+- "이어서"에서는 도구 없이 완료 보고를 지어냈고, 주장 확인이 두 번 잡아 `※ 확인되지 않은 주장`을 붙였다.

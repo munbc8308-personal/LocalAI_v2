@@ -259,6 +259,25 @@ class TaskAgentTest : FunSpec({
         model.requests.size shouldBe 3
     }
 
+    test("목록을 처음 만들기만 하고 일한 뒤 안 고치고 끝내도 되돌린다 (J-08, 2차 시험)") {
+        val store = mutableMapOf<dev.vesta.core.SessionId, dev.vesta.core.plan.TaskPlan>()
+        val plans = object : dev.vesta.core.plan.PlanRepository {
+            override suspend fun get(session: dev.vesta.core.SessionId) = store[session]
+            override suspend fun save(session: dev.vesta.core.SessionId, plan: dev.vesta.core.plan.TaskPlan) { store[session] = plan }
+            override suspend fun clear(session: dev.vesta.core.SessionId) { store.remove(session) }
+        }
+        val write = RecordingTool("write_file", RiskLevel.READ)
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("p", "update_plan", """{"items":[{"text":"A 고치기","status":"in_progress"},{"text":"B 고치기","status":"pending"}]}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w", "write_file", """{"path":"A.swift"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("A를 고쳤어."), ChatChunk.Done("stop", null)),
+            listOf(ChatChunk.Delta("B는 남았어"), ChatChunk.Done("stop", null)),
+        ))
+        TaskAgent(model, models, ToolRegistry(listOf(write)), AutoBroker(ApprovalDecision.Approve), plans = plans).handle(request).toList()
+        model.requests[3].messages.last().content shouldContain "[시스템] 이번 실행에서 한 일을 할 일 목록에 반영하지 않았다"
+        model.requests.size shouldBe 4
+    }
+
     test("같은 도구를 같은 인자로 세 번째 부르면 실행하지 않는다 (J-10)") {
         val search = RecordingTool("search_files", RiskLevel.READ)
         val same = ToolCall("a", "search_files", """{"name":"*App.swift*"}""")

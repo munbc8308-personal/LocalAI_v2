@@ -111,9 +111,9 @@ class TaskAgent(
         val claims = ClaimCheck()
         var rechecked = false
         var nudged = false
-        // 목록 갱신 강제 (J-08): 이번 실행에서 도구를 썼는데 update_plan을 한 번도 안 불렀으면 끝내기 전에 한 번 되돌린다
-        var planTouched = false
-        var worked = false
+        // 목록 갱신 강제 (J-08): 마지막으로 update_plan을 부른 뒤 도구로 일했는데 목록을 안 고치고 끝내면 한 번 되돌린다.
+        // 마지막으로 목록을 고친 뒤 성공한 도구가 있었나 (목록을 처음 만들기만 하고 끝까지 안 고친 경우도 잡는다, 2차 시험)
+        var workedSincePlan = false
         var planNudged = false
         // 같은 호출 되풀이 막기 (J-10): 바로 앞 호출과 같은 도구·인자가 몇 번 이어졌나
         var lastCall: String? = null
@@ -223,7 +223,7 @@ class TaskAgent(
                         unverified.joinToString("\n") { "- $it" } + "\n도구로 실제로 실행해 확인하라(실패하면 고친다). 확인할 수 없으면 답에서 그 주장을 빼고 사실대로 다시 보고하라.")
                     continue
                 }
-                if (plan?.remaining?.isNotEmpty() == true && worked && !planTouched && !planNudged && step < maxSteps) {
+                if (plan?.remaining?.isNotEmpty() == true && workedSincePlan && !planNudged && step < maxSteps) {
                     planNudged = true
                     emit(AgentEvent.Status("할 일 목록을 고치게 합니다"))
                     emit(AgentEvent.Token("\n\n"))
@@ -246,7 +246,7 @@ class TaskAgent(
             for (call in calls) {
                 if (call.name == PlanTool.NAME && plans != null) {
                     val args = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap()))
-                    planTouched = true
+                    workedSincePlan = false
                     lastCall = null
                     val (next, out) = PlanTool.apply(plan, goal, args) { claims.verified(it) }
                     if (next != null) {
@@ -267,7 +267,7 @@ class TaskAgent(
                     continue
                 }
                 val result = runTool(call, request, context, taint, available)
-                if (!result.isError) worked = true
+                if (!result.isError) workedSincePlan = true
                 if (call.name == SHELL) {
                     val command = (runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrNull()?.get("command") as? kotlinx.serialization.json.JsonPrimitive)?.content
                     val error = command?.let { claims.failure(result.output, result.isError) }
@@ -332,7 +332,7 @@ class TaskAgent(
 - 할 일 목록에 없는 일은 하지 않는다. 꼭 필요한 일이 새로 생기면 목록에 더하고 이유를 말한다. 사용자가 요청하지 않은 기능은 만들지 않는다 ("이어서 해 줘"는 새 기능을 만들라는 뜻이 아니다).
 - 남은 일이 있는데 멈춰야 하면 무엇이 남았는지 보고한다."""
         /** "…할게"처럼 하겠다고만 하고 끝난 글 (마지막 문장) */
-        val INTENT = Regex("(할게|하겠어|하겠습니다|진행할게|시작할게|작성할게|생성할게|만들게|고칠게|수정할게|실행할게|확인할게|읽을게|볼게)[.!)\\s]*$")
+        val INTENT = Regex("(할게|하겠어|하겠습니다|진행할게|시작할게|작성할게|생성할게|만들게|고칠게|수정할게|실행할게|확인할게|읽을게|볼게|[아어해]야\\s?(해|겠어|합니다))[.!)\\s]*$")
         /** 단계 하나의 생성 한도 (토큰). 200줄 파일 하나는 넉넉히 쓴다 */
         const val STEP_TOKENS = 8_192
         /** 예약 실행 안내 (M29 S-05) */
