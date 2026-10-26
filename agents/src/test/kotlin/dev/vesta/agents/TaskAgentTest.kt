@@ -273,6 +273,29 @@ class TaskAgentTest : FunSpec({
         model.requests[3].messages.last().content shouldContain "실행하지 않았다: 방금 같은 도구를 같은 인자로 2번 연달아"
     }
 
+    test("같은 셸 명령이 같은 오류로 세 번째 실패하면 막혔다고 멈춘다 (J-11)") {
+        val shell = object : Tool {
+            override val spec = ToolSpec("run_shell", "셸", buildJsonObject { })
+            override val risk = RiskLevel.READ
+            override suspend fun execute(arguments: JsonObject, context: ToolContext) =
+                ToolResult("Testing...\nxcodebuild: error: Scheme G is not currently configured for the test action.\n[종료 코드 0]")
+        }
+        val write = RecordingTool("write_file", RiskLevel.READ)
+        fun test(tail: String) = ChatChunk.ToolCalls(listOf(ToolCall("t$tail", "run_shell", """{"command":"xcodebuild -scheme G test$tail"}""")))
+        val model = ScriptedModel(listOf(
+            listOf(test(" 2>&1 | tail -40"), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w", "write_file", """{"path":"project.yml"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(test(""), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("w2", "write_file", """{"path":"project.yml","v":2}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(test(" | tail -n 20"), ChatChunk.Done("tool_calls", null)),
+        ))
+        val text = TaskAgent(model, models, ToolRegistry(listOf(shell, write)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+            .filterIsInstance<AgentEvent.Token>().joinToString("") { it.text }
+        model.requests.size shouldBe 5
+        text shouldContain "막혀서 멈췄습니다: 같은 명령이 같은 오류로 3번 실패했습니다"
+        text shouldContain "오류: xcodebuild: error: Scheme G is not currently configured for the test action."
+    }
+
     test("승인이 시간 초과로 거부되면 다음 호출로 넘어가지 않고 멈춘다 (J-09)") {
         val write = RecordingTool("write_file", RiskLevel.WRITE)
         val broker = AutoBroker(ApprovalDecision.Deny("5분 동안 응답이 없어 거부", timedOut = true))

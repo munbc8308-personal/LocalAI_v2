@@ -118,6 +118,8 @@ class TaskAgent(
         // 같은 호출 되풀이 막기 (J-10): 바로 앞 호출과 같은 도구·인자가 몇 번 이어졌나
         var lastCall: String? = null
         var repeats = 0
+        // 같은 실패 되풀이 (J-11): 셸 명령·오류 줄마다 실패 횟수
+        val failures = mutableMapOf<Pair<String, String>, Int>()
         // 빌드·테스트 항목 자동 완료 (J-08): 앞에서부터 남은 항목이 build·test이고 실행 기록으로 확인되면 done
         suspend fun FlowCollector<AgentEvent>.autoComplete() {
             val current = plan ?: return
@@ -266,6 +268,24 @@ class TaskAgent(
                 }
                 val result = runTool(call, request, context, taint, available)
                 if (!result.isError) worked = true
+                if (call.name == SHELL) {
+                    val command = (runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrNull()?.get("command") as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    val error = command?.let { claims.failure(result.output, result.isError) }
+                    if (command != null && error != null && result.summary != DENIED && result.summary != TIMED_OUT) {
+                        val key = TAIL.replace(command.trim(), "").trim() to error
+                        val count = (failures[key] ?: 0) + 1
+                        failures[key] = count
+                        if (count >= STUCK_AFTER) {
+                            emit(AgentEvent.Token("\n\n(막혀서 멈췄습니다: 같은 명령이 같은 오류로 ${count}번 실패했습니다.\n명령: ${key.first.take(300)}\n오류: ${error}\n" +
+                                "같은 방법을 되풀이하지 않도록 멈췄습니다. 오류를 보고 방향을 알려 주거나 \"이어서 해 줘\"로 다시 시켜 주세요.)"))
+                            plan?.remaining?.takeIf { it.isNotEmpty() }?.let { left ->
+                                emit(AgentEvent.Token("\n\n남은 할 일 (${left.size}개):\n" + left.joinToString("\n") { "- ${it.text}" }))
+                            }
+                            emit(AgentEvent.Done(type, spec.name, usage))
+                            return@flow
+                        }
+                    }
+                }
                 claims.record(call.name, runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())), !result.isError, result.output)
                 if (result.summary == DENIED) denied += available[call.name]?.describe(runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap())))?.title ?: call.name
                 messages += ChatMessage(ChatRole.TOOL, result.output.take(maxToolOutputChars), toolCallId = call.id)
@@ -319,6 +339,11 @@ class TaskAgent(
         const val UNATTENDED = "예약 실행: 지켜보는 사람이 없어 파일 쓰기·옮기기·셸·보내기 도구가 없다. 그런 일은 하지 않았으면 했다고 말하지 말고, \"예약 실행에서는 할 수 없으니 직접 대화에서 시켜 달라\"고 알린다. 읽기·검색으로 할 수 있는 것만 한다."
         const val DENIED = "거부됨"
         const val TIMED_OUT = "응답 없음"
+        const val SHELL = "run_shell"
+        /** 같은 명령이 같은 오류로 이만큼 실패하면 멈춘다 (J-11) */
+        const val STUCK_AFTER = 3
+        /** 명령 비교에서 빼는 꼬리: `2>&1 | tail -40` 같은 출력 자르기 */
+        val TAIL = Regex("(\\s*2>&1)?(\\s*\\|\\s*(tail|head)(\\s+-n)?\\s+-?\\d+)+\\s*$")
     }
 
     /** 이번 작업에서 로컬 데이터를 읽었는지 */

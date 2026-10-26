@@ -67,6 +67,11 @@ internal class ClaimCheck {
         }
     }
 
+    /** 셸 출력에서 실패를 알리는 첫 줄 (빌드·테스트 실패, `error:`). 실패가 아니면 null. [failed]면 그런 줄이 없을 때 마지막 줄 */
+    fun failure(output: String, failed: Boolean): String? =
+        output.lineSequence().firstOrNull { FAILED.containsMatchIn(it) }?.trim()?.take(200)
+            ?: if (failed) output.lineSequence().lastOrNull { it.isNotBlank() && !it.startsWith("[종료 코드") }?.trim()?.take(200).orEmpty() else null
+
     private fun summary(s: Step) = (if (s.ok) "" else "실패, ") +
         (s.output.lineSequence().firstOrNull { FAILED.containsMatchIn(it) } ?: s.output.lineSequence().lastOrNull { it.isNotBlank() }.orEmpty()).trim().take(100)
 
