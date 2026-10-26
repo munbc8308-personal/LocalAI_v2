@@ -315,8 +315,16 @@ fun Application.vestaApi(deps: ServerDeps) {
                         val skills = request.skills.take(100).mapNotNull { dev.vesta.core.skill.Skill.parse(it.folder, it.text, dev.vesta.core.skill.SkillSource.PROJECT) }
                         dev.vesta.core.agent.Workspace(path, request.instructions, skills)
                     }
-                    deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken))
-                        .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
+                    // 대화 서비스가 예외로 끝나면(DB 잠김 등) 조용히 끊지 않고 오류를 알린다 (팀 검증, M36)
+                    try {
+                        deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken))
+                            .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        log.error(e) { "대화 실패" }
+                        runCatching { emit(ApiJson.encodeToString(EventDto.serializer(), dev.vesta.core.agent.AgentEvent.Error("답을 만들지 못했습니다. 잠시 뒤 다시 보내 주세요.").toDto())) }
+                    }
                 }
             }
             post("/approvals/{id}") {

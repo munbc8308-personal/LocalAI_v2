@@ -51,6 +51,7 @@ private class FakeConversation : ConversationService {
         lastChannel = channel
         lastInput = input
         emit(AgentEvent.SessionReady(SessionId("s1"), "제목", true))
+        if (input.text == "고장") throw IllegalStateException("[SQLITE_BUSY] The database file is locked")
         if (input.text == "위험") emit(AgentEvent.ApprovalRequested("r1", "run_shell", RiskLevel.EXEC, ApprovalDetails("셸", "ls"), null))
         emit(AgentEvent.Token("안녕"))
         emit(AgentEvent.Token("하세요"))
@@ -108,6 +109,13 @@ class ApiTest : FunSpec({
         body shouldContain "\"type\":\"token\",\"text\":\"안녕\""
         body shouldContain "\"type\":\"done\""
         conversation.lastChannel shouldBe ChannelType.CLI
+    } }
+
+    test("대화 서비스가 예외로 끝나면 조용히 끊지 않고 error 이벤트를 보낸다 (M36)") { testApplication {
+        application { vestaApi(deps) }
+        val body = client.post("/api/chat") { bearerAuth("secret"); setBody("""{"text":"고장","channel":"CLI"}""") }.bodyAsText()
+        body shouldContain "\"type\":\"error\""
+        body shouldContain "다시 보내 주세요"
     } }
 
     test("승인 응답을 대화 엔진에 넘긴다") { testApplication {

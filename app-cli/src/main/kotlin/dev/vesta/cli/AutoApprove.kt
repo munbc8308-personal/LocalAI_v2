@@ -34,7 +34,9 @@ internal object AutoApprove {
      * 셸 자동 승인 (`--accept-shell`·`/accept shell`, 사용자가 켤 때만): 셸 도구(run_shell)만. 차단 목록에 걸린 명령은 서버가 승인과 관계없이 실행하지 않는다.
      * 다른 사용자의 셸(주인에게 넘어오는 승인)·MCP 도구는 여기로 오지 않거나 셸이 아니라 해당 없음
      */
-    fun shell(event: AgentEvent.ApprovalRequested): Boolean = event.tool == "run_shell" && event.risk == RiskLevel.EXEC
+    fun shell(event: AgentEvent.ApprovalRequested): Boolean = event.tool == "run_shell" && event.risk == RiskLevel.EXEC &&
+        // 삭제·덮어쓰기(`rm`·`mv`·`> 파일`)나 결정 모델 경고가 붙은 명령은 켜 놓아도 묻는다 (팀 검증: 셸로 입력 로그를 덮어씀, M36)
+        event.details.warning == null
 
     fun allows(event: AgentEvent.ApprovalRequested, workspace: String?): Boolean {
         if (workspace == null || event.risk != RiskLevel.WRITE || event.tool !in TOOLS) return false

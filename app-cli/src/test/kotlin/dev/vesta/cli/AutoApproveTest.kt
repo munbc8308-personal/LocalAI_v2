@@ -53,5 +53,7 @@ class AutoApproveTest : FunSpec({
         AutoApprove.shell(event("run_shell", risk = RiskLevel.EXEC)) shouldBe true
         AutoApprove.shell(event("write_file", "a.kt")) shouldBe false
         AutoApprove.shell(event("mail_send", risk = RiskLevel.EXEC)) shouldBe false
+        // 삭제·덮어쓰기 경고가 붙은 명령은 켜 놓아도 묻는다 (M36)
+        AutoApprove.shell(AgentEvent.ApprovalRequested("r", "run_shell", RiskLevel.EXEC, ApprovalDetails("셸", "echo x > logs/a.log", warning = "파일 삭제·덮어쓰기가 포함된 명령입니다"), null)) shouldBe false
     }
 })

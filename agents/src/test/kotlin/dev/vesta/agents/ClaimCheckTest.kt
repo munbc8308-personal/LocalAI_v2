@@ -46,4 +46,14 @@ class ClaimCheckTest : FunSpec({
         c.unverified("이제 TransactionListView.swift를 수정할게").shouldBeEmpty()
         c.unverified("project.yml을 읽어 봤어").shouldBeEmpty()
     }
+    test("Python 테스트 실행도 테스트로 알아본다 (팀 검증, M36)") {
+        listOf("python3 test_fizzbuzz.py", "python3 -m unittest -q test_textstats.py", "pytest -q").forEach { command ->
+            val c = ClaimCheck()
+            c.record("run_shell", shell(command), true, "Ran 2 tests in 0.001s\n\nOK\n[종료 코드 0]")
+            c.unverified("테스트도 모두 통과했어") shouldBe emptyList()
+        }
+        val failed = ClaimCheck()
+        failed.record("run_shell", shell("python3 -m unittest -q"), true, "FAILED (failures=1)\n[종료 코드 0]")
+        failed.unverified("테스트 통과했어").single() shouldContain "성공한 기록이 없음"
+    }
 })

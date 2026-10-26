@@ -80,7 +80,8 @@ internal class ClaimCheck {
         private val WRITES = setOf("write_file", "apply_patch", "move_file", "make_directory")
         private val TEST_CLAIM = Regex("(테스트|tests?)[^\\n.]{0,25}(통과|성공|passed|succeeded|문제\\s?없|모두\\s?정상)", RegexOption.IGNORE_CASE)
         private val BUILD_CLAIM = Regex("빌드[^\\n.]{0,25}(성공|통과|문제\\s?없|정상)|build succeeded", RegexOption.IGNORE_CASE)
-        private val TEST_COMMAND = Regex("\\b(test|pytest|vitest|jest)\\b")
+        /** 테스트 실행 명령. `test_x.py`·`python3 -m unittest`도 알아보게 영문자 경계로 (팀 검증: `\b`는 `_`·`unit` 때문에 놓쳤다) */
+        private val TEST_COMMAND = Regex("(?<![A-Za-z])(test|tests|pytest|unittest|vitest|jest)(?![A-Za-z])")
         private val BUILD_COMMAND = Regex("\\b(build|xcodebuild|gradlew?|make|cargo|tsc|swift\\s+build|npm\\s+run)\\b")
         private val FAILED = Regex("\\*\\* (BUILD|TEST) FAILED \\*\\*|\\berror:|\\bFAILED\\b|Parsing project spec failed|failures?=\"[1-9]")
         private val EDIT_VERB = Regex("(수정했|고쳤|작성했|만들었|추가했|생성했|바꿨|변경했|업데이트했|되살렸|복구했)")

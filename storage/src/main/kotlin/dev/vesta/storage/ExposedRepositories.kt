@@ -29,7 +29,24 @@ import org.jetbrains.exposed.v1.jdbc.update
 import java.time.Clock
 import java.util.UUID
 
-private suspend fun <T> Database.io(block: () -> T): T = withContext(Dispatchers.IO) { transaction(this@io) { block() } }
+/** 대화·메시지 저장. 동시에 쓰다 SQLITE_BUSY(읽던 거래가 쓰기로 바뀔 때는 기다리지 않고 바로 남)가 나면 잠깐 쉬고 다시 (팀 검증, M36) */
+private suspend fun <T> Database.io(block: () -> T): T = withContext(Dispatchers.IO) {
+    var wait = 100L
+    repeat(BUSY_RETRIES) {
+        try {
+            return@withContext transaction(this@io) { block() }
+        } catch (e: Exception) {
+            if (!busy(e)) throw e
+            kotlinx.coroutines.delay(wait)
+            wait *= 3
+        }
+    }
+    transaction(this@io) { block() }
+}
+
+private const val BUSY_RETRIES = 3
+
+private fun busy(e: Throwable): Boolean = generateSequence(e) { it.cause }.any { "SQLITE_BUSY" in it.message.orEmpty() || "database is locked" in it.message.orEmpty() }
 
 class ExposedSessionRepository(
     private val db: Database,
