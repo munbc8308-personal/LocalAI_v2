@@ -232,6 +232,10 @@ class PublicAccessTest : FunSpec({
         login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty() shouldContain "Secure"
         val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
         client.get("/api/sessions") { ip(1)(); header("Cookie", cookie) }.status shouldBe HttpStatusCode.OK
+        // 바깥 하한보다 짧은 비밀번호로는 바꾸지 못한다 (바꾸면 바깥에서 갇힌다)
+        val csrf = login.bodyAsText().substringAfter("\"csrf\":\"").substringBefore('"')
+        client.post("/api/me/password") { ip(1)(); header("Cookie", cookie); header("X-Vesta-CSRF", csrf); setBody("""{"current":"long-enough-pass","new":"ten-chars!"}""") }
+            .let { it.status shouldBe HttpStatusCode.BadRequest; it.bodyAsText() shouldContain "12자 이상" }
         // 같은 IP의 로그인 시도는 3번까지 (다른 IP는 따로)
         client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"wrong-password-x"}""") }.status shouldBe HttpStatusCode.Unauthorized
         client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }.status shouldBe HttpStatusCode.TooManyRequests

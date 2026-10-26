@@ -888,6 +888,10 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val users = deps.users ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"사용자 관리가 꺼져 있음"}""")
                 val auth = deps.auth ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"웹 로그인이 꺼져 있음"}""")
                 val dto = ApiJson.decodeFromString(ChangePasswordDto.serializer(), call.receiveText())
+                // 직접 공개 중이면 바깥 로그인 하한(12자)보다 짧게 바꾸지 못한다: 바꾼 뒤 바깥에서 못 들어오게 갇혔다 (실제 점검)
+                deps.publicGate?.minPassword?.let { minimum ->
+                    if (dto.new.length < minimum) return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", "바깥에서도 로그인하려면 비밀번호는 ${minimum}자 이상이어야 합니다") }.toString())
+                }
                 when (val failed = auth.verify(user, dto.current)) {
                     null -> Unit
                     is LoginResult.Locked -> {
