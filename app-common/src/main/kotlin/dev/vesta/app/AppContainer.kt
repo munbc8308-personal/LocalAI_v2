@@ -157,7 +157,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     suspend fun embeddingModel(): String = modelVersions.active("embedding")?.name ?: config.models.embedding?.name ?: DEFAULT_EMBEDDING
 
     /** 외부 웹용 HTTP 클라이언트 (리다이렉트 따라감). 로컬 엔진용과 분리한다. */
-    private val webHttp = HttpClients.web(config.web.pageTimeoutSeconds)
+    private val webHttp = dev.vesta.web.GuardedNetwork.webClient(config.web.pageTimeoutSeconds)
     val webCache = WebCacheRepository(database.db)
     private val searxng = SearxngClient(config.web.searxngUrl, http, webCache)
     private val pageFetcher = HttpPageFetcher(webHttp, config.web, webCache)

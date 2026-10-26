@@ -179,7 +179,7 @@ internal class WeeklyCheck(private val options: WeeklyOptions, private val echo:
 
     private suspend fun catalogCandidates(app: AppContainer, current: String, admin: OllamaAdmin, note: (String) -> Unit): List<Candidate> {
         val config = app.config.evolution
-        val http = HttpClients.web(30)
+        val http = dev.vesta.web.GuardedNetwork.webClient(30)
         try {
             val catalog = OllamaLibraryCatalog(config.catalogUrl, http)
             val newest = runCatching { catalog.newest() }.onFailure { note("- 새 모델 목록을 읽지 못함: ${it.message}") }.getOrDefault(emptyList())

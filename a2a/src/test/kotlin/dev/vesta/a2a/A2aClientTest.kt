@@ -155,13 +155,13 @@ class A2aClientTest : FunSpec({
 
         // 바깥 에이전트용 DNS: 해석할 때마다 내부 주소면 연결하지 않는다 (검사한 주소 = 연결 주소)
         val answers = mutableMapOf("agent.example" to byteArrayOf(93, 184.toByte(), 216.toByte(), 34))
-        val dns = A2aHttp.PinnedDns({ it.isLoopbackAddress || it.isSiteLocalAddress }) { host -> listOf(java.net.InetAddress.getByAddress(host, answers.getValue(host))) }
+        val dns = dev.vesta.web.GuardedNetwork.PinnedDns({ it.isLoopbackAddress || it.isSiteLocalAddress }) { host -> listOf(java.net.InetAddress.getByAddress(host, answers.getValue(host))) }
         dns.lookup("agent.example").single().hostAddress shouldBe "93.184.216.34"
         answers["agent.example"] = byteArrayOf(127, 0, 0, 1) // rebinding
         shouldThrow<java.net.UnknownHostException> { dns.lookup("agent.example") }
         shouldThrow<java.net.UnknownHostException> { dns.lookup("localhost") }
         // 실제로 거는 주소를 소켓에서 막는다 (IP 글자·10진수 표기 등 해석 방식과 상관없이)
-        val sockets = A2aHttp.GuardedSocketFactory { it.isLoopbackAddress }
+        val sockets = dev.vesta.web.GuardedNetwork.GuardedSocketFactory { it.isLoopbackAddress }
         shouldThrow<java.io.IOException> { sockets.createSocket().connect(java.net.InetSocketAddress(java.net.InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 9)) }
             .message shouldContain "내부 주소"
         shouldThrow<java.io.IOException> { sockets.createSocket("2130706433", 9) } // 127.0.0.1의 10진수 표기

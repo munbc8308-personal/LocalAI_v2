@@ -27,7 +27,7 @@ private val log = KotlinLogging.logger {}
 /**
  * 웹 페이지 수집 (PROJECT.md W-02, 5.3 제한·예의·도메인 정책).
  * URL 검사(SSRF 방지) → 캐시 → robots.txt → 받기(타임아웃, 크기 제한, 리다이렉트는 한 번씩 검사하며 최대 5번) → 본문 추출 → 캐시 저장.
- * [http]는 리다이렉트를 자동으로 따라가지 않아야 한다 (HttpClients.web).
+ * [http]는 리다이렉트를 자동으로 따라가지 않아야 한다 (GuardedNetwork.webClient: 연결 시점에도 내부 주소를 막는다, Q-01).
  */
 class HttpPageFetcher(
     private val http: HttpClient,
