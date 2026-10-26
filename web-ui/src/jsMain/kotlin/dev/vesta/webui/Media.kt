@@ -69,6 +69,14 @@ class Recorder {
 }
 
 object MediaApi {
+    /** 파일 그대로 올리기 (`PUT`, 본문은 파일, M36 F-04 문서 올리기) */
+    suspend fun putFile(path: String, file: Blob) {
+        val headers = json("Content-Type" to "application/octet-stream", "Accept" to "application/json")
+        Http.csrf?.let { headers[CSRF_HEADER] = it }
+        val response = window.fetch(path, RequestInit(method = "PUT", headers = headers, body = file, credentials = "same-origin".asDynamic())).await()
+        if (!response.ok) throw HttpError(response.status.toInt(), errorOf(response.text().await()) ?: "올리기 실패 ${response.status}")
+    }
+
     /** 녹음 → 글 (`POST /api/stt`). 인식한 글은 바로 보내지 않고 입력란에 넣는다 (V-02) */
     suspend fun transcribe(audio: Blob): String {
         val headers = json("Content-Type" to (audio.type.ifEmpty { "application/octet-stream" }), "Accept" to "application/json")

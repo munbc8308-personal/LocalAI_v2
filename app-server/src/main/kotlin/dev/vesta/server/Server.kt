@@ -120,6 +120,7 @@ fun main() {
         },
         auth = WebAuth(app.webAuth),
         // 내 컬렉션과 공유받은 컬렉션 (U-04). GUEST는 로컬 문서를 쓰지 않는다
+        documents = app.documentUploads,
         collections = { user ->
             if (!dev.vesta.identity.RolePolicy.usesLocalData(user.role)) emptyList()
             else {

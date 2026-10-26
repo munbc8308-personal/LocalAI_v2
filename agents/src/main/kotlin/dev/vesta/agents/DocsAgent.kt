@@ -49,7 +49,7 @@ class DocsAgent(
         val missing = request.collections - targets.map { it.name }.toSet()
         if (targets.isEmpty()) {
             reply(
-                if (all.isEmpty()) "등록된 문서 컬렉션이 없습니다. `vesta collection create <이름>`과 `vesta collection add <이름> <경로>`로 문서를 등록하세요."
+                if (all.isEmpty()) "등록된 문서 컬렉션이 없습니다. 웹 화면의 '컬렉션'에서 만들고 문서(.txt·.md·.pdf)를 올리거나, 이 Mac 터미널에서 `vesta collection create <이름>`·`vesta collection add <이름> <경로>`로 등록하세요."
                 else "컬렉션을 찾을 수 없습니다: ${missing.joinToString()} (있는 컬렉션: ${all.joinToString { it.name }})",
             )
             return@flow

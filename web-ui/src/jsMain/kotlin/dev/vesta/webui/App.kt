@@ -685,34 +685,123 @@ private fun ApprovalCard(chat: ChatController, view: ApprovalView) {
 
 @Composable
 private fun CollectionsView(onAsk: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<CollectionDto>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
+    var notice by remember { mutableStateOf<String?>(null) }
+    var name by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    fun load() = scope.launch {
         runCatching { Http.get("/api/collections", ListSerializer(CollectionDto.serializer())) }
-            .onSuccess { list = it }.onFailure { error = it.message }
+            .onSuccess { list = it; error = null }.onFailure { error = it.message }
     }
+    LaunchedEffect(Unit) { load() }
     Div({ classes("page") }) {
-        H2 { Text("컬렉션") }
-        P({ classes("muted", "small") }) { Text("질문 앞에 @이름 을 붙이면 그 컬렉션에서만 찾습니다. 추가·색인은 이 Mac 터미널에서: vesta collection add / vesta repo add") }
+        Div({ classes("row") }) {
+            H2 { Text("컬렉션") }
+            Button({ classes("link"); onClick { load() } }) { Text("새로 고침") }
+        }
+        P({ classes("muted", "small") }) { Text("질문 앞에 @이름 을 붙이면 그 컬렉션에서만 찾습니다. 여기서 만들고 문서(.txt·.md·.pdf, 20MB까지)를 올리면 잠시 뒤 색인됩니다. 코드 저장소는 이 Mac 터미널에서: vesta repo add") }
         error?.let { P({ classes("error") }) { Text(it) } }
+        notice?.let { P({ classes("muted", "small") }) { Text(it) } }
+        // 만들기 (M36 F-04): 손님은 서버가 막는다
+        Div({ classes("card") }) {
+            Input(InputType.Text) { value(name); placeholder("새 컬렉션 이름 (예: 우리집)"); onInput { name = it.value } }
+            Input(InputType.Text) { value(description); placeholder("무슨 문서인지 (선택)"); onInput { description = it.value } }
+            Button({
+                classes("primary", "small")
+                if (name.isBlank()) disabled()
+                onClick {
+                    scope.launch {
+                        runCatching { Http.post("/api/collections", ApiJson.encodeToString(dev.vesta.api.NewCollectionDto.serializer(), dev.vesta.api.NewCollectionDto(name.trim(), description.ifBlank { null }))) }
+                            .onSuccess { notice = "만들었습니다: @${name.trim()}"; name = ""; description = ""; load() }
+                            .onFailure { error = it.message }
+                    }
+                }
+            }) { Text("만들기") }
+        }
         val items = list
         when {
             items == null && error == null -> P({ classes("muted") }) { Text("불러오는 중…") }
             items != null && items.isEmpty() -> P({ classes("muted") }) { Text("아직 컬렉션이 없습니다") }
-            items != null -> items.forEach { c ->
-                Div({ classes("card", "clickable"); onClick { onAsk(c.name) } }) {
-                    Div({ classes("row") }) {
-                        Span({ classes("strong") }) { Text("@${c.name}") }
-                        Span({ classes("chip") }) { Text(if (c.kind == "CODE") "코드" else "문서") }
+            items != null -> items.forEach { c -> CollectionCard(c, onAsk, onChanged = { message -> notice = message; load() }, onError = { error = it }) }
+        }
+    }
+}
+
+/** 컬렉션 하나: 내 문서 컬렉션이면 올리기·문서 목록·지우기 (M36 F-04) */
+@Composable
+private fun CollectionCard(c: CollectionDto, onAsk: (String) -> Unit, onChanged: (String) -> Unit, onError: (String?) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val mine = c.owner == null && c.kind == "DOCS"
+    var open by remember(c.name) { mutableStateOf(false) }
+    var files by remember(c.name) { mutableStateOf<List<String>>(emptyList()) }
+    var uploading by remember(c.name) { mutableStateOf(false) }
+    val base = "/api/collections/" + js("encodeURIComponent")(c.name) as String
+    fun loadFiles() = scope.launch {
+        runCatching { Http.get("$base/documents", ListSerializer(kotlinx.serialization.serializer<String>())) }.onSuccess { files = it }
+    }
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span({ classes("strong", "clickable"); onClick { onAsk(c.name) } }) { Text("@${c.name}") }
+            Span({ classes("chip") }) { Text(if (c.kind == "CODE") "코드" else "문서") }
+        }
+        c.description?.let { Div { Text(it) } }
+        Div({ classes("muted", "small") }) { Text("문서 ${c.documents}개 · 조각 ${c.chunks}개 · ${c.embeddingModel}") }
+        c.owner?.let { Div({ classes("muted", "small") }) { Text("$it 님이 공유함 (읽기 전용)") } }
+        if (c.sharedWith.isNotEmpty()) Div({ classes("muted", "small") }) { Text("공유: ${c.sharedWith.joinToString()}") }
+        if (mine) {
+            Div({ classes("row") }) {
+                Button({ classes("link", "small"); onClick { open = !open; if (open) loadFiles() } }) { Text(if (open) "접기" else "문서 관리") }
+                Button({
+                    classes("link", "small", "danger")
+                    onClick {
+                        if (window.confirm("'${c.name}' 컬렉션과 올린 문서를 모두 지울까요? 되돌릴 수 없습니다.")) scope.launch {
+                            runCatching { Http.delete(base) }.onSuccess { onChanged("지웠습니다: @${c.name}") }.onFailure { onError(it.message) }
+                        }
                     }
-                    c.description?.let { Div { Text(it) } }
-                    Div({ classes("muted", "small") }) { Text("문서 ${c.documents}개 · 조각 ${c.chunks}개 · ${c.embeddingModel}") }
-                    c.owner?.let { Div({ classes("muted", "small") }) { Text("$it 님이 공유함 (읽기 전용)") } }
-                    if (c.sharedWith.isNotEmpty()) Div({ classes("muted", "small") }) { Text("공유: ${c.sharedWith.joinToString()}") }
-                    c.rootPath?.let { Div({ classes("muted", "small", "mono") }) { Text(it) } }
+                }) { Text("컬렉션 지우기") }
+            }
+            if (open) {
+                Input(InputType.File) {
+                    attr("accept", ".txt,.md,.pdf")
+                    attr("multiple", "")
+                    if (uploading) disabled()
+                    onChange { event ->
+                        val input = event.target.asDynamic()
+                        val picked = (0 until (input.files.length as Int)).map { input.files.item(it) }
+                        input.value = ""
+                        scope.launch {
+                            uploading = true
+                            val failed = mutableListOf<String>()
+                            picked.forEach { file ->
+                                val fileName = file.name as String
+                                runCatching { MediaApi.putFile("$base/documents/" + js("encodeURIComponent")(fileName) as String, file) }.onFailure { failed += "$fileName: ${it.message}" }
+                            }
+                            uploading = false
+                            loadFiles()
+                            if (failed.isEmpty()) onChanged("${picked.size}개를 올렸습니다. 색인이 끝나면 문서 수가 늘어납니다 (새로 고침).") else onError(failed.joinToString("; "))
+                        }
+                    }
                 }
+                if (uploading) Div({ classes("muted", "small") }) { Text("올리는 중…") }
+                files.forEach { f ->
+                    Div({ classes("row", "small") }) {
+                        Span { Text(f) }
+                        Button({
+                            classes("link", "small", "danger")
+                            onClick {
+                                if (window.confirm("'$f'을(를) 지울까요?")) scope.launch {
+                                    runCatching { Http.delete("$base/documents/" + js("encodeURIComponent")(f) as String) }.onSuccess { loadFiles(); onChanged("지웠습니다: $f") }.onFailure { onError(it.message) }
+                                }
+                            }
+                        }) { Text("🗑") }
+                    }
+                }
+                if (files.isEmpty()) Div({ classes("muted", "small") }) { Text("올린 문서가 없습니다") }
             }
         }
+        c.rootPath?.let { Div({ classes("muted", "small", "mono") }) { Text(it) } }
     }
 }
 

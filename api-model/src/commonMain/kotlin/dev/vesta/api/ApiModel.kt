@@ -289,6 +289,10 @@ data class LoginDto(val password: String, /** 없으면 OWNER */ val name: Strin
 data class MeDto(val name: String, val role: String, val csrf: String)
 
 @Serializable
+data class NewCollectionDto(val name: String, val description: String? = null)
+
+/** 컬렉션 (`GET /api/collections`) */
+@Serializable
 data class CollectionDto(
     val name: String,
     /** DOCS / CODE */

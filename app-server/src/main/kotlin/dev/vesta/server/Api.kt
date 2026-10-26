@@ -107,6 +107,8 @@ class ServerDeps(
     /** 웹 UI 로그인. 없으면 Bearer 토큰만 받는다 */
     val auth: WebAuth? = null,
     val collections: suspend (UserContext) -> List<CollectionDto> = { emptyList() },
+    /** 웹에서 문서 컬렉션 만들기·올리기 (M36 F-04). 없으면 그 경로는 503 */
+    val documents: dev.vesta.app.DocumentUploads? = null,
     val dashboard: suspend () -> DashboardDto = { DashboardDto(version, emptyMap(), emptyMap(), emptyList(), 0, 0) },
     /** 접속을 받는 Host 이름 (DNS 리바인딩 방지). localhost·127.0.0.1·Tailscale(`*.ts.net`)은 항상 허용 */
     val allowedHosts: Set<String> = emptySet(),
@@ -922,6 +924,41 @@ fun Application.vestaApi(deps: ServerDeps) {
             get("/collections") {
                 val user = call.principal(deps) ?: return@get
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(CollectionDto.serializer()), deps.collections(user)))
+            }
+            // 웹에서 문서 올리기 (M36 F-04): 본인 컬렉션만, 손님은 안 됨. 색인은 백그라운드
+            post("/collections") {
+                val user = call.principal(deps) ?: return@post
+                val docs = deps.documents ?: return@post call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"문서 올리기를 쓸 수 없습니다"}""")
+                val dto = ApiJson.decodeFromString(dev.vesta.api.NewCollectionDto.serializer(), call.receiveText())
+                docs.create(user, dto.name.trim(), dto.description)?.let { return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it) }.toString()) }
+                call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
+            }
+            delete("/collections/{name}") {
+                val user = call.principal(deps) ?: return@delete
+                val docs = deps.documents ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"문서 올리기를 쓸 수 없습니다"}""")
+                val removed = docs.deleteCollection(user, call.parameters["name"].orEmpty())
+                call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, if (removed) """{"ok":true}""" else """{"error":"컬렉션이 없습니다"}""")
+            }
+            get("/collections/{name}/documents") {
+                val user = call.principal(deps) ?: return@get
+                val list = deps.documents?.documents(user, call.parameters["name"].orEmpty()) ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"컬렉션이 없습니다"}""")
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(kotlinx.serialization.serializer<String>()), list))
+            }
+            put("/collections/{name}/documents/{file}") {
+                val user = call.principal(deps) ?: return@put
+                val docs = deps.documents ?: return@put call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"문서 올리기를 쓸 수 없습니다"}""")
+                if (!dev.vesta.identity.RolePolicy.usesLocalData(user.role)) return@put call.respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 문서를 올릴 수 없습니다"}""")
+                val bytes = call.receiveLimited(dev.vesta.app.DocumentUploads.MAX_MEGABYTES) ?: return@put
+                docs.upload(user, call.parameters["name"].orEmpty(), call.parameters["file"].orEmpty(), bytes)
+                    ?.let { return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it) }.toString()) }
+                call.respondJson(HttpStatusCode.OK, """{"ok":true,"indexing":true}""")
+            }
+            delete("/collections/{name}/documents/{file}") {
+                val user = call.principal(deps) ?: return@delete
+                val docs = deps.documents ?: return@delete call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"문서 올리기를 쓸 수 없습니다"}""")
+                docs.deleteDocument(user, call.parameters["name"].orEmpty(), call.parameters["file"].orEmpty())
+                    ?.let { return@delete call.respondJson(HttpStatusCode.NotFound, buildJsonObject { put("error", it) }.toString()) }
+                call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
             }
             get("/dashboard") {
                 call.principal(deps) ?: return@get

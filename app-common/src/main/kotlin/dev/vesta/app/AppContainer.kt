@@ -507,6 +507,21 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         return (project + personal + skillRepository.list(user.userId) + builtinSkills).distinctBy { it.name }
     }
 
+    /** 웹에서 문서 컬렉션 만들기·올리기 (M36 F-04). 올린 파일은 멤버 폴더 아래, 색인은 백그라운드 */
+    val documentUploads: DocumentUploads by lazy {
+        DocumentUploads(
+            knowledge,
+            index = { collection, folder ->
+                if (config.models.embedding != null) modelManager.acquire(dev.vesta.core.ModelRole.EMBEDDING)
+                indexer.index(collection, listOf(folder))
+            },
+            embeddingModel = ::embeddingModel,
+            userName = { user -> users.list().firstOrNull { it.id == user.userId }?.name },
+            root = java.nio.file.Path.of(config.users.memberRoot.replaceFirst(Regex("^~"), System.getProperty("user.home"))).toAbsolutePath().normalize(),
+            scope = jobScope,
+        )
+    }
+
     /** 앱에 함께 든 스킬 (M33 SK-15) */
     val builtinSkills: List<dev.vesta.core.skill.Skill> by lazy { BuiltinSkills.load() }
 
