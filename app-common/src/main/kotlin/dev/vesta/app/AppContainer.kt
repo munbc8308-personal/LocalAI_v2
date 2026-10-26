@@ -497,15 +497,18 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     }
 
     /**
-     * 부를 수 있는 스킬 (K-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것.
-     * 작업 폴더·내 파일은 Mac 주인 것이라 Mac 주인만 쓴다
+     * 부를 수 있는 스킬 (K-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것 > 내장(M33 K-15).
+     * 작업 폴더·내 파일은 Mac 주인 것이라 Mac 주인만 쓴다. 내장은 모두가 쓴다 (도구는 그 역할 도구와 겹치는 것만)
      */
     suspend fun skillsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.skill.Skill> {
         val owner = user.role == UserRole.OWNER
         val project = if (owner) workspace?.skills.orEmpty() else emptyList()
         val personal = if (owner) personalSkills() else emptyList()
-        return (project + personal + skillRepository.list(user.userId)).distinctBy { it.name }
+        return (project + personal + skillRepository.list(user.userId) + builtinSkills).distinctBy { it.name }
     }
+
+    /** 앱에 함께 든 스킬 (M33 K-15) */
+    val builtinSkills: List<dev.vesta.core.skill.Skill> by lazy { BuiltinSkills.load() }
 
     /** `~/.vesta/skills/<이름>/SKILL.md`. 형식이 틀리거나 숨은 문자가 있는 파일은 건너뛴다 */
     fun personalSkills(): List<dev.vesta.core.skill.Skill> = runCatching {
@@ -536,7 +539,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** `/skills`·`/agents` 목록 */
     private suspend fun directory(user: UserContext, kind: String, workspace: dev.vesta.core.agent.Workspace?): String = when (kind) {
         "skills" -> (skillsFor(user, workspace).takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "부를 수 있는 스킬 (`/이름 할 일`):\n") { s ->
-            val from = when (s.source) { dev.vesta.core.skill.SkillSource.PROJECT -> "작업 폴더"; dev.vesta.core.skill.SkillSource.PERSONAL -> "내 파일"; else -> "웹" }
+            val from = when (s.source) { dev.vesta.core.skill.SkillSource.PROJECT -> "작업 폴더"; dev.vesta.core.skill.SkillSource.PERSONAL -> "내 파일"; dev.vesta.core.skill.SkillSource.BUILTIN -> "기본"; else -> "웹" }
             "- /${s.name} — ${s.description} (${from} · ${s.agent.name.lowercase()}" + (if (s.tools.isNotEmpty()) " · 도구 ${s.tools.joinToString()}" else "") + ")"
         } ?: "스킬이 없습니다. 웹 UI 에이전트 탭에서 만들거나, ~/.vesta/skills/<이름>/SKILL.md 파일로 둘 수 있습니다.") +
             // 제안된 초안 (M28 K-11): 부를 수는 없고 승인·버리기만

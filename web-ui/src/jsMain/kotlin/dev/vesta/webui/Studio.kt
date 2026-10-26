@@ -261,7 +261,7 @@ fun StudioView() {
                                     scope.launch { runCatching { Http.delete("/api/skills/${k.name}") }.onFailure { error = it.message }; loadAgents() }
                                 }
                             }) { Text("지우기") }
-                        } else Span({ classes("muted") }) { Text(if (k.source == "PERSONAL") "내 파일" else "작업 폴더") }
+                        } else Span({ classes("muted") }) { Text(when (k.source) { "PERSONAL" -> "내 파일"; "BUILTIN" -> "기본"; else -> "작업 폴더" }) }
                     }
                     Div({ classes("muted", "small") }) { Text(agentLabel(k.agent) + (if (k.tools.isNotEmpty()) " · 도구 ${k.tools.joinToString()}" else "") + if (k.auto) " · 실행에서 만듦" else "") }
                 }

@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 구현, M32 구현, M33 계획, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v6.5, 2026-10-26)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 구현, M32 구현, M33 구현, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v6.5, 2026-10-26)
 > 구현 전 단계. "결정 필요" 항목은 확정 후 갱신한다.
 
 ### 변경 이력
@@ -1153,7 +1153,7 @@ Hermes Agent는 터미널을 Docker·SSH 등 격리 환경에서 돌린다(2026-
 3. 첫 시험 결과로 J-08~J-10 (13.43)
 4. (나중에) 웹 UI(J-07), 대화 요약 압축
 
-### 7.27 내장 스킬 (Built-in Skills: pstack) — 계획 (M33, K-15~K-18)
+### 7.27 내장 스킬 (Built-in Skills: pstack) — 구현 (M33, K-15~K-18)
 **목적**: 설치하면 바로 부를 수 있는 좋은 스킬을 Vesta에 함께 넣는다. 첫 묶음은 [pstack](https://github.com/cursor/plugins/tree/main/pstack)(poteto, MIT): 코드를 적게·제대로 쓰게 하는 원칙과 작업 지침. 사용자 요청(2026-10-26).
 
 | ID | 기능 | 우선순위 | 설명 |
@@ -1549,7 +1549,7 @@ app-cli / app-server
 | **M30. 지난 대화 검색 (구현)** | 대화 전문 색인(FTS5 trigram), 본인 대화 찾기, "지난번에 …" 질문에 찾은 대화를 참고, `/recall`·웹 검색 칸·작업 도구 (7.24) | "지난번에 얘기한 …"에 그때 대화를 찾아 답하고, 웹에서 예전 대화를 검색해 연다 |
 | **M31. 셸 격리 실행 (구현)** | 셸을 컨테이너 안에서(네트워크 없음·작업 폴더만·권한 없음), 모드(sandbox·host), MEMBER는 늘 격리, 점검 (7.25) | 승인한 셸 명령이 작업 폴더 밖·홈·네트워크에 닿지 못한다 |
 | **M32. 작업 계획·할 일 목록 (구현)** | 대화별 할 일 목록(update_plan), 매 단계 목표·목록 주입, "이어서"는 남은 일만, 빌드·테스트 항목은 실행 기록으로만 완료 (7.26) | 긴 작업에서 "이어서 해 줘"를 되풀이해도 원래 요청의 남은 일만 하고, 시키지 않은 기능을 만들지 않는다 |
-| **M33. 내장 스킬 (계획)** | 앱에 함께 넣는 스킬(`BUILTIN`), 첫 묶음 pstack 31개, 가져오기 도구 (7.27) | 설치하자마자 `/skills`에 pstack 스킬이 보이고 `/tdd …`처럼 부를 수 있다 |
+| **M33. 내장 스킬 (구현)** | 앱에 함께 넣는 스킬(`BUILTIN`), 첫 묶음 pstack 31개, 가져오기 도구 (7.27) | 설치하자마자 `/skills`에 pstack 스킬이 보이고 `/tdd …`처럼 부를 수 있다 |
 
 ### 13.1 M0 진행 기록 (2026-10-17)
 
@@ -3124,3 +3124,13 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **승인 시간 초과면 멈춤(J-09)**: `ApprovalDecision.Deny.timedOut`. 시간 초과면 남은 호출을 하지 않고 "승인 요청에 n분 동안 응답이 없어 멈췄습니다 + 실행하지 않은 작업 + 남은 할 일"로 끝낸다.
 - **같은 호출 되풀이 막기(J-10)**: 바로 앞과 같은 도구·인자(JSON 정규화)가 세 번째면 실행하지 않고 "같은 호출을 되풀이하지 말고 다음 할 일로 넘어가라"를 돌려준다. `update_plan`은 세지 않는다.
 - **테스트**: TaskAgent 3개(자동 완료·되돌림, 되풀이, 시간 초과). 전체 테스트 통과.
+
+#### J-11 (2026-10-26)
+- **같은 실패 되풀이면 멈춤**: 셸 명령(`2>&1 | tail -40` 같은 꼬리 무시)마다 `ClaimCheck.failure`로 뽑은 오류 줄을 세어, 같은 명령·같은 오류가 세 번째면 "막혀서 멈췄습니다 + 명령·오류 + 남은 할 일"로 끝낸다. 사이에 파일을 고쳐도 센다(같은 전제의 고침이 같은 관문에서 실패한 것). TaskAgent 테스트 1개.
+
+### 13.44 M33 내장 스킬 진행 기록 (2026-10-26)
+- **출처**: `SkillSource.BUILTIN`, `BuiltinSkills.load()`(리소스 `skills/index.txt` + `skills/<이름>/SKILL.md`). `skillsFor` 순서는 작업 폴더 > 내 파일 > 웹 > 내장, 내장은 모든 사용자. `/skills`·웹 에이전트 탭은 "기본"으로 보이고 고치기·지우기 버튼이 없다.
+- **이름**: 파일·내장·호출(`SkillCall`) 이름은 64자까지(`Skill.NAME`), 웹에서 만드는 이름은 32자(`Skill.WEB_NAME`, 저장소 칸 40자).
+- **pstack 31개**: `scripts/vendor-pstack.py`로 cursor/plugins `99b609a` 에서 가져옴. 원칙 24개·tdd·blast-radius·correct는 `agent: task`(read_file·list_files·search_files·write_file·apply_patch·run_shell, 역할 도구와 겹치는 것만·승인 그대로), unslop·sharpen·bro·in-your-own-words는 `agent: chat`. 링크는 `글(/이름)`, `PSTACK-LICENSE`(MIT)·`PSTACK-SOURCE` 같이 둠. 원본도 몇몇 원칙(exhaust-the-design-space 등)은 본문이 한두 줄이다.
+- 뺀 26개: 서브에이전트(poteto-mode·swarm·arena·no-comments·figure-it-out·ketchup…), node 스크립트(statechart·teach·benchmark-checklist…), Cursor 전용(setup-pstack·make-bot-ui…), references 폴더가 본문인 것(why·how·architect·interrogate…), 이름이 예약어인 recall.
+- **테스트**: BuiltinSkillsTest 2개(31개·에이전트·링크·긴 이름 호출, 웹 이름 32자). 전체 테스트 통과.

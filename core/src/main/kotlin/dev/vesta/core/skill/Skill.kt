@@ -4,8 +4,8 @@ import dev.vesta.core.AgentType
 import dev.vesta.core.UserId
 import java.time.Instant
 
-/** 스킬이 어디서 왔는가: 작업 폴더(`.vesta/skills`, CLI), 내 파일(`~/.vesta/skills`, Mac 주인), 웹에서 만든 것 */
-enum class SkillSource { PROJECT, PERSONAL, WEB }
+/** 스킬이 어디서 왔는가: 작업 폴더(`.vesta/skills`, CLI), 내 파일(`~/.vesta/skills`, Mac 주인), 웹에서 만든 것, Vesta에 함께 들어 있는 것(M33 K-15) */
+enum class SkillSource { PROJECT, PERSONAL, WEB, BUILTIN }
 
 /**
  * 스킬 (PROJECT.md K-01, M22): 자주 하는 일의 지침. `/이름 할 일`로 부르면 [body]의 `$ARGUMENTS`를 할 일로 바꿔 [agent]에게 맡긴다.
@@ -46,7 +46,10 @@ data class Skill(
 
     companion object {
         const val ARGUMENTS = "\$ARGUMENTS"
-        val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31}$")
+        /** 파일·내장 스킬 이름 (pstack 원본 이름이 50자까지라 64자, M33 K-16) */
+        val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,63}$")
+        /** 웹에서 만드는 스킬 이름 (저장소 칸이 40자) */
+        val WEB_NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31}$")
         const val MAX_BODY = 8_000
         const val MAX_DESCRIPTION = 300
         /** 스킬로 쓸 수 있는 에이전트 */
@@ -63,7 +66,7 @@ data class Skill(
          * 문제가 있으면 그 이유, 없으면 null. TASK가 아니면 도구는 버린다
          */
         fun problem(name: String, description: String, body: String, agent: String, tools: List<String>, agents: Set<AgentType>, allowedTools: Set<String>): String? {
-            if (!NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/이름 으로 부릅니다)"
+            if (!WEB_NAME.matches(name)) return "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다 (/이름 으로 부릅니다)"
             if (name.lowercase() in RESERVED) return "이미 쓰는 명령 이름입니다: /$name"
             if (description.isBlank() || description.length > MAX_DESCRIPTION) return "설명은 1~${MAX_DESCRIPTION}자입니다"
             if (body.isBlank() || body.length > MAX_BODY) return "지침은 1~${MAX_BODY}자입니다"
@@ -128,7 +131,7 @@ interface SkillRepository {
 /** `/이름 할 일` (메신저는 `!이름`) */
 data class SkillCall(val name: String, val arguments: String) {
     companion object {
-        private val PATTERN = Regex("^[/!]([\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31})(?:\\s+(.*))?$", RegexOption.DOT_MATCHES_ALL)
+        private val PATTERN = Regex("^[/!]([\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,63})(?:\\s+(.*))?$", RegexOption.DOT_MATCHES_ALL)
         fun parse(text: String): SkillCall? = PATTERN.find(text.trim())?.let { SkillCall(it.groupValues[1], it.groupValues[2].trim()) }
             ?.takeIf { it.name.lowercase() !in Skill.RESERVED }
     }
