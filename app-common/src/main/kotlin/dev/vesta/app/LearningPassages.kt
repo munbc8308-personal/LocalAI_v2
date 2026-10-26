@@ -124,7 +124,7 @@ class EmbeddingSwitcher(
     }
 }
 
-/** 스킬 초안 쓰기 (M28 K-09): 메인 모델이 실행 하나를 보고 JSON 초안을 낸다 */
+/** 스킬 초안 쓰기 (M28 SK-09): 메인 모델이 실행 하나를 보고 JSON 초안을 낸다 */
 class SkillWriter(private val inference: InferenceClient, private val models: ModelManager) {
     suspend fun write(prompt: String): String {
         val spec = models.acquire(ModelRole.GENERAL)

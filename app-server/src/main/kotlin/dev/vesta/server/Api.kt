@@ -603,7 +603,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed}""")
                 }
             }
-            // 스킬 (K-01): 웹에서 만든 것만 고치고 지운다 (파일 스킬은 파일로)
+            // 스킬 (SK-01): 웹에서 만든 것만 고치고 지운다 (파일 스킬은 파일로)
             route("/skills") {
                 put("/{name}") {
                     val user = call.principal(deps) ?: return@put
@@ -748,7 +748,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 장기 기억 (M27 MEM-05): 내 기억 보기·더하기·고치기·지우기
-            // 예약 작업 (M29 S-04): 본인 것만, 손님은 안 됨. 웹에서 만든 예약은 결과가 웹 대화 목록에 남는다
+            // 예약 작업 (M29 SC-04): 본인 것만, 손님은 안 됨. 웹에서 만든 예약은 결과가 웹 대화 목록에 남는다
             route("/schedules") {
                 get {
                     val user = call.principal(deps) ?: return@get
@@ -1256,7 +1256,7 @@ class StudioEndpoints(
     val a2aRepo: dev.vesta.core.studio.A2aAgentRepository? = null,
     val a2aClient: dev.vesta.a2a.A2aClient? = null,
     val a2aHasToken: (String) -> Boolean = { false },
-    /** 스킬 (K-01): 웹에서 만든 것 저장소, 이 사용자가 부를 수 있는 전체(파일 포함) */
+    /** 스킬 (SK-01): 웹에서 만든 것 저장소, 이 사용자가 부를 수 있는 전체(파일 포함) */
     val skillRepo: dev.vesta.core.skill.SkillRepository? = null,
     val skillsFor: suspend (UserContext) -> List<dev.vesta.core.skill.Skill> = { u -> skillRepo?.list(u.userId).orEmpty() },
 ) {
@@ -1276,7 +1276,7 @@ class StudioEndpoints(
         return dev.vesta.api.AgentsDto(builtin, custom, tools, teams, a2a, owner, skills, drafts)
     }
 
-    /** 스킬 저장 (웹). 이름 규칙·예약어, 그 역할이 쓸 수 있는 에이전트, 쓸 수 있는 도구만, 숨은 문자 거부 (K-06). 같은 이름의 초안이면 승인 (K-11). 문제가 있으면 그 이유 */
+    /** 스킬 저장 (웹). 이름 규칙·예약어, 그 역할이 쓸 수 있는 에이전트, 쓸 수 있는 도구만, 숨은 문자 거부 (SK-06). 같은 이름의 초안이면 승인 (SK-11). 문제가 있으면 그 이유 */
     suspend fun saveSkill(user: UserContext, dto: dev.vesta.api.SkillDto): String? {
         val repo = skillRepo ?: return "스킬을 쓸 수 없습니다"
         val s = dev.vesta.core.skill.Skill

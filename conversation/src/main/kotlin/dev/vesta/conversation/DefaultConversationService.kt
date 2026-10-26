@@ -63,9 +63,9 @@ class DefaultConversationService(
     private val customAgents: suspend (UserContext, String) -> Agent? = { _, _ -> null },
     /** 팀 (`/team 이름 할 일`, M22): 리더 에이전트. 없거나 리더가 지워졌으면 null */
     private val teams: suspend (UserContext, String) -> Agent? = { _, _ -> null },
-    /** 이 사용자가 부를 수 있는 스킬 (K-01): 작업 폴더 > 내 파일 > 웹 순. 작업 폴더는 Mac 주인의 쓸 수 있는 폴더만 넘어온다 */
+    /** 이 사용자가 부를 수 있는 스킬 (SK-01): 작업 폴더 > 내 파일 > 웹 순. 작업 폴더는 Mac 주인의 쓸 수 있는 폴더만 넘어온다 */
     private val skills: suspend (UserContext, dev.vesta.core.agent.Workspace?) -> List<dev.vesta.core.skill.Skill> = { _, _ -> emptyList() },
-    /** 작업 에이전트(TASK) 스킬을 맡을 에이전트: 스킬의 도구 ∩ 역할 도구 (K-06) */
+    /** 작업 에이전트(TASK) 스킬을 맡을 에이전트: 스킬의 도구 ∩ 역할 도구 (SK-06) */
     private val skillAgent: suspend (UserContext, dev.vesta.core.skill.Skill) -> Agent? = { _, _ -> null },
     /** `/skills`·`/agents` 목록 글 */
     private val directory: suspend (UserContext, String, dev.vesta.core.agent.Workspace?) -> String? = { _, _, _ -> null },
@@ -169,7 +169,7 @@ class DefaultConversationService(
             notice(it)
             return@flow
         }
-        // 스킬 초안 (M28 K-11·K-12): 모델 없이 승인·버리기, `/skillify`는 이 대화의 마지막 도구 실행으로 초안을
+        // 스킬 초안 (M28 SK-11·SK-12): 모델 없이 승인·버리기, `/skillify`는 이 대화의 마지막 도구 실행으로 초안을
         if (input.images.isEmpty()) runCatching { skillCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "스킬 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
@@ -181,7 +181,7 @@ class DefaultConversationService(
             notice(it)
             return@flow
         }
-        // 예약 (M29 S-01·S-04): 모델 없이 만들기·목록·멈춤·지우기. 예약 실행 안에서는 받지 않는다
+        // 예약 (M29 SC-01·SC-04): 모델 없이 만들기·목록·멈춤·지우기. 예약 실행 안에서는 받지 않는다
         if (input.images.isEmpty() && !input.unattended) runCatching { scheduleCommand(user, channel, input.text) }.onFailure { log.warn(it) { "예약 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
@@ -192,7 +192,7 @@ class DefaultConversationService(
             return@flow
         }
         val call = dev.vesta.core.studio.CustomCall.parse(input.text)
-        // 스킬 (`/이름 할 일`, K-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
+        // 스킬 (`/이름 할 일`, SK-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
         val skill = if (call == null) dev.vesta.core.skill.SkillCall.parse(input.text)?.let { c -> skills(user, workspace).firstOrNull { it.name == c.name }?.let { it to c } } else null
         // "이어서 해 줘" (가계부 앱 시험에서): 같은 대화의 직전 담당에게 그대로. 라우터에 맡기면 도구 없는 에이전트로 가서 한 척만 했다
         val continued = if (call == null && skill == null && input.images.isEmpty() && CONTINUE.matches(input.text.trim()))

@@ -12,7 +12,7 @@ import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
 /**
- * 예약 시각 (PROJECT.md S-01, M29). 규칙으로만 읽어 늘 같은 뜻이 된다. [canonical]로 저장하고 [of]로 다시 읽는다.
+ * 예약 시각 (PROJECT.md SC-01, M29). 규칙으로만 읽어 늘 같은 뜻이 된다. [canonical]로 저장하고 [of]로 다시 읽는다.
  * [next]는 [after]보다 뒤의 첫 실행 시각 (없으면 null: 한 번만 하는 예약이 지났을 때)
  */
 sealed interface When {

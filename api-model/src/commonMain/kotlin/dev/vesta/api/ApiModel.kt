@@ -28,7 +28,7 @@ data class ChatRequestDto(
     /** CLI 작업 폴더(절대 경로)와 그 폴더의 VESTA.md 내용 (M17). CLI 요청의 Mac 주인 것만 쓴다 */
     val workspace: String? = null,
     val instructions: String? = null,
-    /** 작업 폴더의 스킬 파일(`.vesta/skills/<폴더>/SKILL.md` 내용, K-01). CLI가 사용자 승인을 받은 것만 보낸다 */
+    /** 작업 폴더의 스킬 파일(`.vesta/skills/<폴더>/SKILL.md` 내용, SK-01). CLI가 사용자 승인을 받은 것만 보낸다 */
     val skills: List<ProjectSkillDto> = emptyList(),
     /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,
@@ -37,7 +37,7 @@ data class ChatRequestDto(
 @Serializable
 data class ProjectSkillDto(val folder: String, val text: String)
 
-/** 스킬 (K-01). [source]: PROJECT·PERSONAL·WEB. 웹에서 만든 것만 고칠 수 있다 */
+/** 스킬 (SK-01). [source]: PROJECT·PERSONAL·WEB. 웹에서 만든 것만 고칠 수 있다 */
 @Serializable
 data class SkillDto(
     val name: String,
@@ -422,7 +422,7 @@ data class AgentsDto(val builtin: List<BuiltinAgentDto>, val custom: List<Custom
     /** A2A 에이전트를 등록·쓸 수 있는가 (Mac 주인만) */
     val canA2a: Boolean = false,
     val skills: List<SkillDto> = emptyList(),
-    /** 제안된 스킬 초안 (M28 K-11): 저장(PUT)하면 쓰는 스킬이 되고, 지우면(DELETE) 버린다 */
+    /** 제안된 스킬 초안 (M28 SK-11): 저장(PUT)하면 쓰는 스킬이 되고, 지우면(DELETE) 버린다 */
     val drafts: List<SkillDto> = emptyList(),
 )
 

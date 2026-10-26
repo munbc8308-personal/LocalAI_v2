@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pstack 스킬을 Vesta 내장 스킬로 가져온다 (PROJECT.md 7.27 K-17, M33).
+"""pstack 스킬을 Vesta 내장 스킬로 가져온다 (PROJECT.md 7.27 SK-17, M33).
 
 쓰는 법: python3 -I scripts/vendor-pstack.py <cursor/plugins 체크아웃>
 - 고른 스킬만 app-common/src/main/resources/skills/<이름>/SKILL.md 로 복사한다

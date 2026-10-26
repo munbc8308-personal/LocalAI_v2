@@ -312,7 +312,7 @@ private fun trainingEndpoints(app: AppContainer, scope: CoroutineScope): Trainin
             app.journal.background(user, "MEMORY", "자동 기억", listOf(Triple("sources", "새로 기억함 ${report.saved.size}개", report.saved.joinToString("\n") { "· $it" })))
         },
     ).also { it.start(scope) }
-    // 스킬 제안 (M28 K-09): 같은 쉬는 때만, 10분마다. 초안은 승인해야 쓴다
+    // 스킬 제안 (M28 SK-09): 같은 쉬는 때만, 10분마다. 초안은 승인해야 쓴다
     app.skillSmith.start(scope, idle = {
         !app.journal.busy && !service.running && !app.jobs.busy &&
             java.time.Duration.between(app.journal.lastActivity, java.time.Instant.now()) > java.time.Duration.ofMinutes(2) &&

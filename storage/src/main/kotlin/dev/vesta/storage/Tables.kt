@@ -340,7 +340,7 @@ object A2aAgents : LongIdTable("a2a_agent") {
     init { uniqueIndex(owner, name) }
 }
 
-/** 웹에서 만든 스킬 (M22 K-01, v20) */
+/** 웹에서 만든 스킬 (M22 SK-01, v20) */
 object Skills : LongIdTable("skill") {
     val owner = reference("owner_user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE)
     val name = varchar("name", 40)
@@ -426,7 +426,7 @@ object RunEvents : LongIdTable("run_event") {
     val detail = text("detail").nullable()
 }
 
-/** 예약 작업 (M29 S-01, v26). [spec]은 `When.canonical`, [channel]은 결과를 보낼 곳 */
+/** 예약 작업 (M29 SC-01, v26). [spec]은 `When.canonical`, [channel]은 결과를 보낼 곳 */
 object Schedules : LongIdTable("schedule") {
     val userId = reference("user_id", Users, onDelete = org.jetbrains.exposed.v1.core.ReferenceOption.CASCADE).index()
     val task = text("task")

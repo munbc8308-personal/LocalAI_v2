@@ -5,7 +5,7 @@ import dev.vesta.core.agent.AgentEvent
 import java.nio.file.Path
 
 /**
- * 파일 쓰기 자동 승인 범위 (`--accept-writes`·`/accept`, PROJECT.md W-06, M17).
+ * 파일 쓰기 자동 승인 범위 (`--accept-writes`·`/accept`, PROJECT.md WS-06, M17).
  * 원칙: **작업 폴더 안의 소스 코드·문서 파일**만 묻지 않는다. 막을 이름을 하나씩 늘리는 대신 허용할 것만 정한다.
  * - 도구: write_file·make_directory·move_file. 패치(apply_patch)는 미리 다 알 수 없는 경로(이름 바꾸기·바이너리·모드)가 있어 늘 묻는다
  * - 파일: 확장자가 [SOURCE_EXTENSIONS]일 때만. 설정 형식(json·yaml·toml·xml·properties)은 도구가 읽어 실행하는 경우가 많아 늘 묻는다

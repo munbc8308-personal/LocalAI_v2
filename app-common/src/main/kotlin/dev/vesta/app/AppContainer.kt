@@ -268,13 +268,13 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         )
     }
 
-    /** 스킬 제안을 쓸지 (K-13): GUEST·없는 사용자는 안 씀, 사용자가 끄면 안 씀 */
+    /** 스킬 제안을 쓸지 (SK-13): GUEST·없는 사용자는 안 씀, 사용자가 끄면 안 씀 */
     suspend fun skillAuto(user: dev.vesta.core.UserId): Boolean {
         val u = userRepository.get(user) ?: return false
         return u.role != UserRole.GUEST && userSettings.get(user).skillAuto != false
     }
 
-    /** 스킬 저장·승인 검사 (K-06): 그 역할이 쓸 수 있는 에이전트·도구만 */
+    /** 스킬 저장·승인 검사 (SK-06): 그 역할이 쓸 수 있는 에이전트·도구만 */
     suspend fun skillProblem(user: UserContext, skill: dev.vesta.core.skill.Skill): String? = dev.vesta.core.skill.Skill.problem(
         skill.name, skill.description, skill.body, skill.agent.name, skill.tools,
         dev.vesta.identity.RolePolicy.agents(user.role), toolCatalog(user).map { it.spec.name }.toSet(),
@@ -497,7 +497,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     }
 
     /**
-     * 부를 수 있는 스킬 (K-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것 > 내장(M33 K-15).
+     * 부를 수 있는 스킬 (SK-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것 > 내장(M33 SK-15).
      * 작업 폴더·내 파일은 Mac 주인 것이라 Mac 주인만 쓴다. 내장은 모두가 쓴다 (도구는 그 역할 도구와 겹치는 것만)
      */
     suspend fun skillsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.skill.Skill> {
@@ -507,7 +507,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         return (project + personal + skillRepository.list(user.userId) + builtinSkills).distinctBy { it.name }
     }
 
-    /** 앱에 함께 든 스킬 (M33 K-15) */
+    /** 앱에 함께 든 스킬 (M33 SK-15) */
     val builtinSkills: List<dev.vesta.core.skill.Skill> by lazy { BuiltinSkills.load() }
 
     /** `~/.vesta/skills/<이름>/SKILL.md`. 형식이 틀리거나 숨은 문자가 있는 파일은 건너뛴다 */
@@ -524,7 +524,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         }
     }.getOrDefault(emptyList())
 
-    /** 작업 에이전트 스킬: 스킬이 적은 도구 ∩ 그 사용자가 쓸 수 있는 도구 (K-06). 셸·쓰기 승인은 그대로 */
+    /** 작업 에이전트 스킬: 스킬이 적은 도구 ∩ 그 사용자가 쓸 수 있는 도구 (SK-06). 셸·쓰기 승인은 그대로 */
     private fun skillAgent(skill: dev.vesta.core.skill.Skill): dev.vesta.core.agent.Agent = TaskAgent(
         inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
         maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,

@@ -4,11 +4,11 @@ import dev.vesta.core.AgentType
 import dev.vesta.core.UserId
 import java.time.Instant
 
-/** 스킬이 어디서 왔는가: 작업 폴더(`.vesta/skills`, CLI), 내 파일(`~/.vesta/skills`, Mac 주인), 웹에서 만든 것, Vesta에 함께 들어 있는 것(M33 K-15) */
+/** 스킬이 어디서 왔는가: 작업 폴더(`.vesta/skills`, CLI), 내 파일(`~/.vesta/skills`, Mac 주인), 웹에서 만든 것, Vesta에 함께 들어 있는 것(M33 SK-15) */
 enum class SkillSource { PROJECT, PERSONAL, WEB, BUILTIN }
 
 /**
- * 스킬 (PROJECT.md K-01, M22): 자주 하는 일의 지침. `/이름 할 일`로 부르면 [body]의 `$ARGUMENTS`를 할 일로 바꿔 [agent]에게 맡긴다.
+ * 스킬 (PROJECT.md SK-01, M22): 자주 하는 일의 지침. `/이름 할 일`로 부르면 [body]의 `$ARGUMENTS`를 할 일로 바꿔 [agent]에게 맡긴다.
  * [tools]는 작업 에이전트(TASK)일 때 쓸 도구 이름: 실제로는 그 사용자 역할이 쓸 수 있는 도구와 겹치는 것만 (권한을 넓히지 못한다, K-06)
  */
 data class Skill(
@@ -46,7 +46,7 @@ data class Skill(
 
     companion object {
         const val ARGUMENTS = "\$ARGUMENTS"
-        /** 파일·내장 스킬 이름 (pstack 원본 이름이 50자까지라 64자, M33 K-16) */
+        /** 파일·내장 스킬 이름 (pstack 원본 이름이 50자까지라 64자, M33 SK-16) */
         val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,63}$")
         /** 웹에서 만드는 스킬 이름 (저장소 칸이 40자) */
         val WEB_NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31}$")
@@ -123,7 +123,7 @@ interface SkillRepository {
     suspend fun drafts(owner: UserId): List<Skill> = emptyList()
     /** 초안으로 저장한다 ([skill]의 이름이 쓰는 스킬·초안과 겹치지 않아야 한다) */
     suspend fun saveDraft(owner: UserId, skill: Skill): Skill = error("초안을 저장할 수 없습니다")
-    /** 스킬 제안이 어느 실행까지 봤는지 (K-08) */
+    /** 스킬 제안이 어느 실행까지 봤는지 (SK-08) */
     suspend fun cursor(): Long = 0L
     suspend fun setCursor(at: Long) {}
 }

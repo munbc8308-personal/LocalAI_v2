@@ -26,7 +26,7 @@ internal object Workspaces {
     }
 
     /**
-     * 작업 폴더의 스킬 (K-01): 저장소 루트에서 작업 폴더까지의 `.vesta/skills/<이름>/SKILL.md` (아래쪽이 같은 이름을 덮는다).
+     * 작업 폴더의 스킬 (SK-01): 저장소 루트에서 작업 폴더까지의 `.vesta/skills/<이름>/SKILL.md` (아래쪽이 같은 이름을 덮는다).
      * 형식이 틀리거나 숨은 문자가 있는 파일은 쓰지 않고 그 폴더 이름을 돌려준다
      */
     fun skills(dir: Path, home: Path): Pair<List<dev.vesta.core.skill.Skill>, List<String>> {

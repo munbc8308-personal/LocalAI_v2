@@ -13,7 +13,7 @@ import dev.vesta.api.ScheduleNewDto
 import io.ktor.http.HttpMethod
 import kotlinx.serialization.builtins.ListSerializer
 
-/** 예약 작업 (PROJECT.md S-04, M29). 여기서 만든 예약은 결과가 웹 대화 목록에 남는다 (메신저로 받으려면 메신저에서 /schedule) */
+/** 예약 작업 (PROJECT.md SC-04, M29). 여기서 만든 예약은 결과가 웹 대화 목록에 남는다 (메신저로 받으려면 메신저에서 /schedule) */
 class ScheduleCommand : CliktCommand(name = "schedule") {
     override fun help(context: Context) = "예약 작업: 보기·만들기·멈춤·지금 실행·지우기 (대화에서는 /schedule …, /schedules)"
     override fun run() = Unit

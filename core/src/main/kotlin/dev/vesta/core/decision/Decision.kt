@@ -45,7 +45,7 @@ data class RoutingDecision(
     val customAgent: String? = null,
     /** [customAgent]가 팀 이름인 경우 (`/team 이름`, M22) */
     val team: Boolean = false,
-    /** 스킬로 부른 경우 그 이름 (`/이름 할 일`, K-02) */
+    /** 스킬로 부른 경우 그 이름 (`/이름 할 일`, SK-02) */
     val skill: String? = null,
     /** "이어서 해 줘"로 직전 담당을 이어 간 경우 (M32 J-04: 작업 계획을 이어 쓴다) */
     val continued: Boolean = false,

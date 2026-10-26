@@ -32,7 +32,7 @@ data class AgentRequest(
      * 맡은 에이전트도 처음부터 인터넷 도구에 승인을 받는다
      */
     val tainted: Boolean = false,
-    /** 사람이 없는 실행 (예약 작업, M29 S-05): 승인이 필요한 도구(쓰기·셸·보내기)를 주지 않는다 */
+    /** 사람이 없는 실행 (예약 작업, M29 SC-05): 승인이 필요한 도구(쓰기·셸·보내기)를 주지 않는다 */
     val unattended: Boolean = false,
 )
 
@@ -54,7 +54,7 @@ data class UserInput(
 data class Workspace(
     val path: String,
     val instructions: String? = null,
-    /** 작업 폴더의 스킬(`.vesta/skills`, K-01). CLI가 VESTA.md처럼 사용자 승인(해시)을 받은 것만 넣는다 */
+    /** 작업 폴더의 스킬(`.vesta/skills`, SK-01). CLI가 VESTA.md처럼 사용자 승인(해시)을 받은 것만 넣는다 */
     val skills: List<dev.vesta.core.skill.Skill> = emptyList(),
 ) {
     companion object {

@@ -266,7 +266,7 @@ fun StudioView() {
                     Div({ classes("muted", "small") }) { Text(agentLabel(k.agent) + (if (k.tools.isNotEmpty()) " · 도구 ${k.tools.joinToString()}" else "") + if (k.auto) " · 실행에서 만듦" else "") }
                 }
             }
-            // 제안된 스킬 (M28 K-11): 도구로 끝낸 실행에서 만든 초안. 쓰기(저장)해야 /이름 으로 부를 수 있다
+            // 제안된 스킬 (M28 SK-11): 도구로 끝낸 실행에서 만든 초안. 쓰기(저장)해야 /이름 으로 부를 수 있다
             if (a.drafts.isNotEmpty()) {
                 Div({ classes("small") }) { B { Text("제안된 스킬 ${a.drafts.size}개") }; Span({ classes("muted") }) { Text(" · 승인하기 전에는 부를 수 없습니다") } }
                 a.drafts.forEach { k ->

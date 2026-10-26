@@ -56,7 +56,7 @@ data class UserSettings(
     val voice: String? = null,
     /** 자동 기억 (M27 MEM-03). null이면 기본: 켬 (GUEST는 늘 끔) */
     val memoryAuto: Boolean? = null,
-    /** 스킬 제안 (M28 K-13). null이면 기본: 켬 (GUEST는 늘 끔) */
+    /** 스킬 제안 (M28 SK-13). null이면 기본: 켬 (GUEST는 늘 끔) */
     val skillAuto: Boolean? = null,
 ) {
     /** 시스템 프롬프트에 붙일 말. 아무것도 정하지 않았으면 null */

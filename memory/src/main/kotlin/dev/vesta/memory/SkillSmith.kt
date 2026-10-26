@@ -46,9 +46,9 @@ data class SmithReport(val runs: Int, val sent: Int, val drafts: List<Skill>, va
 
 /**
  * 스킬 자동 생성 (PROJECT.md 7.22, M28). 장기 기억이 "사실"이면 이것은 "일하는 방법"을 기억한다.
- * 1. 끝난 실행에서 후보를 고른다 (K-08, 규칙만): DONE, TASK·CODE, 성공한 도구 [MIN_TOOLS]번 이상, 스킬·사용자 정의 에이전트·팀이 아님
+ * 1. 끝난 실행에서 후보를 고른다 (SK-08, 규칙만): DONE, TASK·CODE, 성공한 도구 [MIN_TOOLS]번 이상, 스킬·사용자 정의 에이전트·팀이 아님
  * 2. 질문·도구 순서·답 앞부분을 [draft](메인 모델)에 보내 초안을 받는다 (K-09). 도구는 실행에서 성공한 것만 쓴다
- * 3. 이미 있는 스킬과 설명이 비슷하면 버린다 (K-10)
+ * 3. 이미 있는 스킬과 설명이 비슷하면 버린다 (SK-10)
  * 4. **초안으로만** 저장한다 (K-11): 사용자가 승인해야 `/이름`으로 부를 수 있다
  * 커서는 처리한 실행까지만 옮긴다: 도는 실행을 만나거나 바빠지면 멈추고 다음에 이어서 본다
  */
@@ -121,7 +121,7 @@ class SkillSmith(
         return RunMaterial(run, steps, fromSkill)
     }
 
-    /** `/skillify [이름]`·`/skills approve 이름`·`/skills drop 이름` (K-11·K-12). 스킬 명령이 아니면 null */
+    /** `/skillify [이름]`·`/skills approve 이름`·`/skills drop 이름` (SK-11·SK-12). 스킬 명령이 아니면 null */
     suspend fun command(user: UserContext, session: SessionId?, text: String): String? {
         val t = text.trim()
         SKILLIFY.find(t)?.let { m ->
@@ -189,7 +189,7 @@ class SkillSmith(
         val base = slug(name ?: reply.name)
         val unique = (listOf(base) + (2..99).map { "${base.take(29)}-$it" }).firstOrNull { it.lowercase() !in taken }
             ?: return Drafted.Skipped("쓸 이름이 없습니다")
-        // 읽기·네트워크 도구만 넣는다 (K-13): 실행 결과에 섞인 지시문이 쓰기·셸 권한을 가진 스킬로 남지 않게
+        // 읽기·네트워크 도구만 넣는다 (SK-13): 실행 결과에 섞인 지시문이 쓰기·셸 권한을 가진 스킬로 남지 않게
         val safe = draftTools(user)
         val tools = material.steps.filter { it.ok && it.tool != DELEGATE && it.tool in safe }.map { it.tool }.distinct()
         val saved = skills.saveDraft(user, Skill(unique, description, body, AgentType.TASK, tools, SkillSource.WEB, draft = true, auto = true, run = material.run.id))
@@ -201,7 +201,7 @@ class SkillSmith(
     companion object {
         /** 자동 제안은 성공한 도구 호출이 이만큼 있어야 (K-08) */
         const val MIN_TOOLS = 3
-        /** 설명 유사도가 이 이상이면 같은 스킬로 본다 (K-10) */
+        /** 설명 유사도가 이 이상이면 같은 스킬로 본다 (SK-10) */
         const val SAME = 0.85
         private const val DELEGATE = "delegate"
         private val STARTED = Regex("^도구 (\\S+) 시작$")

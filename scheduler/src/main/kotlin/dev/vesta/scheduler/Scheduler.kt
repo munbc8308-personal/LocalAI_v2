@@ -36,7 +36,7 @@ data class ScheduleOutcome(val session: SessionId, val text: String, val ok: Boo
 
 /**
  * 예약 작업 (PROJECT.md 7.23, M29).
- * - 명령 (S-01·S-04): `/schedule <언제> <할 일>`, `/schedules`, `/schedule rm|pause|resume|run 번호`. 모델 없이 답한다
+ * - 명령 (SC-01·SC-04): `/schedule <언제> <할 일>`, `/schedules`, `/schedule rm|pause|resume|run 번호`. 모델 없이 답한다
  * - 실행 (S-02·S-03): [start]가 30초마다 때가 된 예약을 하나씩 돈다. 실행마다 새 대화를 만들어 그 사용자로 질문을 보내고(사람이 없는 실행),
  *   답을 [deliver]로 만든 곳에 보낸다. 승인 요청은 바로 거부한다 (S-05)
  */
