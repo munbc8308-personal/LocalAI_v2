@@ -3212,6 +3212,8 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **F-02**: `TEST_COMMAND = (?<![A-Za-z])(test|tests|pytest|unittest|vitest|jest)(?![A-Za-z])`. ClaimCheckTest(unittest·test_x.py·pytest 인정, FAILED는 실패).
 - **F-03**: `ExposedRepositories`의 `Database.io`가 SQLITE_BUSY·locked면 100·300·900ms 쉬고 다시(그다음은 그대로 던짐). `/api/chat` SSE가 예외를 잡아 `error` 이벤트. ApiTest. 끊긴 답은 이미 `interrupted = done == null`로 저장되고 웹·CLI에 "중간에 멈춘 답변"으로 보인다(팀 검증에서는 curl이 먼저 끊겨 못 봤다).
 
+- **F-05**: `AutoApprove.allows`는 이미 있는 테스트 파일(`test_*`·`*_test.*`·`*Test(s).*`·`*.test|spec.*`, `test·tests·__tests__·spec` 폴더 아래)을 고치면 묻는다(새 테스트 파일은 그대로 자동). print 모드는 승인할 수 없어 거부한 작업을 끝에 모아 "대화형으로 다시"를 알린다. `.sh` 같은 실행 파일은 지금처럼 묻는다(F-01로 셸 쪽도 덮어쓰기는 묻게 되어 정책이 맞춰짐). AutoApproveTest.
+
 ---
 
 ## 14. 결정 사항 / 남은 질문

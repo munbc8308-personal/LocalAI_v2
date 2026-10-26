@@ -17,6 +17,9 @@ import java.nio.file.Path
  */
 internal object AutoApprove {
     private val TOOLS = setOf("write_file", "make_directory", "move_file")
+    /** 테스트 파일 이름 (`test_x.py`·`x_test.go`·`FooTest.kt`·`x.test.ts`·`x.spec.js`) */
+    private val TEST_FILE = Regex("^(test_.+|.+_test\\.[a-z]+|.+Tests?\\.[a-z]+|.+\\.(test|spec)\\.[a-z]+)$")
+    private val TEST_DIRS = setOf("test", "tests", "__tests__", "spec")
     private val PROTECTED_DIRS = setOf("gradle", "buildsrc", "project", "node_modules", "vendor", "scripts", "bin", "hooks")
     private val SOURCE_EXTENSIONS = setOf(
         "md", "txt", "rst", "adoc", "kt", "java", "scala", "groovy", "swift", "go", "rs", "py", "rb", "php", "c", "h", "cc", "cpp", "hpp", "m", "mm", "cs",
@@ -46,7 +49,9 @@ internal object AutoApprove {
             val path = Path.of(target).normalize()
             val name = path.fileName?.toString() ?: return@all false
             val fileOk = if (event.tool == "make_directory") true else name.substringAfterLast('.', "").lowercase() in SOURCE_EXTENSIONS && !PROTECTED_FILE.matches(name)
-            path.startsWith(root) && path != root && fileOk &&
+            // 이미 있는 테스트 파일은 고치면 묻는다: 모델이 테스트를 바꿔 "통과"로 만든 일이 있다 (팀 검증, M36 F-05)
+            val existingTest = TEST_FILE.matches(name) || root.relativize(path).any { it.toString().lowercase() in TEST_DIRS }
+            path.startsWith(root) && path != root && fileOk && !(existingTest && java.nio.file.Files.exists(path)) &&
                 root.relativize(path).none { part -> part.toString().let { it.startsWith(".") || it.lowercase() in PROTECTED_DIRS } }
         }
     }

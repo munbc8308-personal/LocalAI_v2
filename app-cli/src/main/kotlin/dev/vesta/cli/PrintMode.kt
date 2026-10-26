@@ -30,6 +30,8 @@ internal object PrintMode {
         val start = TimeSource.Monotonic.markNow()
         var failed = false
         var job: AgentEvent.JobStarted? = null
+        // 승인할 수 없어 거부한 작업: 끝에 모아 알린다 (팀 검증, M36 F-05)
+        val refused = mutableListOf<String>()
         backend.use {
             backend.send(null, question, workspace).collect { event ->
                 renderer?.render(event, start.elapsedNow()) ?: when (event) {
@@ -47,11 +49,17 @@ internal object PrintMode {
                         acceptShell && AutoApprove.shell(event) -> ApprovalDecision.Approve.also { err.println("✓ 자동 승인 (셸): ${event.details.title}".let { if (console != null) dim(it) else it }) }
                         console != null -> ask(console, err, event)
                         else -> ApprovalDecision.Deny("터미널이 아니라 승인할 수 없음").also {
+                            refused += event.details.title
                             err.println("거부: ${event.details.title} (" + if (acceptWrites) "자동 승인 범위 밖: 셸·실행되는 파일·작업 폴더 밖은 터미널에서 승인)" else "터미널에서 실행하거나, 작업 폴더 안 파일 쓰기면 --accept-writes)")
                         }
                     }
                     backend.resolveApproval(event.requestId, decision)
                 }
+            }
+            if (refused.isNotEmpty()) {
+                err.println("\n승인이 필요해 하지 못한 작업 ${refused.size}개:")
+                refused.distinct().forEach { err.println("  - $it") }
+                err.println("터미널에서 `vesta`(대화형)로 다시 시키면 하나씩 승인할 수 있습니다.")
             }
             // 백그라운드로 넘긴 일(M24 영상): 한 번 묻고 끝나는 모드라 결과가 나올 때까지 기다린다
             job?.let { started ->

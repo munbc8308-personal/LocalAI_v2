@@ -49,6 +49,15 @@ class AutoApproveTest : FunSpec({
         AutoApprove.allows(event("move_file", "a.txt", ".git/hooks/post-checkout"), root.toString()) shouldBe false
     }
 
+    test("이미 있는 테스트 파일을 고치는 쓰기는 묻는다, 새 테스트 파일은 자동 (M36 F-05)") {
+        java.nio.file.Files.writeString(root.resolve("test_old.py"), "x")
+        AutoApprove.allows(event("write_file", "test_old.py"), root.toString()) shouldBe false
+        AutoApprove.allows(event("write_file", "test_new.py"), root.toString()) shouldBe true
+        java.nio.file.Files.createDirectories(root.resolve("tests")); java.nio.file.Files.writeString(root.resolve("tests/helper.py"), "x")
+        AutoApprove.allows(event("write_file", "tests/helper.py"), root.toString()) shouldBe false
+        AutoApprove.allows(event("write_file", "src/Main.kt"), root.toString()) shouldBe true
+    }
+
     test("셸 자동 승인은 run_shell(EXEC)만, 쓰기·MCP 도구는 해당 없음") {
         AutoApprove.shell(event("run_shell", risk = RiskLevel.EXEC)) shouldBe true
         AutoApprove.shell(event("write_file", "a.kt")) shouldBe false
