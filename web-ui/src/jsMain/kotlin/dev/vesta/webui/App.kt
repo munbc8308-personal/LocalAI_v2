@@ -554,7 +554,24 @@ private fun FeedbackButtons(chat: ChatController, turn: Turn) {
             Option(agent, { if (turn.correctAgent == agent) selected() }) { Text("→ " + agentName(agent)) }
         }
     }
-    turn.correctAgent?.let { Span({ classes("muted", "small") }) { Text(" 정정을 저장했습니다 (다음 학습에 반영)") } }
+    turn.correctAgent?.let { agent ->
+        Span({ classes("muted", "small") }) { Text(" 정정을 저장했습니다 (다음 학습에 반영)") }
+        // 고른 담당으로 바로 다시 묻기 (R-07, M34 Q-04): 명시 지정(/web …)과 같은 길
+        Retry.command(agent)?.let { command ->
+            Button({ classes("link", "small"); if (chat.busy) disabled(); onClick { chat.send("$command ${Retry.strip(turn.question)}") } }) { Text("→ ${agentName(agent)}로 다시 묻기") }
+        }
+    }
+}
+
+/** 다른 담당으로 다시 묻기 (R-07, M34 Q-04) */
+private object Retry {
+    private val COMMANDS = mapOf("CHAT" to "/chat", "DOCS" to "/docs", "WEB" to "/web", "CODE" to "/code", "TASK" to "/task", "IMAGE" to "/image")
+
+    /** 그 담당을 바로 부르는 명령. 없으면(개인 비서 등) null */
+    fun command(agent: String): String? = COMMANDS[agent]
+
+    /** 질문 앞의 담당 명령은 떼고 다시 붙인다 */
+    fun strip(question: String): String = question.trim().let { q -> COMMANDS.values.firstOrNull { q == it || q.startsWith("$it ") }?.let { q.removePrefix(it).trim() } ?: q }
 }
 
 /** 음성 대화 상태 줄: 지금 단계, 마이크 크기, 끊기·끝내기 */

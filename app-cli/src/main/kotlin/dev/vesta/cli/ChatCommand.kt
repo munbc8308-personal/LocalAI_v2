@@ -140,6 +140,22 @@ class ChatCommand : CliktCommand(name = "chat") {
                             }
                         }
                         "/history" -> session?.let { printHistory(out, backend, it) } ?: out.println(dim("아직 대화가 없습니다."))
+                        // 다른 담당으로 다시 묻기 (R-07, M34 Q-04): 이 대화의 마지막 질문을 명시 지정(/web …)으로 다시 보낸다
+                        "/again" -> {
+                            val current = session
+                            val command = arg?.trim()?.lowercase()?.removePrefix("/")?.takeIf { it in AGAIN }?.let { "/$it" }
+                            val last = current?.let { backend.messages(it.id).lastOrNull { m -> m.role == ChatRole.USER }?.content }
+                            when {
+                                command == null -> out.println(dim("다시 물을 담당: /again ${AGAIN.joinToString("|")}"))
+                                last == null -> out.println(dim("다시 물을 질문이 없습니다."))
+                                else -> {
+                                    val question = last.trim().let { q -> AGAIN.map { "/$it" }.firstOrNull { q == it || q.startsWith("$it ") }?.let { q.removePrefix(it).trim() } ?: q }
+                                    out.println(dim("→ $command $question"))
+                                    out.flush()
+                                    session = generate(terminal, reader, backend, session, "$command $question", workspace) ?: session
+                                }
+                            }
+                        }
                         // 이 대화 지침 (C-06, M34 Q-03): 보기·정하기·지우기. 대화가 있어야 붙일 곳이 있다
                         "/prompt" -> {
                             val current = session
@@ -271,7 +287,9 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
-        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept", "/prompt")
+        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept", "/prompt", "/again")
+        /** `/again`으로 다시 물을 수 있는 담당 (명시 지정 명령이 있는 것) */
+        val AGAIN = listOf("chat", "docs", "web", "code", "task", "image")
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val HELP = """
             /new             새 대화
@@ -279,6 +297,7 @@ class ChatCommand : CliktCommand(name = "chat") {
             /resume [번호]   세션 이어하기 (번호 생략 시 가장 최근)
             /history         현재 대화 다시 보기
             /prompt [글|reset] 이 대화 지침 보기·정하기·지우기 (예: /prompt 답은 영어로)
+            /again 담당       마지막 질문을 다른 담당으로 다시 (chat·docs·web·code·task·image)
             /web 질문         웹 검색해서 답하기 (질문에 URL이 있으면 그 페이지를 읽음)
             /docs 질문        등록한 모든 문서에서 찾아 답하기
             /code 질문        코드 도우미 (작업 폴더가 등록한 저장소면 그 저장소에서 찾음)
