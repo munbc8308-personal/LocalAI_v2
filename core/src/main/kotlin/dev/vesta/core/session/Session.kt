@@ -51,6 +51,20 @@ interface SessionRepository {
     suspend fun updateTitle(userId: UserId, id: SessionId, title: String)
     /** 세션과 메시지·라우팅 기록을 지운다 (평가용으로 만든 대화 정리, M16). 지웠으면 true */
     suspend fun delete(userId: UserId, id: SessionId): Boolean = false
+    /** 이 대화 지침 (C-06, M34 Q-03). null이면 지운다. 본인 대화가 아니면 false */
+    suspend fun updateSystemPrompt(userId: UserId, id: SessionId, prompt: String?): Boolean = false
+}
+
+/** 이 대화 지침 (C-06, M34 Q-03): 기본 시스템 프롬프트 뒤에 붙는다 (바꾸지 않는다: 날짜·안전 규칙은 그대로) */
+object SessionPrompt {
+    const val MAX = 4_000
+
+    /** 문제가 있으면 그 이유 */
+    fun problem(text: String): String? = when {
+        text.length > MAX -> "지침은 ${MAX}자까지입니다"
+        dev.vesta.core.text.HiddenChars.has(text) -> "보이지 않는 문자가 들어 있습니다"
+        else -> null
+    }
 }
 
 interface MessageRepository {

@@ -93,6 +93,17 @@ class ChatController(private val scope: CoroutineScope) {
             .onSuccess { sessions.clear(); sessions.addAll(it) }
     }
 
+    /** 지금 대화의 지침 (C-06, M34 Q-03). 대화 목록에서 읽는다 */
+    val prompt: String? get() = sessions.firstOrNull { it.id == sessionId }?.prompt
+
+    /** 지금 대화의 지침을 바꾼다. 빈 글이면 지운다 */
+    fun setPrompt(text: String) = scope.launch {
+        val id = sessionId ?: return@launch
+        runCatching { Http.put("/api/sessions/$id/prompt", ApiJson.encodeToString(dev.vesta.api.SessionPromptDto.serializer(), dev.vesta.api.SessionPromptDto(text.trim().ifEmpty { null }))) }
+            .onSuccess { refreshSessions() }
+            .onFailure { loadError = "지침을 저장하지 못했습니다: ${it.message}" }
+    }
+
     /** 대화 하나 지우기 (붙은 이미지·영상까지). 지금 보던 대화면 새 대화로 */
     fun deleteSession(id: String) = scope.launch {
         runCatching { Http.delete("/api/sessions/$id") }

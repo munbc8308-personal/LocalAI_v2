@@ -33,7 +33,9 @@ import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -82,6 +84,21 @@ class ApiTest : FunSpec({
         client.get("/api/sessions").status shouldBe HttpStatusCode.Unauthorized
         client.get("/api/sessions") { bearerAuth("wrong") }.status shouldBe HttpStatusCode.Unauthorized
         client.get("/api/sessions") { bearerAuth("secret") }.bodyAsText() shouldContain "\"id\":\"s1\""
+    } }
+
+    test("이 대화 지침 (C-06, M34 Q-03): 본인 대화만, 4,000자·숨은 문자 거부, 빈 글은 지움") { testApplication {
+        val saved = mutableListOf<String?>()
+        val sessions = object : SessionRepository by NoSessions {
+            override suspend fun updateSystemPrompt(userId: UserId, id: SessionId, prompt: String?) = (id.value == "s1").also { if (it) saved += prompt }
+        }
+        application { vestaApi(ServerDeps(conversation, sessions, NoMessages, UserContext(UserId(1), UserRole.OWNER), token = "secret", version = "t")) }
+        suspend fun put(id: String, body: String) = client.put("/api/sessions/$id/prompt") { bearerAuth("secret"); contentType(ContentType.Application.Json); setBody(body) }
+        put("s1", """{"prompt":"  답은 영어로  "}""").status shouldBe HttpStatusCode.OK
+        put("s1", """{"prompt":""}""").status shouldBe HttpStatusCode.OK
+        put("other", """{"prompt":"x"}""").status shouldBe HttpStatusCode.NotFound
+        put("s1", """{"prompt":"${"가".repeat(4_001)}"}""").status shouldBe HttpStatusCode.BadRequest
+        put("s1", """{"prompt":"a\u200bb"}""").status shouldBe HttpStatusCode.BadRequest
+        saved shouldBe listOf("답은 영어로", null)
     } }
 
     test("/api/chat은 이벤트를 SSE로 흘려보낸다") { testApplication {

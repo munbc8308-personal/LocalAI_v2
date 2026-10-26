@@ -188,7 +188,11 @@ data class ApprovalDto(
 )
 
 @Serializable
-data class SessionDto(val id: String, val title: String?, val channel: String, val updatedAt: String)
+data class SessionDto(val id: String, val title: String?, val channel: String, val updatedAt: String, /** 이 대화 지침 (C-06) */ val prompt: String? = null)
+
+/** 이 대화 지침 바꾸기 (`PUT /api/sessions/{id}/prompt`, M34 Q-03). null·빈 글이면 지운다 */
+@Serializable
+data class SessionPromptDto(val prompt: String? = null)
 
 /** 지난 대화 찾기 결과 하나 (`/api/sessions/search`, M30 H-05): 맞은 부분 앞뒤 */
 @Serializable

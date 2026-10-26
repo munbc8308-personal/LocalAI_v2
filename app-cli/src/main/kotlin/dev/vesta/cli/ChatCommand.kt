@@ -140,6 +140,16 @@ class ChatCommand : CliktCommand(name = "chat") {
                             }
                         }
                         "/history" -> session?.let { printHistory(out, backend, it) } ?: out.println(dim("아직 대화가 없습니다."))
+                        // 이 대화 지침 (C-06, M34 Q-03): 보기·정하기·지우기. 대화가 있어야 붙일 곳이 있다
+                        "/prompt" -> {
+                            val current = session
+                            if (current == null) out.println(dim("대화를 시작한 뒤에 정할 수 있습니다 (첫 질문을 보낸 다음 /prompt 글)."))
+                            else when (arg?.trim()) {
+                                null, "" -> out.println(backend.find(current.id)?.systemPrompt?.let { "이 대화 지침:\n$it" } ?: dim("이 대화 지침이 없습니다. 정하기: /prompt 글, 지우기: /prompt reset"))
+                                "reset" -> out.println(backend.setPrompt(current.id, null)?.let { red(it) } ?: dim("이 대화 지침을 지웠습니다."))
+                                else -> out.println(backend.setPrompt(current.id, arg.trim())?.let { red(it) } ?: dim("이 대화 지침을 정했습니다. 다음 질문부터 따릅니다."))
+                            }
+                        }
                         "/accept" -> {
                             val words = arg?.lowercase()?.split(Regex("\\s+")).orEmpty()
                             if (words.firstOrNull() == "shell") {
@@ -261,13 +271,14 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
-        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept")
+        val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept", "/prompt")
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val HELP = """
             /new             새 대화
             /sessions        최근 세션 목록
             /resume [번호]   세션 이어하기 (번호 생략 시 가장 최근)
             /history         현재 대화 다시 보기
+            /prompt [글|reset] 이 대화 지침 보기·정하기·지우기 (예: /prompt 답은 영어로)
             /web 질문         웹 검색해서 답하기 (질문에 URL이 있으면 그 페이지를 읽음)
             /docs 질문        등록한 모든 문서에서 찾아 답하기
             /code 질문        코드 도우미 (작업 폴더가 등록한 저장소면 그 저장소에서 찾음)

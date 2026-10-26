@@ -333,7 +333,7 @@ fun Application.vestaApi(deps: ServerDeps) {
             get("/sessions") {
                 val user = call.principal(deps) ?: return@get
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 20
-                val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString()) }
+                val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString(), it.systemPrompt) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(SessionDto.serializer()), list))
             }
             // 지난 대화 찾기 (M30 H-05): 본인 대화만, 손님은 안 됨
@@ -353,6 +353,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val media = deps.media?.deleteSession(user.userId, id.value) ?: 0
                 val removed = deps.sessions.delete(user.userId, id)
                 call.respondJson(if (removed) HttpStatusCode.OK else HttpStatusCode.NotFound, """{"removed":$removed,"media":$media}""")
+            }
+            // 이 대화 지침 (C-06, M34 Q-03): 본인 대화만
+            put("/sessions/{id}/prompt") {
+                val user = call.principal(deps) ?: return@put
+                val dto = ApiJson.decodeFromString(dev.vesta.api.SessionPromptDto.serializer(), call.receiveText())
+                val text = dto.prompt?.trim()?.ifEmpty { null }
+                text?.let { dev.vesta.core.session.SessionPrompt.problem(it) }?.let { return@put call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it) }.toString()) }
+                val ok = deps.sessions.updateSystemPrompt(user.userId, SessionId(call.parameters["id"].orEmpty()), text)
+                call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, if (ok) """{"ok":true}""" else """{"error":"세션 없음"}""")
             }
             get("/sessions/{id}/messages") {
                 val user = call.principal(deps) ?: return@get

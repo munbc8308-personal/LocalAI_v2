@@ -64,6 +64,10 @@ class ExposedSessionRepository(
             .map { it.toSession() }
     }
 
+    override suspend fun updateSystemPrompt(userId: UserId, id: SessionId, prompt: String?): Boolean = db.io {
+        Sessions.update({ (Sessions.id eq id.value) and (Sessions.userId eq userId.value) }) { it[Sessions.systemPrompt] = prompt } > 0
+    }
+
     override suspend fun updateTitle(userId: UserId, id: SessionId, title: String) {
         db.io {
             Sessions.update({ (Sessions.id eq id.value) and (Sessions.userId eq userId.value) }) {

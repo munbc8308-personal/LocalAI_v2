@@ -51,6 +51,17 @@ class ExposedRepositoriesTest : FunSpec({
         messages.list(session.id).shouldBeEmpty()
     }
 
+    test("이 대화 지침 (C-06, M34 Q-03): 본인 세션만 정하고 지운다") {
+        val (db, sessions, _) = setup()
+        val owner = db.ensureOwner("owner")
+        val session = sessions.create(owner, ChannelType.WEB, null)
+        sessions.updateSystemPrompt(UserId(owner.value + 999), session.id, "남의 지침") shouldBe false
+        sessions.updateSystemPrompt(owner, session.id, "답은 영어로") shouldBe true
+        sessions.find(owner, session.id)?.systemPrompt shouldBe "답은 영어로"
+        sessions.updateSystemPrompt(owner, session.id, null) shouldBe true
+        sessions.find(owner, session.id)?.systemPrompt shouldBe null
+    }
+
     test("최근 사용 순으로 정렬된다") {
         val (db, sessions, messages) = setup()
         val owner = db.ensureOwner("owner")

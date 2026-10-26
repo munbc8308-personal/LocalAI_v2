@@ -210,6 +210,7 @@ private fun ChatView(chat: ChatController, drawer: Boolean, setDrawer: (Boolean)
         if (drawer) Div({ classes("scrim"); onClick { setDrawer(false) } })
         Div({ classes("conversation") }) {
             Div({ id("messages"); classes("messages") }) {
+                if (chat.sessionId != null) PromptBar(chat)
                 if (chat.turns.isEmpty()) {
                     Div({ classes("empty") }) {
                         P { Text("무엇이든 물어보세요.") }
@@ -446,6 +447,23 @@ private fun TurnView(chat: ChatController, turn: Turn) {
         if (turn.answer.isNotBlank() && !(chat.busy && turn === chat.turns.lastOrNull())) Div({ classes("turn-actions") }) {
             SpeakButton(turn)
             if (turn.messageId != null) FeedbackButtons(chat, turn)
+        }
+    }
+}
+
+/** 이 대화 지침 (C-06, M34 Q-03): 기본 지침 뒤에 붙어 이 대화의 다음 질문부터 따른다 */
+@Composable
+private fun PromptBar(chat: ChatController) {
+    var editing by remember(chat.sessionId) { mutableStateOf(false) }
+    var text by remember(chat.sessionId) { mutableStateOf("") }
+    Div({ classes("prompt-bar", "small") }) {
+        if (!editing) {
+            Span({ classes("muted") }) { Text(chat.prompt?.let { "이 대화 지침: " + it.take(80) + if (it.length > 80) "…" else "" } ?: "이 대화 지침 없음") }
+            Button({ classes("link", "small"); onClick { text = chat.prompt.orEmpty(); editing = true } }) { Text(if (chat.prompt == null) "정하기" else "고치기") }
+        } else {
+            TextArea(text) { placeholder("예: 답은 영어로. 코드는 Kotlin으로. (4,000자까지, 비우면 지움)"); attr("rows", "3"); attr("maxlength", "4000"); onInput { text = it.value } }
+            Button({ classes("primary", "small"); onClick { chat.setPrompt(text); editing = false } }) { Text("저장") }
+            Button({ classes("link", "small"); onClick { editing = false } }) { Text("취소") }
         }
     }
 }

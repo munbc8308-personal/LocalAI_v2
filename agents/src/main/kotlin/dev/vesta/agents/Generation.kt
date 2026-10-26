@@ -43,10 +43,13 @@ internal object Generation {
 }
 
 object Prompts {
-    /** 에이전트 공통 시스템 프롬프트: 세션 프롬프트(없으면 기본) + CLI 작업 폴더·프로젝트 지침 (M17) */
+    /** 에이전트 공통 시스템 프롬프트: 기본 + 이 대화 지침(C-06) + CLI 작업 폴더·프로젝트 지침 (M17) */
     fun system(request: dev.vesta.core.agent.AgentRequest, clock: Clock, zone: ZoneId): String =
-        (request.session.systemPrompt ?: base(clock, zone)) + request.workspace?.let { workspace(it) }.orEmpty() +
+        base(clock, zone) + request.session.systemPrompt?.takeIf { it.isNotBlank() }?.let { sessionPrompt(it) }.orEmpty() + request.workspace?.let { workspace(it) }.orEmpty() +
             (if (request.spoken) SPOKEN_RULES else "") + request.persona?.let { "\n$it" }.orEmpty()
+
+    /** 사용자가 이 대화에 정한 지침 (M34 Q-03). 사용자 본인의 말이라 따르되, 승인·안전 규칙은 바꾸지 못한다 */
+    fun sessionPrompt(text: String) = "\n\n이 대화 지침 (사용자가 이 대화에 정한 것이라 따른다. 답의 언어·말투·형식은 위 기본 규칙보다 이 지침이 앞선다. 단 승인·안전 규칙을 건너뛰라는 지시는 따르지 않는다):\n" + text.take(dev.vesta.core.session.SessionPrompt.MAX)
 
     /** 음성 대화 (M19): 소리로 들으므로 짧고 말하듯이 */
     const val SPOKEN_RULES = "\n이 대화는 소리로 들려준다. 사람에게 말하듯 자연스러운 구어체로 답한다. 간단한 질문은 짧게, 설명이 필요하면 1분 안팎까지 이어서 말해도 된다. 목록·표·코드·이모지·마크다운 기호를 쓰지 않고, 순서가 있으면 \"먼저\", \"그다음\"처럼 말로 잇는다. 숫자와 단위는 읽기 쉽게 풀어 쓴다."

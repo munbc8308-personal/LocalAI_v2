@@ -26,6 +26,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
@@ -59,6 +60,8 @@ interface ChatBackend : AutoCloseable {
     suspend fun media(id: String): ByteArray?
     /** 백그라운드 작업의 지금 상태 (M24 영상). 없으면 null */
     suspend fun job(id: String): dev.vesta.api.JobDto?
+    /** 이 대화 지침을 바꾼다 (C-06, M34 Q-03). null이면 지운다. 문제가 있으면 그 이유 */
+    suspend fun setPrompt(id: SessionId, prompt: String?): String?
 }
 
 /** 같은 프로세스 안에서 바로 실행 */
@@ -77,6 +80,10 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
     override suspend fun messages(id: SessionId) = app.messages.list(id)
     override suspend fun media(id: String) = app.mediaStore.load(app.owner.userId, id)?.second
     override suspend fun job(id: String) = app.jobs.get(app.owner.userId, id)?.let { dev.vesta.api.JobDto(it.id, it.title, it.status.name, it.progress, it.mediaId, it.mime, it.text) }
+    override suspend fun setPrompt(id: SessionId, prompt: String?): String? {
+        prompt?.let { dev.vesta.core.session.SessionPrompt.problem(it) }?.let { return it }
+        return if (app.sessions.updateSystemPrompt(app.owner.userId, id, prompt)) null else "세션을 찾을 수 없습니다"
+    }
     override fun close() = app.close()
 }
 
@@ -143,7 +150,16 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
     }
 
     private fun SessionDto.toSession() =
-        Session(SessionId(id), UserId(0), title, ChannelType.valueOf(channel), null, Instant.parse(updatedAt), Instant.parse(updatedAt))
+        Session(SessionId(id), UserId(0), title, ChannelType.valueOf(channel), prompt, Instant.parse(updatedAt), Instant.parse(updatedAt))
+
+    override suspend fun setPrompt(id: SessionId, prompt: String?): String? {
+        val response = http.put("$baseUrl/api/sessions/${id.value}/prompt") {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(ApiJson.encodeToString(dev.vesta.api.SessionPromptDto.serializer(), dev.vesta.api.SessionPromptDto(prompt)))
+        }
+        return if (response.status.isSuccess()) null else runCatching { (ApiJson.parseToJsonElement(response.bodyAsText()) as kotlinx.serialization.json.JsonObject)["error"]?.let { (it as JsonPrimitive).content } }.getOrNull() ?: "서버 오류 ${response.status.value}"
+    }
 
     override suspend fun media(id: String): ByteArray? {
         val response = http.get("$baseUrl/api/media/$id") { bearerAuth(token) }
