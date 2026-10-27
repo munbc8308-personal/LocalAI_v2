@@ -61,6 +61,8 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
     suspend fun start() {
         if (active) return
         error = null
+        // 읽어 주기 모델을 미리 올린다: 처음 한 번은 모델을 올리느라 10초쯤 걸린다 (M37). 결과 소리는 버린다
+        scope.launch { runCatching { MediaApi.speech("네.") }.getOrNull()?.let { org.w3c.dom.url.URL.revokeObjectURL(it) } }
         val media = window.navigator.asDynamic().mediaDevices ?: throw IllegalStateException("이 브라우저(또는 HTTP 주소)에서는 마이크를 쓸 수 없습니다")
         val constraints = json("audio" to json("echoCancellation" to true, "noiseSuppression" to true, "autoGainControl" to true))
         val opened: dynamic = (media.getUserMedia(constraints) as kotlin.js.Promise<dynamic>).await()
