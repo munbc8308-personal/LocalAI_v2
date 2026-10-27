@@ -98,6 +98,52 @@ class Stt:
                 self.unload()
 
 
+class Tts:
+    """Qwen3-TTS(mlx-audio) 한국어 읽어 주기 (M37). 처음 부를 때 올리고, 오래 안 쓰면 내린다. 한 번에 하나만"""
+
+    SPEAKERS = {"serena", "vivian", "uncle_fu", "ryan", "aiden", "ono_anna", "sohee", "eric", "dylan"}
+
+    def __init__(self, model: str, idle: int):
+        self.model_name = model
+        self.idle = idle
+        self.lock = threading.Lock()
+        self.last_used = 0.0
+        self.model = None
+
+    def synthesize(self, text: str, speaker: str, language: str) -> bytes:
+        import io, wave
+        from mlx_audio.tts.utils import load_model
+        with self.lock:
+            if self.model is None:
+                self.model = load_model(self.model_name)
+                log.info("tts model loaded: %s", self.model_name)
+            self.last_used = time.time()
+            chunks = [np.array(r.audio) for r in self.model.generate_custom_voice(text=text, speaker=speaker, language=language)]
+            sr = self.model.sample_rate
+        audio = np.clip(np.concatenate(chunks), -1.0, 1.0) if chunks else np.zeros(1, dtype=np.float32)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((audio * 32767).astype("<i2").tobytes())
+        return buf.getvalue()
+
+    def unload(self):
+        with self.lock:
+            if self.model is None:
+                return
+            self.model = None
+            mx.clear_cache()
+            log.info("tts model unloaded")
+
+    def reaper(self):
+        while True:
+            time.sleep(30)
+            if self.model is not None and time.time() - self.last_used > self.idle:
+                self.unload()
+
+
 class Imager:
     """FLUX.1-schnell 이미지 생성. 한 번에 하나만 그린다"""
 
@@ -226,7 +272,7 @@ def load_token(path: str) -> str:
     return token
 
 
-def handler(stt: Stt, imager: Imager, token: str, port: int):
+def handler(stt: Stt, imager: Imager, token: str, port: int, tts: "Tts"):
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
@@ -275,7 +321,11 @@ def handler(stt: Stt, imager: Imager, token: str, port: int):
                     stt.unload()
                 if which in ("all", "image"):
                     imager.unload()
+                if which in ("all", "tts"):
+                    tts.unload()
                 return self.reply(200, {"ok": True})
+            if url.path == "/tts":
+                return self.speech()
             if url.path == "/image":
                 return self.image()
             if url.path != "/stt":
@@ -297,6 +347,31 @@ def handler(stt: Stt, imager: Imager, token: str, port: int):
             except Exception as e:
                 log.exception("stt failed")
                 self.reply(500, {"error": str(e)})
+
+        def speech(self):
+            """{"text","speaker","language"} → audio/wav (M37)"""
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 64_000:
+                return self.reply(413, {"error": "text too large or empty"})
+            try:
+                req = json.loads(self.rfile.read(length))
+                text = str(req["text"]).strip()[:2000]
+                speaker = str(req.get("speaker") or "sohee")
+                language = str(req.get("language") or "Korean")
+            except Exception as e:
+                return self.reply(400, {"error": f"bad request: {e}"})
+            if not text or speaker not in Tts.SPEAKERS or language not in ("Korean", "English", "Japanese", "Chinese", "auto"):
+                return self.reply(400, {"error": "bad text, speaker or language"})
+            try:
+                body = tts.synthesize(text, speaker, language)
+            except Exception as e:
+                log.exception("tts failed")
+                return self.reply(500, {"error": str(e)})
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def image(self):
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
@@ -345,6 +420,7 @@ def main():
     parser.add_argument("--image-dir", default="~/.vesta/models/flux1-schnell-4bit", help="양자화해 저장한 이미지 모델")
     parser.add_argument("--image-idle", type=int, default=600, help="이 초 동안 안 그리면 이미지 모델을 내린다")
     parser.add_argument("--image-bits", type=int, default=4)
+    parser.add_argument("--tts-model", default="mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     stt = Stt(args.stt_model, args.idle)
@@ -352,7 +428,9 @@ def main():
     imager = Imager(args.image_dir, args.image_idle, args.image_bits)
     threading.Thread(target=imager.reaper, daemon=True).start()
     token = load_token(args.token_file)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt, imager, token, args.port))
+    tts = Tts(args.tts_model, args.idle)
+    threading.Thread(target=tts.reaper, daemon=True).start()
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(stt, imager, token, args.port, tts))
     log.info("Vesta media worker on 127.0.0.1:%d (stt %s)", args.port, args.stt_model)
     server.serve_forever()
 

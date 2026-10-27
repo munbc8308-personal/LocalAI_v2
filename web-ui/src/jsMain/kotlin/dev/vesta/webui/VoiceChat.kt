@@ -26,7 +26,7 @@ enum class VoicePhase { OFF, LISTENING, HEARING, THINKING, SPEAKING }
  * - 마이크 소리를 직접 받아(ScriptProcessor) 말이 시작·끝나는 때를 소리 크기로 찾는다 (주변 소음에 맞춰 기준을 올린다)
  * - 말이 끝나면(0.9초 조용) 16kHz WAV로 만들어 `/api/stt`로 보내고, 인식한 글을 바로 질문으로 보낸다
  * - 답이 오는 대로 문장 단위로 `/api/speech`에 맡겨 순서대로 읽는다 (다음 문장은 읽는 동안 미리 만든다)
- * - 생각·읽는 동안에는 마이크 소리를 쓰지 않는다 (스피커 소리를 다시 알아듣지 않게). 읽는 중 누르면 끊고 다시 듣는다
+ * - 생각하는 동안에는 마이크 소리를 쓰지 않는다. 읽는 동안에는 들으며, 사용자가 말하면 바로 끊고 그 말부터 받는다 (M37 끼어들기). 눌러도 끊는다
  * 마이크는 HTTPS(Tailscale)나 localhost에서만 열린다
  */
 class VoiceConversation(private val scope: CoroutineScope, private val chat: ChatController) {
@@ -46,6 +46,8 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
     private val utterance = mutableListOf<FloatArray>()
     private val preRoll = ArrayDeque<FloatArray>()
     private var noise = 0.01
+    /** 읽는 중 사용자 목소리가 이어진 시간 (끼어들기) */
+    private var bargeMs = 0.0
     private var speechMs = 0.0
     private var silenceMs = 0.0
     private var totalMs = 0.0
@@ -117,9 +119,25 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
         for (v in frame) sum += v * v
         val rms = sqrt(sum / maxOf(1, length))
         level = minOf(1.0, rms * 8)
-        if (phase != VoicePhase.LISTENING && phase != VoicePhase.HEARING) return
         val ms = length / sampleRate * 1000
         val threshold = maxOf(MIN_THRESHOLD, noise * 3)
+        // 끼어들기 (M37 RV-05): 읽는 중에도 듣는다. 스피커 소리는 브라우저 에코 제거가 빼지만 남을 수 있어 기준을 높이고, 잠깐 이어질 때만 끊는다.
+        // 끊은 뒤에는 그동안 들은 소리부터 이어서 받는다 (첫 말을 잃지 않게)
+        if (phase == VoicePhase.SPEAKING) {
+            preRoll.addLast(frame)
+            while (preRoll.size > BARGE_FRAMES) preRoll.removeFirst()
+            bargeMs = if (rms > threshold * BARGE_FACTOR) bargeMs + ms else 0.0
+            if (bargeMs >= BARGE_MS) {
+                val heard = preRoll.toList()
+                interrupt()
+                utterance.addAll(heard)
+                speechMs = bargeMs; silenceMs = 0.0; totalMs = bargeMs
+                bargeMs = 0.0
+                phase = VoicePhase.HEARING
+            }
+            return
+        }
+        if (phase != VoicePhase.LISTENING && phase != VoicePhase.HEARING) return
         when (phase) {
             VoicePhase.LISTENING -> if (rms > threshold) {
                 utterance.addAll(preRoll)
@@ -213,7 +231,11 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
         const val TARGET_RATE = 16_000
         const val MIN_THRESHOLD = 0.012
         const val PRE_ROLL_FRAMES = 2
-        const val END_SILENCE_MS = 900.0
+        const val END_SILENCE_MS = 700.0
+        /** 끼어들기: 평소 기준의 몇 배 소리가 얼마나 이어져야 끊는지, 그때 앞 소리 몇 조각을 살리는지 */
+        const val BARGE_FACTOR = 2.5
+        const val BARGE_MS = 250.0
+        const val BARGE_FRAMES = 6
         const val MIN_SPEECH_MS = 300.0
         const val MAX_UTTERANCE_MS = 30_000.0
     }

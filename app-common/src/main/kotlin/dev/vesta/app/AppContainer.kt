@@ -116,9 +116,15 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val videoProjects = dev.vesta.storage.ExposedVideoProjectRepository(database.db)
     /** 영상 합성 (M24 G-02): ffmpeg가 있으면 */
     val videoComposer: dev.vesta.core.media.VideoComposer? = ffmpeg.takeIf { dev.vesta.media.Ffmpeg.available(config.media.ffmpeg) }?.let { dev.vesta.media.FfmpegVideoComposer(it) }
-    /** 읽어 주기: macOS say (models.tts, engine: say) */
-    val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.takeIf { it.engine == "say" }
-        ?.let { dev.vesta.media.SayTextToSpeech(it.name, ffmpeg, config.media.ttsMaxChars) }
+    /** 읽어 주기: macOS say (models.tts, engine: say) 또는 Qwen3-TTS (engine: mlx-audio, M37) */
+    val textToSpeech: dev.vesta.core.media.TextToSpeech? = config.models.tts?.let { tts ->
+        when {
+            tts.engine == "say" -> dev.vesta.media.SayTextToSpeech(tts.name, ffmpeg, config.media.ttsMaxChars)
+            // Qwen3-TTS (M37): 미디어 워커(models.stt의 주소)에서. name은 화자
+            tts.engine == "mlx-audio" -> (tts.baseUrl ?: config.models.stt?.baseUrl)?.let { dev.vesta.media.WorkerTextToSpeech(it, http, ffmpeg, tts.name, config.media.ttsMaxChars) }
+            else -> null
+        }
+    }
     /** 이어 말하기 (models.tts가 say일 때, 도우미가 있으면, M19) */
     val streamingSpeech: dev.vesta.core.media.StreamingSpeech? = config.models.tts?.takeIf { it.engine == "say" }?.let { tts ->
         java.nio.file.Path.of(config.media.speakBinary.replaceFirst(Regex("^~"), System.getProperty("user.home")))
