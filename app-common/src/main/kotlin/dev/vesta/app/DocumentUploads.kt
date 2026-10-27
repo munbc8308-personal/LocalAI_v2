@@ -57,14 +57,16 @@ class DocumentUploads(
     suspend fun documents(user: UserContext, collectionName: String): List<String>? {
         if (refuse(user) != null) return null
         val (_, folder) = target(user, collectionName) ?: return null
-        return Files.list(folder).use { s -> s.filter { Files.isRegularFile(it) && !it.fileName.toString().startsWith(".") }.map { it.fileName.toString() }.sorted().toList() }
+        return Files.list(folder).use { s -> s.filter { Files.isRegularFile(it, java.nio.file.LinkOption.NOFOLLOW_LINKS) && !it.fileName.toString().startsWith(".") }.map { it.fileName.toString() }.sorted().toList() }
     }
 
     /** 문서 하나를 지운다(색인에서도). 문제가 있으면 그 이유 */
     suspend fun deleteDocument(user: UserContext, collectionName: String, fileName: String): String? {
         val (collection, folder) = target(user, collectionName) ?: return "컬렉션이 없습니다: $collectionName"
         val file = safeName(fileName) ?: return "없는 문서입니다"
-        if (!Files.deleteIfExists(folder.resolve(file))) return "없는 문서입니다"
+        val target = folder.resolve(file)
+        if (Files.isSymbolicLink(target) || !Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return "없는 문서입니다"
+        Files.delete(target)
         reindex(collection, folder)
         return null
     }
@@ -73,7 +75,9 @@ class DocumentUploads(
     suspend fun deleteCollection(user: UserContext, collectionName: String): Boolean {
         if (refuse(user) != null) return false
         val collection = knowledge.findCollection(user.userId, collectionName)?.takeIf { it.kind == CollectionKind.DOCS } ?: return false
-        folderOf(user, collectionName)?.takeIf { Files.isDirectory(it) }?.let { dir -> Files.walk(dir).use { s -> s.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
+        // 링크를 따라가지 않고 지운다 (Files.walk는 기본으로 링크를 따라가지 않는다). 폴더가 밖을 가리키면 파일은 건드리지 않는다
+        folderOf(user, collectionName)?.takeIf { Files.isDirectory(it, java.nio.file.LinkOption.NOFOLLOW_LINKS) && contained(it) }
+            ?.let { dir -> Files.walk(dir).use { s -> s.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
         return knowledge.deleteCollection(user.userId, collection.id)
     }
 
@@ -84,6 +88,8 @@ class DocumentUploads(
         val collection = knowledge.findCollection(user.userId, name)?.takeIf { it.kind == CollectionKind.DOCS } ?: return null
         val folder = folderOf(user, name) ?: return null
         Files.createDirectories(folder)
+        // 경로 중간이나 폴더가 심볼릭 링크면 밖(남의 폴더)을 가리킬 수 있다: 실제 경로가 root 안이고 링크가 없을 때만 (보안 검토)
+        if (!contained(folder)) return null
         return collection to folder
     }
 
@@ -94,10 +100,27 @@ class DocumentUploads(
         return folder.takeIf { NAME.matches(name) && it.startsWith(root) }
     }
 
-    /** 같은 컬렉션의 색인은 차례로 (올리기가 몰려도 겹치지 않게) */
+    /** [folder]가 root 아래 실제 폴더이고, root부터 그 사이에 심볼릭 링크가 없는지 */
+    private fun contained(folder: Path): Boolean {
+        val realRoot = root.toRealPath()
+        if (!folder.toRealPath().startsWith(realRoot)) return false
+        var p = folder
+        while (p.startsWith(root) && p != root) {
+            if (Files.isSymbolicLink(p)) return false
+            p = p.parent ?: break
+        }
+        return true
+    }
+
+    /** 같은 컬렉션의 색인은 차례로 (올리기가 몰려도 겹치지 않게). 올린 폴더에는 보통 파일만 있어야 한다: 링크·하위 폴더가 있으면 색인하지 않는다 (보안 검토) */
     private fun reindex(collection: Collection, folder: Path) {
         scope.launch {
             locks.getOrPut(collection.id.value) { Mutex() }.withLock {
+                val odd = Files.list(folder).use { s -> s.filter { Files.isSymbolicLink(it) || !Files.isRegularFile(it, java.nio.file.LinkOption.NOFOLLOW_LINKS) }.toList() }
+                if (odd.isNotEmpty() || !contained(folder)) {
+                    log.warn { "웹에서 올린 문서 폴더에 링크·폴더가 있어 색인하지 않음: ${collection.name} ${odd.map { it.fileName }}" }
+                    return@withLock
+                }
                 runCatching { index(collection, folder) }.onFailure { log.warn(it) { "웹에서 올린 문서 색인 실패: ${collection.name}" } }
             }
         }

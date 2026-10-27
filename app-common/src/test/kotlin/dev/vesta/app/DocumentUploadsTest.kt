@@ -51,4 +51,33 @@ class DocumentUploadsTest : FunSpec({
         Files.exists(root.resolve("mina/collections/우리집")) shouldBe false
         knowledge.findCollection(owner, "우리집") shouldBe null
     }
+
+    test("링크로 밖을 가리키는 폴더·파일은 쓰지도 색인하지도 않는다 (보안 검토)") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("mina")
+        val knowledge = KnowledgeRepository(db.db)
+        val root = createTempDirectory("users").toRealPath()
+        val secret = createTempDirectory("other").toRealPath().also { Files.writeString(it.resolve("secret.md"), "비밀") }
+        val indexed = mutableListOf<String>()
+        val uploads = DocumentUploads(knowledge, { c, _ -> indexed += c.name }, { "m" }, { "mina" }, root, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+        val mina = UserContext(owner, UserRole.MEMBER)
+        uploads.create(mina, "a", null) shouldBe null
+        uploads.create(mina, "b", null) shouldBe null
+        // 컬렉션 폴더 자체가 밖을 가리키는 링크
+        Files.createDirectories(root.resolve("mina/collections"))
+        Files.createSymbolicLink(root.resolve("mina/collections/a"), secret)
+        uploads.upload(mina, "a", "x.md", "x".toByteArray())!! shouldContain "컬렉션이 없습니다"
+        uploads.documents(mina, "a") shouldBe null
+        uploads.deleteCollection(mina, "a")
+        Files.exists(secret.resolve("secret.md")) shouldBe true
+        // 폴더 안에 밖을 가리키는 파일 링크: 목록에 안 보이고, 색인하지 않는다
+        uploads.documents(mina, "b") shouldBe emptyList()
+        Files.createSymbolicLink(root.resolve("mina/collections/b/leak.md"), secret.resolve("secret.md"))
+        uploads.documents(mina, "b") shouldBe emptyList()
+        uploads.upload(mina, "b", "ok.md", "x".toByteArray()) shouldBe null
+        delay(300)
+        indexed shouldBe emptyList()
+        uploads.deleteDocument(mina, "b", "leak.md")!! shouldContain "없는 문서"
+        Files.exists(secret.resolve("secret.md")) shouldBe true
+    }
 })
