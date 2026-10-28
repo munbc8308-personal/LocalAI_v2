@@ -12,7 +12,11 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
 /** 실행 소식 하나: 새 단계, 또는 끝난 실행 (화면에 바로 흘린다) */
-data class RunUpdate(val run: Long, val user: UserId, val event: RunEvent? = null, val finished: AgentRun? = null)
+data class RunUpdate(
+    val run: Long, val user: UserId, val event: RunEvent? = null, val finished: AgentRun? = null,
+    /** 담당이 정해질 때 (M38 OF-07): 에이전트(팀이면 TEAM)·사용자 정의 이름·스킬 */
+    val agent: String? = null, val customAgent: String? = null, val skill: String? = null,
+)
 
 /**
  * 실행 기록 (PROJECT.md A-12·A-13, M22). AgentEvent를 사람이 읽는 단계로 바꿔 저장하고 [updates]로 흘린다.
@@ -49,7 +53,9 @@ class StudioJournal(private val runs: RunRepository) : RunJournal {
         val (kind, title, detail) = describe(event) ?: return
         if (event is AgentEvent.Routed) runs.setAgent(run, if (event.decision.team) TEAM else event.decision.agent.name, event.decision.customAgent)
         val saved = runs.add(run, kind, title, detail)
-        flow.tryEmit(RunUpdate(run, owners[run] ?: return, saved))
+        val routed = (event as? AgentEvent.Routed)?.decision
+        flow.tryEmit(RunUpdate(run, owners[run] ?: return, saved,
+            agent = routed?.let { if (it.team) TEAM else it.agent.name }, customAgent = routed?.customAgent, skill = routed?.skill))
     }
 
     override suspend fun finish(run: Long, status: RunStatus, answer: String?) {

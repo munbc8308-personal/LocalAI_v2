@@ -720,7 +720,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                             try {
                                 studio.updates.collect { update ->
                                     if (update.user != user.userId) return@collect
-                                    val dto = dev.vesta.api.RunUpdateDto(update.finished?.dto(), update.event?.dto())
+                                    val dto = dev.vesta.api.RunUpdateDto(update.finished?.dto(), update.event?.dto(), update.agent, update.customAgent, update.skill)
                                     emit(ApiJson.encodeToString(dev.vesta.api.RunUpdateDto.serializer(), dto))
                                 }
                             } finally {

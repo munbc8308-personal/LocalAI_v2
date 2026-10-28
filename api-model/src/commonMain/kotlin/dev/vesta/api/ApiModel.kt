@@ -502,7 +502,11 @@ data class RunDetailDto(val run: RunDto, val events: List<RunEventDto>, val answ
 
 /** 실시간 소식 (`GET /api/runs/stream`, SSE): 새 단계([event]) 또는 실행 상태([run]) */
 @Serializable
-data class RunUpdateDto(val run: RunDto? = null, val event: RunEventDto? = null)
+data class RunUpdateDto(
+    val run: RunDto? = null, val event: RunEventDto? = null,
+    /** 담당이 정해질 때 (사무실 화면, M38 OF-07) */
+    val agent: String? = null, val customAgent: String? = null, val skill: String? = null,
+)
 
 /** 예약 작업 (`/api/schedules`, M29). [number]는 `/schedule rm 번호`의 번호, [when]은 사람 말 */
 @Serializable
