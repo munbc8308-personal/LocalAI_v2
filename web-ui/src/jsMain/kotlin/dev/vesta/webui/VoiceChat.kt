@@ -93,7 +93,9 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
 
     private fun openSocket() {
         val proto = if (window.location.protocol == "https:") "wss:" else "ws:"
-        val query = chat.sessionId?.let { "?session=" + js("encodeURIComponent")(it) as String }.orEmpty()
+        // 쿠키로 여는 웹소켓은 CSRF 값을 쿼리로 함께 보낸다 (서버가 확인)
+        val query = "?csrf=" + (js("encodeURIComponent")(Http.csrf.orEmpty()) as String) +
+            chat.sessionId?.let { "&session=" + js("encodeURIComponent")(it) as String }.orEmpty()
         val ws: dynamic = js("new WebSocket(proto + '//' + window.location.host + '/api/voice' + query)")
         ws.binaryType = "arraybuffer"
         ws.onmessage = { e: dynamic -> if (e.data is String) onEvent(e.data as String) else enqueue(e.data) }

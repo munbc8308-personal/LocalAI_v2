@@ -16,6 +16,7 @@ dependencies {
     runtimeOnly(libs.logback.classic)
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.ktor.client.mock)
+    testImplementation(libs.ktor.client.websockets)
     testImplementation(testFixtures(project(":channel-core")))
 }
 

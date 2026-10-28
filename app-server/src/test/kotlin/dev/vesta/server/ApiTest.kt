@@ -25,6 +25,7 @@ import io.kotest.matchers.string.shouldNotContain
 import dev.vesta.identity.PasswordHasher
 import dev.vesta.storage.VestaDatabase
 import dev.vesta.storage.WebAuthRepository
+import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.header
@@ -142,6 +143,25 @@ class ApiTest : FunSpec({
         kotlinx.coroutines.runBlocking { repo.setPasswordHash(owner, PasswordHasher.hash("correct horse")) }
         return ServerDeps(conversation, NoSessions, NoMessages, UserContext(owner, UserRole.OWNER), token = "secret", version = "t", auth = WebAuth(repo))
     }
+
+    test("음성 웹소켓: 쿠키로 열면 CSRF 값·같은 주소가 있어야 한다 (M37 보안 검토)") { testApplication {
+        application { vestaApi(webDeps()) }
+        val login = client.post("/api/login") { setBody("""{"password":"correct horse"}""") }
+        val cookie = "Cookie" to login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText()).csrf
+        val ws = createClient { install(io.ktor.client.plugins.websocket.WebSockets) }
+        suspend fun reason(path: String, vararg headers: Pair<String, String>): String? {
+            var closed: String? = "열림"
+            ws.webSocket(path, request = { headers.forEach { (k, v) -> header(k, v) } }) { closed = closeReason.await()?.message }
+            return closed
+        }
+        val origin = "Origin" to "http://localhost"
+        reason("/api/voice", cookie, origin) shouldBe "로그인이 필요합니다"
+        reason("/api/voice?csrf=x$csrf", cookie, origin) shouldBe "로그인이 필요합니다"
+        reason("/api/voice?csrf=$csrf", cookie, "Origin" to "https://evil.example") shouldBe "로그인이 필요합니다"
+        // 맞으면 열리고, 이 시험 서버에는 음성 인식이 없어 그 이유로 닫힌다
+        reason("/api/voice?csrf=$csrf", cookie, origin) shouldBe "음성 인식·읽어 주기가 설정돼 있지 않습니다"
+    } }
 
     test("웹 로그인: 쿠키로 조회하고, POST는 CSRF 헤더가 있어야 한다") { testApplication {
         val deps = webDeps()

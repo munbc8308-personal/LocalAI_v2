@@ -68,6 +68,7 @@ import io.ktor.server.request.host
 import io.ktor.server.websocket.pingPeriod
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.close
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.onEach
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
@@ -935,7 +936,8 @@ fun Application.vestaApi(deps: ServerDeps) {
                 webSocket {
                     // 열 때 로그인·Origin 확인 (응답을 보낼 수 없으니 실패하면 닫는다). 브라우저면 Origin이 이 주소와 같아야 한다(쿠키로 남의 사이트가 열지 못하게)
                     val origin = call.request.header(HttpHeaders.Origin)
-                    val user = call.voiceUser(deps)
+                    val auth = call.voiceUser(deps)
+                    val user = auth?.first
                     val sameOrigin = if (origin == null) call.request.header(HttpHeaders.Authorization) != null else runCatching { java.net.URI(origin).host }.getOrNull() == call.request.host()
                     if (user == null || !sameOrigin) {
                         close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY, "로그인이 필요합니다"))
@@ -952,8 +954,17 @@ fun Application.vestaApi(deps: ServerDeps) {
                         this,
                         transcribe = { wav -> stt.transcribe(wav, "ko") },
                         answer = { question ->
-                            deps.conversation.send(user, ChannelType.WEB, session, UserInput(question, spoken = true))
-                                .onEach { if (it is dev.vesta.core.agent.AgentEvent.SessionReady) session = it.sessionId }
+                            // 차례마다 로그인이 아직 살아 있는지 다시 본다(로그아웃·비밀번호 변경·사용자 삭제 뒤 열려 있던 연결로 계속 쓰지 못하게, 보안 검토)
+                            kotlinx.coroutines.flow.flow {
+                                val token = auth.second
+                                val alive = token == null || deps.auth?.session(token)?.let { deps.publicMismatchFor(call, it.user) == null } == true
+                                if (!alive) {
+                                    close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY, "로그인이 끝났습니다"))
+                                    return@flow
+                                }
+                                emitAll(deps.conversation.send(user, ChannelType.WEB, session, UserInput(question, spoken = true))
+                                    .onEach { if (it is dev.vesta.core.agent.AgentEvent.SessionReady) session = it.sessionId })
+                            }
                         },
                         speak = { text -> dev.vesta.media.SpeechText.prepare(text, 1_500).takeIf { it.isNotBlank() }?.let { tts.synthesize(it, dev.vesta.core.media.AudioFormat.M4A) } },
                         sendText = { outgoing.send(io.ktor.websocket.Frame.Text(it)) },
@@ -1223,13 +1234,22 @@ private class PublicRequest(val email: String?, val ip: String)
 private val PUBLIC_REQUEST = io.ktor.util.AttributeKey<PublicRequest>("vesta-public")
 internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
 
-/** 음성 웹소켓을 연 사용자 (M37). [principal]과 같은 확인이지만 응답을 보내지 않는다 (웹소켓은 열린 뒤라) */
-private suspend fun ApplicationCall.voiceUser(deps: ServerDeps): UserContext? {
-    if (request.header(HttpHeaders.Authorization) != null) return if (bearer(deps.token)) deps.owner else null
-    val session = request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) } ?: return null
+/**
+ * 음성 웹소켓을 연 사용자와 (쿠키면) 세션 토큰 (M37). [principal]과 같은 확인이지만 응답을 보내지 않는다(웹소켓은 열린 뒤라).
+ * 쿠키로 열면 CSRF 값도 쿼리 `csrf`로 받아야 한다: 브라우저는 웹소켓에 헤더를 못 붙이고, 남의 사이트는 이 값을 모른다 (보안 검토)
+ */
+private suspend fun ApplicationCall.voiceUser(deps: ServerDeps): Pair<UserContext, String?>? {
+    if (request.header(HttpHeaders.Authorization) != null) return if (bearer(deps.token)) deps.owner to null else null
+    val token = request.cookies[SESSION_COOKIE] ?: return null
+    val session = deps.auth?.session(token) ?: return null
     if (publicMismatch(deps, session.user) != null) return null
-    return session.user
+    val given = request.queryParameters["csrf"].orEmpty()
+    if (!MessageDigest.isEqual(given.toByteArray(), session.csrf.toByteArray())) return null
+    return session.user to token
 }
+
+/** [publicMismatch]를 웹소켓 안에서 다시 부를 때 */
+private suspend fun ServerDeps.publicMismatchFor(call: ApplicationCall, user: UserContext): String? = call.publicMismatch(this, user)
 
 /**
  * 바깥 요청의 IP. 입구는 127.0.0.1에만 열려 앞단(cloudflared·Caddy)만 붙는다. 그 모드의 앞단이 직접 적는 헤더 하나만 믿는다:
