@@ -29,10 +29,10 @@ import kotlin.math.sin
  * 여러 실행이 동시에 돌면 직원도 동시에 여럿. 팀 리더가 맡기면 멤버 직원이 생겨 편지가 오간다. 그림은 모두 코드로 그린다(픽셀 직원·가구)
  */
 @Composable
-fun OfficeView(onOpenSession: (String) -> Unit) {
+fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var info by remember { mutableStateOf("지금 일하는 직원이 없습니다. 대화나 에이전트에 일을 맡기면 들어옵니다.") }
-    val office = remember { Office { count -> info = if (count == 0) "지금 일하는 직원이 없습니다. 대화나 에이전트에 일을 맡기면 들어옵니다." else "일하는 직원 ${count}명 · 직원을 누르면 그 대화로" } }
+    val office = remember { Office(userName) { count -> info = if (count == 0) "지금 일하는 직원이 없습니다. 대화나 에이전트에 일을 맡기면 들어옵니다." else "일하는 직원 ${count}명 · 직원을 누르면 그 대화로" } }
     Div({ classes("page") }) {
         H2 { Text("사무실") }
         P({ classes("muted", "small") }) { Text(info) }
@@ -63,7 +63,7 @@ fun OfficeView(onOpenSession: (String) -> Unit) {
 }
 
 /** 사무실 상태와 그리기. Compose 상태 대신 매 프레임 직접 그린다 (직원이 많아도 가볍게) */
-private class Office(private val onCount: (Int) -> Unit) {
+private class Office(private val userName: String, private val onCount: (Int) -> Unit) {
     private class Station(val key: String, val col: Double, val row: Double, val icon: String, val label: String)
     private class Envelope(var x: Double, var y: Double, val tx: Double, val ty: Double)
 
@@ -78,6 +78,12 @@ private class Office(private val onCount: (Int) -> Unit) {
         var member = false
         var parent: Long? = null
         var phase = 0.0
+        /** 끝나면 사용자에게 보고할 말 (답 첫 줄) */
+        var report: String? = null
+        var reporting = false
+        var reportLeft = 0.0
+        /** 같은 에이전트가 동시에 여럿이면 2, 3… */
+        var nth = 1
     }
 
     private val stations = listOf(
@@ -89,6 +95,7 @@ private class Office(private val onCount: (Int) -> Unit) {
         Station("easel", 11.6, 1.2, "🎨", "이젤"),
         Station("phone", 14.0, 1.2, "📞", "전화"),
         Station("mail", 14.6, 8.4, "📮", "우편함"),
+        Station("boss", 8.0, 8.6, "", ""),
     ).associateBy { it.key }
     /** 책상 자리 (칸 단위) */
     private val desks = (0 until 12).map { i -> (2.6 + (i % 6) * 2.1) to (4.0 + (i / 6) * 2.4) }
@@ -123,6 +130,7 @@ private class Office(private val onCount: (Int) -> Unit) {
         if (workers.containsKey(run)) return
         val door = stations.getValue("door")
         val w = Worker(run, agent, name, door.col, door.row)
+        w.nth = renumber(agent, name)
         w.desk = freeDesk()
         desks.getOrNull(w.desk)?.let { (c, r) -> w.tx = c; w.ty = r; if (atDesk) { w.x = c; w.y = r } }
         workers[run] = w
@@ -141,6 +149,7 @@ private class Office(private val onCount: (Int) -> Unit) {
                     leader.agent = u.agent ?: leader.agent
                     leader.name = u.customAgent
                     leader.skill = u.skill
+                    leader.nth = renumber(leader.agent, leader.name, except = leader.run)
                 }
                 "status" -> actor.bubble = e.title
                 "tool_started" -> {
@@ -167,7 +176,9 @@ private class Office(private val onCount: (Int) -> Unit) {
                     back(leader)
                     leader.bubble = e.title
                 }
-                "done", "answer", "error" -> leader.bubble = if (e.kind == "error") "오류" else "끝"
+                "answer" -> leader.report = e.title
+                "error" -> leader.report = "오류가 났어요"
+                "done" -> leader.bubble = "보고하러 가요"
             }
             if (e.kind != "approval" && e.kind != "status") actor.approval = false
         }
@@ -179,7 +190,7 @@ private class Office(private val onCount: (Int) -> Unit) {
             if (w != null) {
                 w.agent = r.agent
                 w.name = r.customAgent ?: w.name
-                if (r.status != "RUNNING") leave(w)
+                if (r.status != "RUNNING") report(w)
             }
         }
     }
@@ -209,6 +220,20 @@ private class Office(private val onCount: (Int) -> Unit) {
         desks.getOrNull(w.desk)?.let { (c, r) -> w.tx = c; w.ty = r }
     }
 
+    /** 사용자 책상 앞으로 가서 보고한 뒤 나간다 (멤버는 리더에게 편지로 보고했으니 바로) */
+    private fun report(w: Worker) {
+        if (w.member || w.reporting || w.leaving) { if (w.member) leave(w); return }
+        w.reporting = true
+        w.approval = false
+        val boss = stations.getValue("boss")
+        w.tx = boss.col + ((w.run % 3) - 1) * 0.9; w.ty = boss.row - 1.3
+        w.reportLeft = REPORT_SECONDS
+    }
+
+    /** 같은 이름으로 지금 있는 직원 수 + 1 */
+    private fun renumber(agent: String, name: String?, except: Long? = null): Int =
+        workers.values.count { it.run != except && !it.leaving && it.agent == agent && it.name == name } + 1
+
     private fun leave(w: Worker) {
         w.leaving = true
         w.approval = false
@@ -236,6 +261,11 @@ private class Office(private val onCount: (Int) -> Unit) {
             if (abs(dx) > 0.02) w.x += dx.coerceIn(-speed, speed) else if (abs(dy) > 0.02) w.y += dy.coerceIn(-speed, speed)
             w.phase = if (moving) w.phase + dt * 10 else 0.0
             if (w.leaving && !moving) gone += w.run
+            if (w.reporting && !moving) {
+                w.bubble = "보고: " + (w.report ?: "끝났어요")
+                w.reportLeft -= dt
+                if (w.reportLeft <= 0) { w.reporting = false; leave(w) }
+            }
         }
         if (gone.isNotEmpty()) { gone.forEach { workers.remove(it) }; onCount(workers.values.count { !it.member }) }
         envelopes.removeAll { e ->
@@ -265,7 +295,7 @@ private class Office(private val onCount: (Int) -> Unit) {
         g.fillStyle = "#2b2838"; g.fillRect(0.0, 2 * tile - 4, width, 4.0)
         // 자리
         g.asDynamic().textAlign = "center"
-        for (s in stations.values) {
+        for (s in stations.values.filter { it.icon.isNotEmpty() }) {
             g.fillStyle = "rgba(0,0,0,0.12)"
             g.fillRect((s.col - 0.6) * tile, (s.row - 0.5) * tile, tile * 1.2, tile * 1.1)
             g.font = "${(tile * 0.6).toInt()}px sans-serif"
@@ -274,42 +304,133 @@ private class Office(private val onCount: (Int) -> Unit) {
             g.font = "${(tile * 0.24).toInt()}px sans-serif"; g.fillStyle = if (s.row < 2) "#eee" else "#555"
             g.fillText(s.label, s.col * tile, (s.row + 0.62) * tile)
         }
+        // 사용자 책상과 사용자
+        val boss = stations.getValue("boss")
+        drawPerson(g, boss.col, boss.row - 0.35, "USER", 0.0, t, 99)
+        g.fillStyle = "#6b4a2e"; g.fillRect((boss.col - 1.3) * tile, (boss.row - 0.1) * tile, tile * 2.6, tile * 0.6)
+        g.fillStyle = "#c9a227"; g.fillRect((boss.col - 1.3) * tile, (boss.row - 0.1) * tile, tile * 2.6, tile * 0.08)
+        g.font = "${(tile * 0.24).toInt()}px sans-serif"; g.fillStyle = "#fff"
+        g.fillText("$userName (나)", boss.col * tile, (boss.row + 0.33) * tile)
+        workers.values.any { it.reporting && abs(it.ty - it.y) < 0.05 && abs(it.tx - it.x) < 0.05 }.takeIf { it }?.let { pill(g, "👍", boss.col * tile, (boss.row - 1.15) * tile, "#fff", "#333") }
         // 직원 (아래쪽이 앞에 오게), 책상은 앉은 직원 앞에 그린다
-        for (w in workers.values.sortedBy { it.y }) drawWorker(g, w, t)
+        // 앉은 직원은 책상 뒤에, 걸어다니는·보고하는 직원은 책상 앞에
+        val (seated, walking) = workers.values.sortedBy { it.y }.partition { w -> desks.getOrNull(w.desk)?.let { (c0, r0) -> abs(w.x - c0) < 0.05 && abs(w.y - r0) < 0.05 } == true }
+        seated.forEach { drawWorker(g, it, t) }
         for ((c0, r0) in desks) {
             g.fillStyle = "#2f3542"; g.fillRect((c0 + 0.15) * tile, (r0 - 0.05) * tile, tile * 0.45, tile * 0.32)
             g.fillStyle = "#9b6b43"; g.fillRect((c0 - 0.7) * tile, (r0 + 0.25) * tile, tile * 1.4, tile * 0.45)
         }
-        // 앉은 직원 이름표는 책상 위에 보이게
-        g.font = "${(tile * 0.22).toInt()}px sans-serif"; g.fillStyle = "#fff"
-        for (w in workers.values) desks.getOrNull(w.desk)?.let { (c0, r0) -> if (abs(w.x - c0) < 0.05 && abs(w.y - r0) < 0.05) g.fillText((w.name ?: label(w.agent)).take(10), c0 * tile, (r0 + 0.58) * tile) }
+        walking.forEach { drawWorker(g, it, t) }
         // 편지
         g.font = "${(tile * 0.45).toInt()}px sans-serif"
         for (e in envelopes) g.fillText("✉️", e.x * tile, e.y * tile)
     }
 
     private fun drawWorker(g: CanvasRenderingContext2D, w: Worker, t: Double) {
-        val px = tile / 10
-        val x = w.x * tile
-        val bob = if (w.phase > 0) sin(w.phase) * px * 0.6 else sin(t * 2 + w.run) * px * 0.2
-        val y = w.y * tile - tile * 0.2 + bob
-        fun box(dx: Double, dy: Double, ww: Double, hh: Double, color: String) { g.fillStyle = color; g.fillRect(x + dx * px, y + dy * px, ww * px, hh * px) }
-        val body = color(w.agent)
-        val step = if (w.phase > 0 && sin(w.phase * 2) > 0) 1.0 else 0.0
-        box(-2.0, 3.0, 1.6, 2.5 + step, "#333")             // 다리
-        box(0.4, 3.0, 1.6, 3.5 - step, "#333")
-        box(-3.0, -2.0, 6.0, 5.2, body)                      // 몸
-        box(-2.5, -6.5, 5.0, 4.6, "#f1c9a5")                 // 얼굴
-        box(-2.8, -7.3, 5.6, 1.8, hair(w.agent))             // 머리
-        box(-1.4, -4.8, 0.8, 0.8, "#222"); box(0.6, -4.8, 0.8, 0.8, "#222")
-        // 이름표
-        g.font = "${(tile * 0.22).toInt()}px sans-serif"; g.fillStyle = "#333"
-        g.fillText((w.name ?: label(w.agent)).take(10), x, y + 7.8 * px)
-        // 스킬 배지
-        w.skill?.let { s -> pill(g, "/$s", x, y - 10.5 * px, "#5b4bd6", "#fff") }
-        // 말풍선·승인
-        if (w.approval) pill(g, "! 승인 필요", x, y - 8.5 * px, "#e5484d", "#fff")
-        else w.bubble?.takeIf { it.isNotBlank() }?.let { pill(g, it.take(18) + if (it.length > 18) "…" else "", x, y - 8.5 * px, "#fff", "#333") }
+        val px = tile / 12
+        val y = drawPerson(g, w.x, w.y - 0.25, w.agent, w.phase, t, w.run, w.name)
+        // 이름: 페르소나 이름 · 역할 (사용자 정의 에이전트는 그 이름)
+        val title = displayName(w)
+        g.font = "${(tile * 0.21).toInt()}px sans-serif"
+        g.fillStyle = "rgba(255,255,255,0.85)"
+        val tw = g.measureText(title).width + 6
+        g.fillRect(w.x * tile - tw / 2, y - 4.2 * px, tw, tile * 0.26)
+        g.fillStyle = "#222"; g.fillText(title, w.x * tile, y - 4.2 * px + tile * 0.2)
+        // 이웃끼리 말풍선이 겹치지 않게 번갈아 높이를 바꾼다
+        val lift = if (w.desk % 2 == 1) tile * 0.42 else 0.0
+        w.skill?.let { s -> pill(g, "/$s", w.x * tile, y - 9.5 * px - lift, "#5b4bd6", "#fff") }
+        if (w.approval) pill(g, "! 승인 필요", w.x * tile, y - 4.8 * px - lift, "#e5484d", "#fff")
+        else w.bubble?.takeIf { it.isNotBlank() }?.let { b -> val n = if (w.reporting) 26 else 14; pill(g, b.take(n) + if (b.length > n) "…" else "", w.x * tile, y - 4.8 * px - lift, if (w.reporting) "#fff8d6" else "#fff", "#333") }
+    }
+
+    private fun displayName(w: Worker): String {
+        val base = w.name ?: "${persona(w.agent)} · ${label(w.agent)}"
+        return if (w.nth > 1) "$base ${w.nth}" else base
+    }
+
+    /**
+     * 픽셀 사람 하나 (12×18 칸). 역할마다 머리·모자·소품·옷이 다르다. 그린 머리 위 y를 돌려준다.
+     * [seed]로 사용자 정의 에이전트는 이름마다 색이 달라진다
+     */
+    private fun drawPerson(g: CanvasRenderingContext2D, cx: Double, cy: Double, agent: String, phase: Double, t: Double, seed: Long, name: String? = null): Double {
+        val px = tile / 12
+        val bob = if (phase > 0) sin(phase) * px * 0.7 else sin(t * 2 + seed) * px * 0.25
+        val x0 = cx * tile - 6 * px
+        val y0 = cy * tile - 12 * px + bob
+        fun r(x: Double, y: Double, w: Double, h: Double, c: String) { g.fillStyle = c; g.fillRect(x0 + x * px, y0 + y * px, w * px, h * px) }
+        val look = look(agent, name)
+        val step = if (phase > 0 && sin(phase * 2) > 0) 1.0 else 0.0
+        // 그림자
+        g.fillStyle = "rgba(0,0,0,0.15)"; g.fillRect(x0 + 2 * px, y0 + 17.2 * px, 8 * px, 1 * px)
+        // 다리·신발
+        r(3.5, 13.0, 2.0, 3.5 + step, look.pants); r(6.5, 13.0, 2.0, 4.5 - step, look.pants)
+        r(3.0, 16.5 + step, 2.8, 1.0, "#222"); r(6.2, 17.5 - step, 2.8, 1.0, "#222")
+        // 몸통·팔
+        r(2.5, 7.5, 7.0, 6.0, look.shirt)
+        r(1.3, 8.0, 1.3, 4.5, look.shirt); r(9.4, 8.0, 1.3, 4.5, look.shirt)
+        r(1.3, 12.3, 1.3, 1.0, SKIN); r(9.4, 12.3, 1.3, 1.0, SKIN)
+        when (look.outfit) {
+            "tie" -> { r(4.0, 7.5, 4.0, 1.2, "#fff"); r(5.5, 8.5, 1.0, 3.5, look.accent) }
+            "hoodie" -> { r(3.0, 7.0, 6.0, 1.3, look.accent); r(5.2, 8.3, 0.4, 2.0, "#ddd"); r(6.4, 8.3, 0.4, 2.0, "#ddd"); r(4.0, 11.0, 4.0, 1.5, look.accent) }
+            "vest" -> { r(2.5, 7.5, 2.0, 6.0, look.accent); r(7.5, 7.5, 2.0, 6.0, look.accent) }
+            "overall" -> { r(3.5, 9.5, 5.0, 4.0, look.accent); r(3.8, 7.5, 0.8, 2.2, look.accent); r(7.4, 7.5, 0.8, 2.2, look.accent) }
+            "apron" -> r(3.5, 9.0, 5.0, 4.6, look.accent)
+            "cardigan" -> { r(5.6, 7.5, 0.8, 6.0, look.accent); r(4.4, 9.0, 0.4, 0.4, "#fff"); r(4.4, 10.5, 0.4, 0.4, "#fff") }
+            "crown" -> { r(4.0, 7.5, 4.0, 1.0, look.accent) }
+        }
+        // 목·얼굴
+        r(5.0, 6.5, 2.0, 1.2, SKIN)
+        r(3.0, 1.5, 6.0, 5.3, SKIN)
+        r(4.2, 3.8, 0.9, 0.9, "#222"); r(6.9, 3.8, 0.9, 0.9, "#222")
+        r(5.3, 5.5, 1.4, 0.5, "#c0645a")
+        r(3.6, 4.9, 0.7, 0.4, "#f3a9a0"); r(7.7, 4.9, 0.7, 0.4, "#f3a9a0")
+        // 머리 모양
+        when (look.hair) {
+            "short" -> { r(2.8, 0.6, 6.4, 1.6, look.hairColor); r(2.8, 1.5, 0.9, 2.2, look.hairColor); r(8.3, 1.5, 0.9, 2.2, look.hairColor) }
+            "bun" -> { r(2.8, 0.8, 6.4, 1.5, look.hairColor); r(4.8, -0.9, 2.4, 1.8, look.hairColor); r(2.6, 1.6, 0.9, 4.0, look.hairColor); r(8.5, 1.6, 0.9, 4.0, look.hairColor) }
+            "long" -> { r(2.6, 0.6, 6.8, 1.7, look.hairColor); r(2.2, 1.5, 1.2, 6.0, look.hairColor); r(8.6, 1.5, 1.2, 6.0, look.hairColor) }
+            "spiky" -> { r(2.8, 0.9, 6.4, 1.3, look.hairColor); r(3.0, 0.0, 1.0, 1.0, look.hairColor); r(5.0, -0.4, 1.0, 1.4, look.hairColor); r(7.0, 0.0, 1.0, 1.0, look.hairColor) }
+        }
+        // 모자·소품
+        when (look.hat) {
+            "explorer" -> { r(2.0, 0.6, 8.0, 0.9, "#8a6d3b"); r(3.3, -0.9, 5.4, 1.6, "#a0824a") }
+            "hardhat" -> { r(2.4, 0.2, 7.2, 1.4, "#f2c94c"); r(3.4, -0.9, 5.2, 1.2, "#f2c94c"); r(1.8, 1.3, 8.4, 0.5, "#e0b23a") }
+            "beret" -> { r(2.6, -0.2, 6.6, 1.5, "#c0392b"); r(5.6, -0.9, 0.8, 0.8, "#c0392b") }
+            "cap" -> { r(2.8, 0.0, 6.4, 1.4, "#34495e"); r(0.8, 0.8, 2.2, 0.6, "#34495e") }
+            "crown" -> { r(3.2, -0.8, 5.6, 1.2, "#f1c40f"); r(3.2, -1.6, 0.9, 0.9, "#f1c40f"); r(5.55, -1.8, 0.9, 1.0, "#f1c40f"); r(7.9, -1.6, 0.9, 0.9, "#f1c40f") }
+        }
+        when (look.gear) {
+            "glasses" -> { r(3.8, 3.5, 1.7, 1.4, "rgba(255,255,255,0.35)"); r(6.5, 3.5, 1.7, 1.4, "rgba(255,255,255,0.35)"); r(3.8, 3.4, 4.4, 0.3, "#222") }
+            "headphones" -> { r(2.0, 2.5, 1.0, 2.6, "#222"); r(9.0, 2.5, 1.0, 2.6, "#222"); r(2.4, 0.3, 7.2, 0.6, "#222") }
+            "earpiece" -> { r(8.8, 3.6, 0.7, 1.2, "#222"); r(8.0, 4.8, 1.0, 0.3, "#222") }
+            "book" -> { r(9.2, 10.0, 2.4, 3.0, "#2e86de"); r(9.6, 10.3, 1.6, 0.4, "#fff") }
+            "palette" -> { r(-0.4, 10.0, 2.6, 2.0, "#e0c097"); r(0.0, 10.4, 0.6, 0.6, "#e74c3c"); r(0.9, 10.4, 0.6, 0.6, "#3498db"); r(0.4, 11.1, 0.6, 0.6, "#2ecc71") }
+            "camera" -> { r(9.0, 9.5, 2.8, 2.0, "#2d3436"); r(9.9, 9.9, 1.0, 1.0, "#74b9ff") }
+            "laptop" -> { r(-0.6, 10.5, 3.0, 2.0, "#636e72"); r(-0.4, 10.7, 2.6, 1.4, "#81ecec") }
+        }
+        return y0
+    }
+
+    private class Look(val shirt: String, val pants: String, val accent: String, val outfit: String, val hair: String, val hairColor: String, val hat: String = "", val gear: String = "")
+
+    private fun look(agent: String, name: String?): Look = when (agent) {
+        "USER" -> Look("#2c3e50", "#1e272e", "#f1c40f", "crown", "short", "#2b1b10", "crown")
+        "CHAT" -> Look("#4f8ef7", "#34495e", "#2f6fd6", "cardigan", "long", "#4a2f1d")
+        "WEB" -> Look("#2bb673", "#5d4037", "#1e8c57", "vest", "short", "#3b2a1a", "explorer", "glasses")
+        "DOCS" -> Look("#f2994a", "#4e342e", "#d97a2b", "cardigan", "bun", "#c58b4c", gear = "book")
+        "CODE" -> Look("#7d4cdb", "#263238", "#5a32a8", "hoodie", "spiky", "#1b1b1b", gear = "headphones")
+        "TASK" -> Look("#e8eef3", "#2c3e50", "#eb5757", "overall", "short", "#5a2d0c", "hardhat")
+        "PERSONAL" -> Look("#2d3436", "#2d3436", "#e2b93b", "tie", "short", "#111", gear = "earpiece")
+        "IMAGE" -> Look("#dff3fb", "#455a64", "#3cb4e5", "apron", "long", "#8e5a2b", "beret", "palette")
+        "VIDEO" -> Look("#9b59b6", "#2c3e50", "#6c3483", "hoodie", "short", "#2b2b2b", "cap", "camera")
+        "TEAM" -> Look("#1e5631", "#1e272e", "#27ae60", "tie", "short", "#3b2a1a", gear = "laptop")
+        "CURATOR", "SKILL" -> Look("#95a5a6", "#34495e", "#7f8c8d", "apron", "short", "#555")
+        else -> {
+            // 사용자 정의 에이전트: 이름마다 색이 달라진다
+            val h = (name ?: agent).hashCode().let { if (it < 0) -it else it }
+            val shirts = listOf("#e67e22", "#16a085", "#c0392b", "#2980b9", "#8e44ad", "#d35400")
+            Look(shirts[h % shirts.size], "#2c3e50", "#ecf0f1", listOf("tie", "vest", "hoodie", "cardigan")[h % 4], listOf("short", "long", "spiky", "bun")[(h / 7) % 4], listOf("#2b1b10", "#6d4c41", "#111", "#b9770e")[(h / 3) % 4])
+        }
     }
 
     private fun pill(g: CanvasRenderingContext2D, text: String, x: Double, y: Double, bg: String, fg: String) {
@@ -321,15 +442,18 @@ private class Office(private val onCount: (Int) -> Unit) {
         g.fillStyle = fg; g.fillText(text, x, y - h * 0.28)
     }
 
-    private fun color(agent: String) = when (agent) {
-        "CHAT" -> "#4f8ef7"; "WEB" -> "#2bb673"; "DOCS" -> "#f2994a"; "CODE" -> "#9b51e0"; "TASK" -> "#eb5757"
-        "PERSONAL" -> "#e2b93b"; "IMAGE" -> "#3cb4e5"; "VIDEO" -> "#bb6bd9"; "TEAM" -> "#27ae60"; else -> "#8a8f98"
+    private fun persona(agent: String) = when (agent) {
+        "CHAT" -> "하나"; "WEB" -> "탐이"; "DOCS" -> "서윤"; "CODE" -> "코다"; "TASK" -> "맥스"; "PERSONAL" -> "미소"
+        "IMAGE" -> "아라"; "VIDEO" -> "무비"; "TEAM" -> "팀장"; "CURATOR" -> "모아"; "SKILL" -> "스미스"; else -> agent.lowercase()
     }
-
-    private fun hair(agent: String) = when (agent) { "WEB", "CODE" -> "#3b2a1a"; "DOCS", "IMAGE" -> "#d8a25e"; "TASK" -> "#5a2d0c"; else -> "#2b2b2b" }
 
     private fun label(agent: String) = when (agent) {
         "CHAT" -> "대화"; "WEB" -> "웹"; "DOCS" -> "문서"; "CODE" -> "코드"; "TASK" -> "작업"; "PERSONAL" -> "비서"
         "IMAGE" -> "이미지"; "VIDEO" -> "영상"; "TEAM" -> "팀"; "CURATOR" -> "학습"; "SKILL" -> "스킬"; else -> agent.lowercase()
+    }
+
+    private companion object {
+        const val SKIN = "#f1c9a5"
+        const val REPORT_SECONDS = 2.5
     }
 }

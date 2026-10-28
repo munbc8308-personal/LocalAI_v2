@@ -143,7 +143,7 @@ private fun Main(me: MeDto, onLogout: () -> Unit) {
         }
         when (tab) {
             Tab.CHAT -> ChatView(chat, drawer, { drawer = it }, draft, { draft = it })
-            Tab.OFFICE -> OfficeView { id -> chat.open(id); tab = Tab.CHAT }
+            Tab.OFFICE -> OfficeView(me.name) { id -> chat.open(id); tab = Tab.CHAT }
             Tab.AGENTS -> StudioView()
             Tab.GALLERY -> GalleryView()
             Tab.COLLECTIONS -> CollectionsView { name -> draft = "@$name "; tab = Tab.CHAT }
