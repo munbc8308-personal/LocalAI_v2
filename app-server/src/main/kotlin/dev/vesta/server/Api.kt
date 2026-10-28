@@ -65,6 +65,10 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
 import io.ktor.server.request.host
+import io.ktor.server.websocket.pingPeriod
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.close
+import kotlinx.coroutines.flow.onEach
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.path
@@ -209,6 +213,11 @@ fun Application.vestaApi(deps: ServerDeps) {
     // 웹 UI 파일을 휴대폰으로 보낼 때 크기를 줄인다. SSE는 조각마다 바로 보내야 하므로 압축하지 않는다
     install(Compression) {
         gzip { excludeContentType(ContentType.Text.EventStream) }
+    }
+    // 음성 대화 웹소켓 (M37 RV-02)
+    install(io.ktor.server.websocket.WebSockets) {
+        pingPeriod = kotlin.time.Duration.parse("20s")
+        maxFrameSize = 1L * 1024 * 1024
     }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
@@ -921,6 +930,44 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
                 call.userAction { users.setOwnPassword(user.userId, dto.new); null }
             }
+            // 음성 대화 (M37 RV-02): 웹소켓을 열기 전에 로그인을 확인하고, 브라우저면 Origin이 이 주소와 같아야 한다(쿠키로 남의 사이트가 열지 못하게)
+            route("/voice") {
+                webSocket {
+                    // 열 때 로그인·Origin 확인 (응답을 보낼 수 없으니 실패하면 닫는다). 브라우저면 Origin이 이 주소와 같아야 한다(쿠키로 남의 사이트가 열지 못하게)
+                    val origin = call.request.header(HttpHeaders.Origin)
+                    val user = call.voiceUser(deps)
+                    val sameOrigin = if (origin == null) call.request.header(HttpHeaders.Authorization) != null else runCatching { java.net.URI(origin).host }.getOrNull() == call.request.host()
+                    if (user == null || !sameOrigin) {
+                        close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY, "로그인이 필요합니다"))
+                        return@webSocket
+                    }
+                    val stt = deps.speechToText
+                    val tts = deps.textToSpeech
+                    if (stt == null || tts == null) {
+                        close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.CANNOT_ACCEPT, "음성 인식·읽어 주기가 설정돼 있지 않습니다"))
+                        return@webSocket
+                    }
+                    var session = call.request.queryParameters["session"]?.takeIf { it.isNotBlank() }?.let(::SessionId)
+                    val voice = VoiceSession(
+                        this,
+                        transcribe = { wav -> stt.transcribe(wav, "ko") },
+                        answer = { question ->
+                            deps.conversation.send(user, ChannelType.WEB, session, UserInput(question, spoken = true))
+                                .onEach { if (it is dev.vesta.core.agent.AgentEvent.SessionReady) session = it.sessionId }
+                        },
+                        speak = { text -> dev.vesta.media.SpeechText.prepare(text, 1_500).takeIf { it.isNotBlank() }?.let { tts.synthesize(it, dev.vesta.core.media.AudioFormat.M4A) } },
+                        sendText = { outgoing.send(io.ktor.websocket.Frame.Text(it)) },
+                        sendAudio = { outgoing.send(io.ktor.websocket.Frame.Binary(true, it)) },
+                    )
+                    for (frame in incoming) {
+                        when (frame) {
+                            is io.ktor.websocket.Frame.Binary -> voice.onAudio(frame.data)
+                            is io.ktor.websocket.Frame.Text -> if ("interrupt" in frame.data.decodeToString()) voice.interrupt()
+                            else -> Unit
+                        }
+                    }
+                }
+            }
             get("/collections") {
                 val user = call.principal(deps) ?: return@get
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(CollectionDto.serializer()), deps.collections(user)))
@@ -1175,6 +1222,14 @@ private suspend fun ApplicationCall.principal(deps: ServerDeps): UserContext? {
 private class PublicRequest(val email: String?, val ip: String)
 private val PUBLIC_REQUEST = io.ktor.util.AttributeKey<PublicRequest>("vesta-public")
 internal const val ACCESS_HEADER = "Cf-Access-Jwt-Assertion"
+
+/** 음성 웹소켓을 연 사용자 (M37). [principal]과 같은 확인이지만 응답을 보내지 않는다 (웹소켓은 열린 뒤라) */
+private suspend fun ApplicationCall.voiceUser(deps: ServerDeps): UserContext? {
+    if (request.header(HttpHeaders.Authorization) != null) return if (bearer(deps.token)) deps.owner else null
+    val session = request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) } ?: return null
+    if (publicMismatch(deps, session.user) != null) return null
+    return session.user
+}
 
 /**
  * 바깥 요청의 IP. 입구는 127.0.0.1에만 열려 앞단(cloudflared·Caddy)만 붙는다. 그 모드의 앞단이 직접 적는 헤더 하나만 믿는다:

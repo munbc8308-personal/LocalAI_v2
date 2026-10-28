@@ -11,6 +11,7 @@ dependencies {
     implementation(project(":channel-discord-voice"))
     implementation(project(":channel-slack"))
     implementation(libs.bundles.ktor.server)
+    implementation(libs.ktor.server.websockets)
     implementation(libs.kotlin.logging)
     runtimeOnly(libs.logback.classic)
     testImplementation(libs.ktor.server.test.host)

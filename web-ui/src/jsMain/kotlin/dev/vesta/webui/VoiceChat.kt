@@ -14,6 +14,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.khronos.webgl.ArrayBuffer
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.khronos.webgl.DataView
 import org.w3c.files.Blob
 import kotlin.js.json
@@ -53,6 +55,13 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
     private var totalMs = 0.0
 
     private var work: Job? = null
+    /** 웹소켓 음성 길 (M37 RV-02). 열리면 말 끝 판단·받아 적기·끼어들기는 서버가 한다. 못 열면 예전 방식(HTTP) */
+    private var socket: dynamic = null
+    private var voiceTurn: Turn? = null
+    private var replyDone = true
+    private var playing = 0
+    private var nextAt = 0.0
+    private val sources = mutableListOf<dynamic>()
     private var audio: dynamic = null
     private var audioDone: CompletableDeferred<Unit>? = null
 
@@ -79,9 +88,83 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
         processor = node
         reset()
         phase = VoicePhase.LISTENING
+        openSocket()
+    }
+
+    private fun openSocket() {
+        val proto = if (window.location.protocol == "https:") "wss:" else "ws:"
+        val query = chat.sessionId?.let { "?session=" + js("encodeURIComponent")(it) as String }.orEmpty()
+        val ws: dynamic = js("new WebSocket(proto + '//' + window.location.host + '/api/voice' + query)")
+        ws.binaryType = "arraybuffer"
+        ws.onmessage = { e: dynamic -> if (e.data is String) onEvent(e.data as String) else enqueue(e.data) }
+        ws.onclose = { _: dynamic -> if (socket === ws) socket = null }
+        ws.onerror = { _: dynamic -> if (socket === ws) socket = null }
+        socket = ws
+    }
+
+    private fun onEvent(raw: String) {
+        val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return
+        val text = o["text"]?.jsonPrimitive?.content.orEmpty()
+        when (o["type"]?.jsonPrimitive?.content) {
+            "partial" -> { heard = text; if (phase == VoicePhase.LISTENING) phase = VoicePhase.HEARING }
+            "final" -> { heard = text; voiceTurn = chat.voiceTurn(text); replyDone = false; phase = VoicePhase.THINKING }
+            "session" -> if (chat.sessionId == null) chat.sessionId = text
+            "token" -> voiceTurn?.let { it.answer += text }
+            "interrupt" -> { stopPlayback(); replyDone = true; phase = VoicePhase.LISTENING }
+            "done" -> { replyDone = true; chat.refreshSessions(); if (playing == 0) phase = VoicePhase.LISTENING }
+            "idle" -> phase = VoicePhase.LISTENING
+            "error" -> { error = text; replyDone = true; if (playing == 0) phase = VoicePhase.LISTENING }
+        }
+    }
+
+    /** 문장 소리(m4a)를 풀어 이어서 틀어 준다 (조각 사이가 끊기지 않게 시각을 맞춘다) */
+    private fun enqueue(data: dynamic) {
+        val ctx = context ?: return
+        playing++
+        (ctx.decodeAudioData(data) as kotlin.js.Promise<dynamic>).then({ buffer: dynamic ->
+            val node: dynamic = ctx.createBufferSource()
+            node.buffer = buffer
+            node.connect(ctx.destination)
+            val now = (ctx.currentTime as Number).toDouble()
+            nextAt = maxOf(now, nextAt)
+            node.start(nextAt)
+            nextAt += (buffer.duration as Number).toDouble()
+            sources.add(node)
+            phase = VoicePhase.SPEAKING
+            node.onended = { _: dynamic ->
+                sources.remove(node)
+                playing--
+                if (playing == 0 && replyDone && phase == VoicePhase.SPEAKING) phase = VoicePhase.LISTENING
+            }
+        }, { _: dynamic -> playing-- })
+    }
+
+    private fun stopPlayback() {
+        sources.toList().forEach { runCatching { it.onended = null; it.stop() } }
+        sources.clear()
+        playing = 0
+        nextAt = 0.0
+    }
+
+    /** 마이크 조각을 16kHz PCM16으로 바꿔 보낸다 */
+    private fun sendFrame(frame: FloatArray) {
+        val ws = socket ?: return
+        if ((ws.readyState as Number).toInt() != 1) return
+        val step = sampleRate / TARGET_RATE
+        val count = (frame.size / step).toInt()
+        val buffer = ArrayBuffer(count * 2)
+        val view = org.khronos.webgl.DataView(buffer)
+        for (i in 0 until count) {
+            val v = frame[(i * step).toInt()].coerceIn(-1f, 1f)
+            view.setInt16(i * 2, (v * 32767).toInt().toShort(), true)
+        }
+        ws.send(buffer)
     }
 
     fun stop() {
+        runCatching { socket?.close() }
+        socket = null
+        stopPlayback()
         work?.cancel()
         work = null
         stopAudio()
@@ -96,6 +179,14 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
     /** 읽는 중이면 끊고(답변 생성도 멈춘다) 다시 듣는다 */
     fun interrupt() {
         if (phase != VoicePhase.SPEAKING && phase != VoicePhase.THINKING) return
+        val ws = socket
+        if (ws != null) {
+            ws.send("""{"type":"interrupt"}""")
+            stopPlayback()
+            replyDone = true
+            phase = VoicePhase.LISTENING
+            return
+        }
         work?.cancel()
         work = null
         stopAudio()
@@ -121,6 +212,8 @@ class VoiceConversation(private val scope: CoroutineScope, private val chat: Cha
         for (v in frame) sum += v * v
         val rms = sqrt(sum / maxOf(1, length))
         level = minOf(1.0, rms * 8)
+        // 웹소켓이 열려 있으면 소리를 그대로 보내고 판단은 서버가 한다
+        if (socket != null) { sendFrame(frame); return }
         val ms = length / sampleRate * 1000
         val threshold = maxOf(MIN_THRESHOLD, noise * 3)
         // 끼어들기 (M37 RV-05): 읽는 중에도 듣는다. 스피커 소리는 브라우저 에코 제거가 빼지만 남을 수 있어 기준을 높이고, 잠깐 이어질 때만 끊는다.

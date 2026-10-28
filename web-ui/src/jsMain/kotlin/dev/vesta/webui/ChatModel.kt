@@ -93,6 +93,9 @@ class ChatController(private val scope: CoroutineScope) {
             .onSuccess { sessions.clear(); sessions.addAll(it) }
     }
 
+    /** 음성 대화(웹소켓)가 알아들은 말로 차례 하나를 만든다. 답 글은 음성 대화가 채운다 (M37) */
+    fun voiceTurn(question: String): Turn = Turn(question).also { turns += it }
+
     /** 지금 대화의 지침 (C-06, M34 Q-03). 대화 목록에서 읽는다 */
     val prompt: String? get() = sessions.firstOrNull { it.id == sessionId }?.prompt
 
