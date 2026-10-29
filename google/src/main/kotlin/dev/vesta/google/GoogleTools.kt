@@ -339,7 +339,7 @@ class SheetsReadTool(api: GoogleApi, maxChars: Int) : GoogleTool(
         val id = id(arguments, "spreadsheet")
         val info = api.json(user, HttpMethod.Get, url(SHEETS, id) { append("fields", "properties.title,sheets.properties.title") })
         val sheets = info["sheets"]?.jsonArray.orEmpty().mapNotNull { it.jsonObject["properties"]?.jsonObject?.str("title") }
-        val range = arguments.str("range")?.takeIf { it.isNotBlank() } ?: sheets.firstOrNull() ?: return fail("시트가 없음")
+        val range = range(arguments) ?: sheets.firstOrNull() ?: return fail("시트가 없음")
         val values = api.json(user, HttpMethod.Get, url(SHEETS, id, "values", range))["values"]?.jsonArray.orEmpty()
         val rows = values.take(MAX_ROWS).joinToString("\n") { row -> row.jsonArray.joinToString("\t") { (it as? JsonPrimitive)?.content.orEmpty() } }
         val title = info["properties"]?.jsonObject?.str("title").orEmpty()
@@ -370,7 +370,7 @@ class SheetsWriteTool(api: GoogleApi, maxChars: Int, private val append: Boolean
 
     override suspend fun run(arguments: JsonObject, user: UserId): ToolResult {
         val id = id(arguments, "spreadsheet")
-        val range = arguments.str("range")?.takeIf { it.isNotBlank() } ?: return fail("range가 필요함")
+        val range = range(arguments) ?: return fail("range가 필요함")
         val values = rows(arguments) ?: return fail("values는 줄 배열의 배열이어야 함")
         val body = buildJsonObject { put("majorDimension", "ROWS"); put("values", values) }.toString()
         val result = if (append) {
@@ -559,7 +559,13 @@ internal fun params(vararg properties: Param, required: List<String> = emptyList
 }
 
 private fun url(base: String, vararg segments: String, query: io.ktor.http.ParametersBuilder.() -> Unit = {}): Url =
-    URLBuilder(base).apply { appendPathSegments(*segments); parameters.query() }.build()
+    // 조각 속 /도 인코딩한다: 범위·id가 경로를 더 만들지 못하게 (보안 검토)
+    URLBuilder(base).apply { appendPathSegments(segments.toList(), encodeSlash = true); parameters.query() }.build()
+
+/** 시트 범위 (시트1!A1:D20, '내 시트'!A:A, 시트 이름만). 경로·쿼리 글자는 거부 (보안 검토) */
+private fun range(arguments: JsonObject): String? = arguments.str("range")?.trim()?.takeIf { it.isNotEmpty() }?.also {
+    require(it.length <= 200 && it.none { c -> c in "/?#\\" || c.code < 0x20 } && ".." !in it) { "range 형식이 잘못됨: ${it.take(80)}" }
+}
 
 private fun JsonObject.int(key: String) = (this[key] as? JsonPrimitive)?.let { it.intOrNull ?: it.content.toIntOrNull() }
 private fun JsonObject.bool(key: String) = (this[key] as? JsonPrimitive)?.let { it.booleanOrNull ?: it.content.toBooleanStrictOrNull() }

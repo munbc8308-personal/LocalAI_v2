@@ -425,7 +425,7 @@ class ApiTest : FunSpec({
             override fun delete(user: dev.vesta.core.UserId) = Unit
         }
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { respondError(HttpStatusCode.BadRequest) })
-        val google = dev.vesta.google.GoogleAuth(http, "1-abc.apps.googleusercontent.com", { "test-client-secret" }, "https://vesta.example/api/google/callback", store)
+        val google = dev.vesta.google.GoogleAuth(http, "1-abc.apps.googleusercontent.com", { "test-client-secret" }, listOf("https://vesta.example/api/google/callback", "http://localhost/api/google/callback"), store)
         val deps = ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", auth = WebAuth(repo), users = users, google = google)
         application { vestaApi(deps) }
         val noRedirect = createClient { followRedirects = false }
@@ -439,7 +439,12 @@ class ApiTest : FunSpec({
         client.get("/api/google", mina).bodyAsText() shouldBe """{"available":true}"""
         val url = io.ktor.http.Url(dev.vesta.api.ApiJson.parseToJsonElement(client.post("/api/google/connect", mina).bodyAsText()).let { (it as kotlinx.serialization.json.JsonObject)["url"].toString().trim('"') })
         url.host shouldBe "accounts.google.com"
-        url.parameters["redirect_uri"] shouldBe "https://vesta.example/api/google/callback"
+        url.parameters["redirect_uri"] shouldBe "http://localhost/api/google/callback"
+        val flow = client.post("/api/google/connect", mina).headers.getAll(io.ktor.http.HttpHeaders.SetCookie).orEmpty().first { it.startsWith("vesta_google_flow=") }
+        flow shouldContain "HttpOnly"
+        flow shouldContain "SameSite=Lax"
+        // 다른 Host로 연 화면에서는 시작하지 않는다 (돌아올 때 쿠키가 따라오지 않으므로)
+        client.post("/api/google/connect") { mina(); header("Host", "127.0.0.1") }.status shouldBe HttpStatusCode.BadRequest
         // 다른 사람의 state를 만들 수 없다: 모르는 state·취소는 설정 화면으로
         noRedirect.get("/api/google/callback?state=guess&code=x").headers["Location"]!! shouldContain "/?google="
         noRedirect.get("/api/google/callback?error=access_denied").headers["Location"] shouldBe "/?google=denied"

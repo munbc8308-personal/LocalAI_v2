@@ -29,11 +29,10 @@ class GoogleSetupCommand : CliktCommand(name = "setup") {
 
     override fun run() = runBlocking {
         val store = UserStore()
-        val redirect = redirectUri(store)
         echo("1. console.cloud.google.com 에서 프로젝트를 만들고, API 라이브러리에서 Gmail·Drive·Sheets·Docs·Calendar API를 켭니다")
         echo("2. Google 인증 플랫폼 > 대상: 외부, 게시 상태를 '프로덕션'으로 (테스트면 7일마다 연결이 끊깁니다. 검수 없이 경고 화면·100명까지)")
-        echo("3. 클라이언트 > 클라이언트 만들기 > 웹 애플리케이션, 승인된 리디렉션 URI:")
-        echo("     $redirect")
+        echo("3. 클라이언트 > 클라이언트 만들기 > 웹 애플리케이션, 승인된 리디렉션 URI (모두 추가, 연결은 이 주소로 연 화면에서):")
+        dev.vesta.app.googleRedirectUris(store.config).forEach { echo("     $it") }
         val id = (clientId ?: run { echo("클라이언트 ID: ", trailingNewline = false); readlnOrNull() })?.trim().orEmpty()
         if (!ID.matches(id)) { echo("클라이언트 ID 형식이 아닙니다 (….apps.googleusercontent.com)", err = true); throw ProgramResult(1) }
         val console = System.console() ?: run { echo("터미널에서 실행하세요 (비밀 입력을 숨기려고 콘솔이 필요합니다)", err = true); throw ProgramResult(1) }
@@ -54,7 +53,7 @@ class GoogleStatusCommand : CliktCommand(name = "status") {
         val config = store.config.google
         echo("설정: " + if (config.enabled && config.clientId.isNotBlank()) "켜짐 (${config.clientId.take(12)}…)" else "꺼짐 (켜기: vesta google setup)")
         echo("클라이언트 비밀: " + if (GoogleKeychain.clientSecret() != null) "키체인에 있음" else "없음")
-        echo("돌아오는 주소: ${redirectUri(store)}")
+        echo("돌아오는 주소: ${dev.vesta.app.googleRedirectUris(store.config).joinToString()}")
         store.service.list().filter { it.role != dev.vesta.core.UserRole.GUEST }.forEach { user ->
             echo("  ${user.name}: " + (GoogleKeychain.read(user.id)?.email?.let { "연결됨 · $it" } ?: "연결 안 함"))
         }
@@ -78,10 +77,6 @@ class GoogleOffCommand : CliktCommand(name = "off") {
 }
 
 private val ID = Regex("^[0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com$")
-
-private fun redirectUri(store: UserStore): String = store.config.google.redirectUri.ifBlank {
-    store.config.publicAccess.hostname.takeIf { it.isNotBlank() }?.let { "https://$it/api/google/callback" } ?: "http://localhost:${store.config.server.port}/api/google/callback"
-}
 
 private fun writeGoogleConfig(store: UserStore, enabled: Boolean, clientId: String) {
     val file = store.paths.configFile

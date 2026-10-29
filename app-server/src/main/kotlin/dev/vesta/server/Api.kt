@@ -766,7 +766,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@post
                     val google = deps.google ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"Google 연동이 설정되지 않았습니다 (Mac에서 vesta google setup)"}""")
                     if (user.role == dev.vesta.core.UserRole.GUEST) return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 Google을 연결할 수 없습니다"}""")
-                    call.respondJson(HttpStatusCode.OK, buildJsonObject { put("url", google.connectUrl(user.userId)) }.toString())
+                    // 돌아올 때 이 브라우저인지 확인하는 쿠키 (보안 검토). Google에서 돌아오는 이동에도 실리게 SameSite=Lax
+                    val public = call.attributes.contains(PUBLIC_REQUEST)
+                    val origin = if (public) "https://${deps.publicGate!!.hostname}" else "http://" + (call.request.header(HttpHeaders.Host) ?: call.request.host()).lowercase().removeSuffix(":80")
+                    val start = google.start(user.userId, origin) ?: return@post call.respondJson(
+                        HttpStatusCode.BadRequest,
+                        buildJsonObject { put("error", "이 주소에서는 연결할 수 없습니다. 다음 주소에서 열어 연결해 주세요: " + google.redirectUris.joinToString(" 또는 ") { it.removeSuffix("/api/google/callback") }) }.toString(),
+                    )
+                    call.response.cookies.append(Cookie(GOOGLE_FLOW_COOKIE, start.nonce, maxAge = 600, path = "/api/google/callback", httpOnly = true, secure = start.redirectUri.startsWith("https://"), extensions = mapOf("SameSite" to "Lax")))
+                    call.respondJson(HttpStatusCode.OK, buildJsonObject { put("url", start.url) }.toString())
                 }
                 delete {
                     val user = call.principal(deps) ?: return@delete
@@ -778,9 +786,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val google = deps.google ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
                     val state = call.request.queryParameters["state"].orEmpty()
                     val code = call.request.queryParameters["code"]
+                    val nonce = call.request.cookies[GOOGLE_FLOW_COOKIE]
+                    call.response.cookies.append(Cookie(GOOGLE_FLOW_COOKIE, "", maxAge = 0, path = "/api/google/callback", httpOnly = true))
                     val result = when {
                         code == null || state.isEmpty() -> "denied"
-                        else -> when (val finished = google.finish(state, code)) {
+                        else -> when (val finished = google.finish(state, code, nonce)) {
                             is dev.vesta.google.GoogleAuth.Finish.Ok -> "ok"
                             is dev.vesta.google.GoogleAuth.Finish.Failed -> finished.message
                         }
@@ -1200,6 +1210,8 @@ private suspend fun ApplicationCall.receiveLimited(megabytes: Int): ByteArray? {
     return bytes
 }
 internal const val SESSION_COOKIE = "vesta_session"
+/** Google 연결을 시작한 브라우저 표시 (M40, 보안 검토) */
+internal const val GOOGLE_FLOW_COOKIE = "vesta_google_flow"
 
 /** localhost·루프백과 Tailscale MagicDNS 이름, 설정에 적은 이름만 받는다 */
 internal fun hostAllowed(host: String, allowed: Set<String>): Boolean {

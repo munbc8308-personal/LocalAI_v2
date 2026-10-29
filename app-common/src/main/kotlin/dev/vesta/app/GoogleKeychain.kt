@@ -30,3 +30,9 @@ object GoogleKeychain : GoogleTokenStore {
 
     private fun account(user: UserId) = "user-${user.value}"
 }
+
+/** Google에 등록할 돌아오는 주소들: 설정한 주소(없으면 공개 주소)와 이 Mac의 localhost (M40) */
+fun googleRedirectUris(config: dev.vesta.core.config.VestaConfig): List<String> = listOfNotNull(
+    config.google.redirectUri.ifBlank { config.publicAccess.hostname.takeIf { it.isNotBlank() }?.let { "https://$it/api/google/callback" }.orEmpty() }.ifBlank { null },
+    "http://localhost:${config.server.port}/api/google/callback",
+).distinct()

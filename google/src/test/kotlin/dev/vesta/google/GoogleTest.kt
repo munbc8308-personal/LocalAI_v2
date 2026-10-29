@@ -67,19 +67,29 @@ class GoogleTest : FunSpec({
             }
         }
         val store = MemoryStore()
-        val auth = GoogleAuth(HttpClient(engine), "client-1", { "test-client-secret" }, "https://vesta.example/api/google/callback", store, now = { clock })
-        val link = Url(auth.connectUrl(user))
+        val auth = GoogleAuth(HttpClient(engine), "client-1", { "test-client-secret" }, listOf("https://vesta.example/api/google/callback", "http://localhost:8787/api/google/callback"), store, now = { clock })
+        auth.start(user, "https://evil.example") shouldBe null
+        auth.start(user, "http://localhost:8787")!!.redirectUri shouldBe "http://localhost:8787/api/google/callback"
+        val start = auth.start(user, "https://vesta.example")!!
+        val link = Url(start.url)
         link.parameters["code_challenge_method"] shouldBe "S256"
         link.parameters["access_type"] shouldBe "offline"
+        link.parameters["redirect_uri"] shouldBe "https://vesta.example/api/google/callback"
         val state = link.parameters["state"]!!
 
-        auth.finish("other-state", "code-1").shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
-        auth.finish(state, "code-1") shouldBe GoogleAuth.Finish.Ok(user, "mina@gmail.com")
+        auth.finish("other-state", "code-1", start.nonce).shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
+        // 남이 보낸 링크: 시작한 브라우저의 쿠키(nonce)가 없으면 안 된다 (state도 버려진다)
+        val stolen = auth.start(user, "https://vesta.example")!!
+        auth.finish(Url(stolen.url).parameters["state"]!!, "code-1", null).shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
+        val again = auth.start(user, "https://vesta.example")!!
+        auth.finish(Url(again.url).parameters["state"]!!, "code-1", "wrong-nonce").shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
+        val real = auth.start(user, "https://vesta.example")!!
+        auth.finish(Url(real.url).parameters["state"]!!, "code-1", real.nonce) shouldBe GoogleAuth.Finish.Ok(user, "mina@gmail.com")
         requests.first() shouldContain "code_verifier="
         store.saved[7]!!.refreshToken shouldBe "r-1"
         auth.email(user) shouldBe "mina@gmail.com"
-        // 같은 state는 다시 못 쓴다
-        auth.finish(state, "code-1").shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
+        // 같은 state는 다시 못 쓴다 (새 요청이 앞 요청을 버렸다)
+        auth.finish(state, "code-1", start.nonce).shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
 
         auth.accessToken(user) shouldBe "a-1"
         clock += 3_600_000
@@ -87,9 +97,9 @@ class GoogleTest : FunSpec({
         auth.accessToken(UserId(8)) shouldBe null
 
         // 10분이 지난 state는 안 된다
-        val late = Url(auth.connectUrl(user)).parameters["state"]!!
+        val late = auth.start(user, "https://vesta.example")!!
         clock += GoogleAuth.STATE_MILLIS + 1
-        auth.finish(late, "code-2").shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
+        auth.finish(Url(late.url).parameters["state"]!!, "code-2", late.nonce).shouldBeInstanceOf<GoogleAuth.Finish.Failed>()
 
         auth.disconnect(user)
         auth.email(user) shouldBe null
@@ -101,7 +111,7 @@ class GoogleTest : FunSpec({
         val http = HttpClient(MockEngine { request ->
             if (request.url.toString() == GoogleAuth.TOKEN_URL) respond("""{"access_token":"a-1","expires_in":3600}""", headers = json) else handler(request)
         })
-        return GoogleApi(http, GoogleAuth(http, "client-1", { "test-client-secret" }, "https://x/cb", store))
+        return GoogleApi(http, GoogleAuth(http, "client-1", { "test-client-secret" }, listOf("https://x/cb"), store))
     }
     val member = ToolContext(UserContext(user, UserRole.MEMBER))
 
@@ -144,7 +154,7 @@ class GoogleTest : FunSpec({
 
     test("연결하지 않았거나 손님이면 쓰지 못한다") {
         val http = HttpClient(MockEngine { respond("", HttpStatusCode.InternalServerError) })
-        val api = GoogleApi(http, GoogleAuth(http, "c", { "s" }, "https://x/cb", MemoryStore()))
+        val api = GoogleApi(http, GoogleAuth(http, "c", { "s" }, listOf("https://x/cb"), MemoryStore()))
         val search = googleTools(api, 10_000).first { it.spec.name == "gmail_search" }
         search.execute(buildJsonObject {}, member).output shouldContain "연결되지 않았거나"
         search.execute(buildJsonObject {}, ToolContext(UserContext(user, UserRole.GUEST))).output shouldContain "손님"
@@ -161,6 +171,8 @@ class GoogleTest : FunSpec({
         tool.execute(buildJsonObject { put("spreadsheet", "sheet_12345"); put("range", "가계부"); put("values", values) }, member).output shouldContain "가계부!A5:B5"
         path shouldContain "/values/"
         path shouldNotContain "가계부"
+        // 범위로 경로를 늘리지 못한다
+        tool.execute(buildJsonObject { put("spreadsheet", "sheet_12345"); put("range", "../../drive/v3/files"); put("values", values) }, member).isError shouldBe true
         sent shouldContain "\"12000\""
     }
 

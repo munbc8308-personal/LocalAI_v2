@@ -62,19 +62,22 @@ object OfficeText {
         return (0 until nodes.length).joinToString("") { nodes.item(it).textContent }
     }
 
-    /** zip에서 고른 항목만 (항목 하나 20MB까지: 압축 폭탄 대비) */
+    /** zip에서 고른 항목만 (풀어 낸 크기 합계 [MAX_TOTAL]·항목 [MAX_ENTRIES]개까지: 압축 폭탄 대비, 보안 검토) */
     private fun entries(bytes: ByteArray, want: (String) -> Boolean): Map<String, ByteArray> = buildMap {
+        var total = 0L
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 if (!want(entry.name)) continue
+                require(size < MAX_ENTRIES) { "파일 속 항목이 너무 많습니다" }
                 val out = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(64 * 1024)
                 while (true) {
                     val n = zip.read(buffer)
                     if (n < 0) break
                     out.write(buffer, 0, n)
-                    require(out.size() <= MAX_ENTRY) { "파일 속 항목이 너무 큽니다" }
+                    total += n
+                    require(total <= MAX_TOTAL) { "풀어 낸 내용이 너무 큽니다" }
                 }
                 put(entry.name, out.toByteArray())
             }
@@ -92,7 +95,8 @@ object OfficeText {
 
     private val SHEET = Regex("^xl/worksheets/sheet(\\d+)\\.xml$")
     private const val MAX_ROWS = 2_000
-    private const val MAX_ENTRY = 20 * 1024 * 1024
+    private const val MAX_TOTAL = 40L * 1024 * 1024
+    private const val MAX_ENTRIES = 51
     private val TEXT_TYPES = setOf("application/json", "application/xml", "application/javascript", "application/x-yaml")
     private val TEXT_EXTENSIONS = setOf("txt", "md", "csv", "tsv", "json", "xml", "yaml", "yml", "log", "html")
 }

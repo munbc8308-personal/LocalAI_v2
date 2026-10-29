@@ -37,17 +37,22 @@ interface GoogleTokenStore {
 
 /**
  * 사용자별 Google OAuth (PROJECT.md 7.34 GW-02). 웹 설정에서 [connectUrl]로 Google 로그인에 보내고, 돌아오면 [finish]로 토큰을 받는다.
- * state는 한 번만·10분·사용자에 묶이고, PKCE를 함께 쓴다. 접근 토큰은 메모리에만 두고 만료되면 갱신 토큰으로 다시 받는다
+ * state는 한 번만·10분·사용자에 묶이고, PKCE를 함께 쓴다. 연결을 시작한 브라우저에도 묶는다(쿠키의 nonce, 보안 검토):
+ * 남이 자기 state가 든 로그인 링크를 보내 피해자 Google 계정을 자기 Vesta에 붙이지 못하게. 접근 토큰은 메모리에만 두고 만료되면 갱신 토큰으로 다시 받는다
  */
 class GoogleAuth(
     private val http: HttpClient,
     private val clientId: String,
     private val clientSecret: () -> String?,
-    val redirectUri: String,
+    /** 등록한 돌아오는 주소들 (공개 주소, localhost). 연결을 시작한 화면과 같은 곳으로 돌아와야 쿠키가 따라온다 */
+    val redirectUris: List<String>,
     private val store: GoogleTokenStore,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    private class Pending(val user: UserId, val verifier: String, val expires: Long)
+    private class Pending(val user: UserId, val verifier: String, val nonceHash: ByteArray, val redirectUri: String, val expires: Long)
+
+    /** 연결 시작: Google 로그인 [url]과, 브라우저 쿠키로 둘 [nonce]. 돌아오는 곳은 [redirectUri] */
+    class Start(val url: String, val nonce: String, val redirectUri: String)
     private class Access(val token: String, val expires: Long)
 
     private val pending = ConcurrentHashMap<String, Pending>()
@@ -61,15 +66,17 @@ class GoogleAuth(
         data class Failed(val message: String) : Finish
     }
 
-    /** Google 로그인 주소. 같은 사용자의 이전 요청은 버린다 */
-    fun connectUrl(user: UserId): String {
+    /** 화면 주소 [origin](`https://host`, `http://localhost:8787`)으로 돌아오는 Google 로그인. 등록한 주소가 아니면 null. 같은 사용자의 이전 요청은 버린다 */
+    fun start(user: UserId, origin: String): Start? {
+        val redirectUri = redirectUris.firstOrNull { it.startsWith("$origin/") } ?: return null
         val time = now()
         pending.entries.removeIf { it.value.expires < time || it.value.user == user }
         val state = random(32)
         val verifier = random(48)
-        pending[state] = Pending(user, verifier, time + STATE_MILLIS)
-        val challenge = b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
-        return URLBuilder(AUTH_URL).apply {
+        val nonce = random(32)
+        pending[state] = Pending(user, verifier, sha256(nonce), redirectUri, time + STATE_MILLIS)
+        val challenge = b64(sha256(verifier))
+        return Start(URLBuilder(AUTH_URL).apply {
             parameters.append("client_id", clientId)
             parameters.append("redirect_uri", redirectUri)
             parameters.append("response_type", "code")
@@ -80,17 +87,19 @@ class GoogleAuth(
             parameters.append("state", state)
             parameters.append("code_challenge", challenge)
             parameters.append("code_challenge_method", "S256")
-        }.buildString()
+        }.buildString(), nonce, redirectUri)
     }
 
-    /** Google에서 돌아온 [code]를 토큰으로 바꾸고 저장한다 */
-    suspend fun finish(state: String, code: String): Finish {
+    /** Google에서 돌아온 [code]를 토큰으로 바꾸고 저장한다. [nonce]는 연결을 시작한 브라우저의 쿠키 */
+    suspend fun finish(state: String, code: String, nonce: String?): Finish {
         val request = pending.remove(state)?.takeIf { it.expires >= now() }
             ?: return Finish.Failed("연결 요청이 없거나 10분이 지났습니다. 설정에서 다시 눌러 주세요")
+        if (nonce == null || !MessageDigest.isEqual(sha256(nonce), request.nonceHash))
+            return Finish.Failed("연결을 시작한 브라우저가 아닙니다. 연결 버튼을 누른 화면에서 다시 해 주세요")
         val secret = secret() ?: return Finish.Failed("Google 클라이언트 비밀이 없습니다 (Mac에서 vesta google setup)")
         val json = token(
             "grant_type" to "authorization_code", "code" to code, "client_id" to clientId, "client_secret" to secret,
-            "redirect_uri" to redirectUri, "code_verifier" to request.verifier,
+            "redirect_uri" to request.redirectUri, "code_verifier" to request.verifier,
         ) ?: return Finish.Failed("Google이 연결을 받아 주지 않았습니다. 다시 시도해 주세요")
         val accessToken = json.str("access_token") ?: return Finish.Failed("접근 토큰을 받지 못했습니다")
         val refresh = json.str("refresh_token")
@@ -185,6 +194,7 @@ class GoogleAuth(
         private val random = SecureRandom()
         private fun random(bytes: Int) = b64(ByteArray(bytes).also(random::nextBytes))
         private fun b64(bytes: ByteArray) = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        private fun sha256(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
     }
 }
 

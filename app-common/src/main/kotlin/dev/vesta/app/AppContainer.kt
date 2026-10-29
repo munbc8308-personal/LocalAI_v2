@@ -345,10 +345,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     /** Google 연동 (M40, 7.34): 사용자마다 자기 계정. 클라이언트 ID를 정했을 때만 */
     private val googleHttp by lazy { dev.vesta.google.googleHttpClient() }
     val googleAuth: dev.vesta.google.GoogleAuth? = config.google.takeIf { it.enabled && it.clientId.isNotBlank() }?.let { g ->
-        val redirect = g.redirectUri.ifBlank {
-            config.publicAccess.hostname.takeIf { it.isNotBlank() }?.let { "https://$it/api/google/callback" } ?: "http://localhost:${config.server.port}/api/google/callback"
-        }
-        dev.vesta.google.GoogleAuth(googleHttp, g.clientId, GoogleKeychain::clientSecret, redirect, GoogleKeychain)
+        dev.vesta.google.GoogleAuth(googleHttp, g.clientId, GoogleKeychain::clientSecret, googleRedirectUris(config), GoogleKeychain)
     }
     val googleTools: List<dev.vesta.google.GoogleTool> = googleAuth?.let { dev.vesta.google.googleTools(dev.vesta.google.GoogleApi(googleHttp, it), config.tools.maxOutputChars) }.orEmpty()
     /** 이 사용자가 Google을 쓸 수 있는지 (손님 아님 + 연결함) */

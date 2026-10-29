@@ -3358,6 +3358,10 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
   - `GET/DELETE /api/google`, `POST /api/google/connect`.
   - `GET /api/google/callback`: 쿠키 없이 state로만, 결과는 `/?google=`로 → 상태 탭 Google 카드.
   - `vesta google setup|status|off`.
+- 보안 검토 고침:
+  - 연결을 시작한 브라우저에 묶는다: `/connect`가 nonce 쿠키(HttpOnly·SameSite=Lax·10분)를 주고 콜백이 확인. 남이 보낸 로그인 링크로 피해자 Google을 붙이지 못한다. 그래서 돌아오는 주소를 화면 주소마다 등록한다(공개 주소 + `http://localhost:8787`).
+  - 시트 범위의 `/`는 경로 조각 안에서 인코딩하고 `/?#\\..`는 거부.
+  - zip은 풀어 낸 합계 40MB·항목 51개까지.
 - 확인: `./gradlew test` 통과(google 7개, ApiTest Google 연결), 설치 후 health, `vesta google status`(꺼짐). 실제 Google Cloud 클라이언트·계정 연결은 아직(주인이 `vesta google setup` 후).
 
 ---
