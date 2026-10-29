@@ -5,6 +5,9 @@ import dev.vesta.core.ModelRole
 import dev.vesta.core.agent.Agent
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.agent.AgentRequest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import dev.vesta.core.inference.ChatChunk
 import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRequest
@@ -260,6 +263,9 @@ class TaskAgent(
             if (text.isNotEmpty()) emit(AgentEvent.Token("\n"))
             calledAny = true
             messages += ChatMessage(ChatRole.ASSISTANT, text.toString(), toolCalls = calls)
+            // 팀 멤버 여럿에게 한 번에 맡기면 동시에 진행한다 (M38 OF-11). 멤버 단계는 순서대로 흘려 보낸다
+            val parallel = calls.filter { available[it.name] is dev.vesta.core.tools.DelegatingTool }.takeIf { it.size > 1 }
+                ?.let { runParallel(it, request, context, taint, available) }.orEmpty()
             for (call in calls) {
                 if (call.name == PlanTool.NAME && plans != null) {
                     val args = runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrDefault(JsonObject(emptyMap()))
@@ -283,7 +289,7 @@ class TaskAgent(
                     messages += ChatMessage(ChatRole.TOOL, "실행하지 않았다: 방금 같은 도구를 같은 인자로 ${repeats - 1}번 연달아 불렀다. 결과는 위와 같다. 같은 호출을 되풀이하지 말고 다음 할 일로 넘어가라.", toolCallId = call.id)
                     continue
                 }
-                val result = runTool(call, request, context, taint, available)
+                val result = parallel[call.id] ?: runTool(call, request, context, taint, available)
                 if (!result.isError) workedSincePlan = true
                 if (call.name == SHELL) {
                     val command = (runCatching { Json.parseToJsonElement(call.arguments).jsonObject }.getOrNull()?.get("command") as? kotlinx.serialization.json.JsonPrimitive)?.content
@@ -367,6 +373,22 @@ class TaskAgent(
 
     /** 이번 작업에서 로컬 데이터를 읽었는지 */
     private class Taint(var tainted: Boolean = false)
+
+    /** 나눠 맡기기 여럿을 동시에. 멤버들이 낸 소식은 채널로 모아 이 흐름에서 차례로 내보낸다(흐름은 한 코루틴에서만 내보낼 수 있다) */
+    private suspend fun FlowCollector<AgentEvent>.runParallel(
+        calls: List<ToolCall>,
+        request: AgentRequest,
+        context: ToolContext,
+        taint: Taint,
+        available: Map<String, Tool>,
+    ): Map<String, ToolResult> = kotlinx.coroutines.coroutineScope {
+        val events = kotlinx.coroutines.channels.Channel<AgentEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val sink = FlowCollector<AgentEvent> { events.send(it) }
+        val jobs = calls.map { call -> async { call.id to with(sink) { runTool(call, request, context, taint, available) } } }
+        launch { jobs.awaitAll(); events.close() }
+        for (e in events) emit(e)
+        jobs.awaitAll().toMap()
+    }
 
     private suspend fun FlowCollector<AgentEvent>.runTool(
         call: ToolCall,

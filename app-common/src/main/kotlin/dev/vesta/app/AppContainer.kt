@@ -496,7 +496,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         }
         if (members.isEmpty()) return null
         val rules = "\n\n너는 팀 '${def.name}'(${def.description})의 리더다. 멤버:\n" + members.joinToString("\n") { "- ${it.name}: ${it.description}" } +
-            "\n- 일을 나눠 delegate 도구로 멤버에게 맡긴다. 한 번에 한 멤버, 앞 멤버의 결과가 필요하면 다음 task에 그 결과를 적어 넘긴다." +
+            "\n- 일을 나눠 delegate 도구로 멤버에게 맡긴다. 서로 기다릴 필요 없는 일은 한 단계에서 delegate를 여러 번 불러 동시에 맡기고, 앞 멤버의 결과가 필요하면 그 결과를 다음 task에 적어 넘긴다." +
             "\n- 멤버는 이 대화를 보지 못한다. task에 목표·조건·경로·앞 단계 결과를 모두 적는다." +
             "\n- 멤버의 결과를 그대로 믿지 말고 확인한 뒤, 무엇을 누가 했는지 짧게 밝혀 최종 답을 쓴다."
         return customAgent(user, def.leader, dev.vesta.agents.DelegateTool(members), rules)

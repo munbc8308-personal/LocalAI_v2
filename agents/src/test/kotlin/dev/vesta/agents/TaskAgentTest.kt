@@ -305,6 +305,34 @@ class TaskAgentTest : FunSpec({
         model.requests.size shouldBe 4
     }
 
+    test("나눠 맡기기 여럿은 동시에 진행하고, 결과는 부른 순서대로 돌려준다 (M38 OF-11)") {
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var running = 0
+        var overlapped = false
+        val team = object : dev.vesta.core.tools.DelegatingTool {
+            override val spec = ToolSpec("delegate", "맡기기", buildJsonObject { })
+            override val risk = RiskLevel.READ
+            override suspend fun execute(arguments: JsonObject, context: ToolContext) = error("delegate로만")
+            override suspend fun delegate(arguments: JsonObject, request: AgentRequest, emit: suspend (AgentEvent) -> Unit): ToolResult {
+                val name = (arguments["agent"] as kotlinx.serialization.json.JsonPrimitive).content
+                running++
+                if (running == 2) { overlapped = true; started.complete(Unit) }
+                emit(AgentEvent.Status("[$name] 일하는 중"))
+                kotlinx.coroutines.withTimeout(2_000) { started.await() }
+                running--
+                return ToolResult("$name 결과")
+            }
+        }
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("a", "delegate", """{"agent":"리서치","task":"x"}"""), ToolCall("b", "delegate", """{"agent":"작성","task":"y"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("다 모았어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(team)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        overlapped shouldBe true
+        model.requests[1].messages.filter { it.role == ChatRole.TOOL }.map { it.content } shouldBe listOf("리서치 결과", "작성 결과")
+        events.filterIsInstance<AgentEvent.Status>().map { it.text }.let { it shouldContain "[리서치] 일하는 중"; it shouldContain "[작성] 일하는 중" }
+    }
+
     test("같은 도구를 같은 인자로 세 번째 부르면 실행하지 않는다 (J-10)") {
         val search = RecordingTool("search_files", RiskLevel.READ)
         val same = ToolCall("a", "search_files", """{"name":"*App.swift*"}""")

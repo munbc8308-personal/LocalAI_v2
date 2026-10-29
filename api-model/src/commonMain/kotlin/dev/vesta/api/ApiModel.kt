@@ -481,7 +481,7 @@ data class A2aPreviewDto(
 
 /** 팀 (A-14): 리더·멤버는 사용자 정의 에이전트 이름 (`PUT /api/teams/{name}`) */
 @Serializable
-data class TeamDto(val name: String, val description: String, val leader: String, val members: List<String>, val updatedAt: String? = null)
+data class TeamDto(val name: String, val description: String, val leader: String, val members: List<String>, val updatedAt: String? = null, /** 사무실 팀 방 꾸미기 (M38) */ val theme: String? = null)
 
 @Serializable
 data class RunDto(

@@ -32,9 +32,21 @@ import kotlin.math.sin
 fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var info by remember { mutableStateOf("지금 일하는 직원이 없습니다. 대화나 에이전트에 일을 맡기면 들어옵니다.") }
+    var rooms by remember { mutableStateOf(listOf(Office.Room(Office.MAIN, "본사", 0, false))) }
+    var current by remember { mutableStateOf(Office.MAIN) }
     val office = remember { Office(userName) { count -> info = if (count == 0) "지금 일하는 직원이 없습니다. 대화나 에이전트에 일을 맡기면 들어옵니다." else "일하는 직원 ${count}명 · 직원을 누르면 그 대화로" } }
+    office.onRooms = { rooms = it }
     Div({ classes("page") }) {
         H2 { Text("사무실") }
+        // 방(본사·팀마다): 일하는 직원 수, 승인 기다리면 빨간 점
+        Div({ classes("row", "small"); style { property("flex-wrap", "wrap"); property("justify-content", "flex-start"); property("gap", "6px") } }) {
+            rooms.forEach { r ->
+                org.jetbrains.compose.web.dom.Button({
+                    classes("link", "small"); if (r.key == current) classes("on")
+                    onClick { current = r.key; office.show(r.key) }
+                }) { Text(r.label + (if (r.count > 0) " (${r.count})" else "") + if (r.approval) " 🔴" else "") }
+            }
+        }
         P({ classes("muted", "small") }) { Text(info) }
         Canvas({ id("office"); classes("office") }) {}
     }
@@ -47,6 +59,8 @@ fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
             }
         }
         scope.launch { runCatching { Http.get("/api/me/settings", dev.vesta.api.SettingsDto.serializer()) }.getOrNull()?.avatar?.let { office.avatar = it } }
+        // 팀마다 방 (꾸미기는 팀 설정, 없으면 팀 이름으로)
+        scope.launch { runCatching { Http.get("/api/agents", dev.vesta.api.AgentsDto.serializer()) }.getOrNull()?.teams?.forEach { office.addRoom(it.name, it.theme) } }
         scope.launch {
             runCatching { Http.get("/api/runs?limit=30", ListSerializer(RunDto.serializer())) }.getOrNull()
                 ?.filter { it.status == "RUNNING" }?.forEach { office.enter(it.id, it.agent, it.customAgent, atDesk = true) }
@@ -67,8 +81,26 @@ fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
 internal class Office(private val userName: String, private val onCount: (Int) -> Unit) {
     /** 내 캐릭터 꾸미기 (설정, M38) */
     var avatar: String? = null
+    /** 방 탭에 보일 것 (M38 OF-09) */
+    data class Room(val key: String, val label: String, val count: Int, val approval: Boolean)
+    var onRooms: (List<Room>) -> Unit = {}
+    /** 방 → 꾸미기. 본사는 사무실 */
+    private val themes = linkedMapOf(MAIN to "office")
+    private var room = MAIN
+
+    fun addRoom(team: String, theme: String?) {
+        themes[team] = theme ?: THEMES[(team.hashCode() and 0x7fffffff) % THEMES.size]
+        publish()
+    }
+
+    fun show(key: String) { room = key }
+
+    private fun publish() = onRooms(themes.keys.map { k ->
+        val inRoom = workers.values.filter { it.room == k && !it.leaving }
+        Room(k, if (k == MAIN) "본사" else "팀 $k", inRoom.count { !it.member }, inRoom.any { it.approval })
+    })
     private class Station(val key: String, val col: Double, val row: Double, val icon: String, val label: String)
-    private class Envelope(var x: Double, var y: Double, val tx: Double, val ty: Double)
+    private class Envelope(var x: Double, var y: Double, val tx: Double, val ty: Double, val room: String = MAIN)
 
     private class Worker(val run: Long, var agent: String, var name: String?, var x: Double, var y: Double) {
         var tx = x
@@ -87,6 +119,10 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         var reportLeft = 0.0
         /** 같은 에이전트가 동시에 여럿이면 2, 3… */
         var nth = 1
+        /** 어느 방 (본사 또는 팀 이름) */
+        var room = MAIN
+        /** 메인 모델이 이 직원 일로 생각·글쓰기 중 (도구·승인 대기가 아닐 때) */
+        var thinking = false
     }
 
     private val stations = listOf(
@@ -104,7 +140,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
     private val desks = (0 until 12).map { i -> (2.6 + (i % 6) * 2.1) to (4.0 + (i / 6) * 2.4) }
     private val workers = LinkedHashMap<Long, Worker>()
     /** 팀 실행에서 지금 맡은 멤버 (멤버의 단계는 멤버가 움직인다) */
-    private val activeMember = HashMap<Long, Long>()
+    private val activeMembers = HashMap<Long, HashMap<String, Long>>()
     private val envelopes = mutableListOf<Envelope>()
     private var nextMemberId = -1L
     private var canvas: HTMLCanvasElement? = null
@@ -118,7 +154,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
             val rect = target.getBoundingClientRect()
             val px = (e.asDynamic().clientX as Double) - rect.left
             val py = (e.asDynamic().clientY as Double) - rect.top
-            workers.values.firstOrNull { abs(it.x * tile - px) < tile * 0.5 && abs(it.y * tile - py) < tile * 0.8 && !it.member }
+            workers.values.firstOrNull { it.room == room && abs(it.x * tile - px) < tile * 0.5 && abs(it.y * tile - py) < tile * 0.8 && !it.member }
                 ?.let { onClick(it.run) }
         }
         frame = window.requestAnimationFrame(::tick)
@@ -155,18 +191,21 @@ internal class Office(private val userName: String, private val onCount: (Int) -
             val run = e.run
             if (e.kind == "input") enter(run)
             val leader = workers[run] ?: run { enter(run); workers.getValue(run) }
-            // 팀: 맡긴 동안의 단계는 그 멤버가 한다
-            val actor = activeMember[run]?.let { workers[it] } ?: leader
+            // 팀: 멤버가 한 단계는 "[이름] …"·"이름/도구"로 온다 (여럿이 동시에 일할 수 있다, OF-11)
+            val memberName = Regex("^\\[([^\\]]+)\\]").find(e.title)?.groupValues?.get(1)
+                ?: e.title.removePrefix("도구 ").substringBefore(' ').takeIf { '/' in it }?.substringBefore('/')
+            val actor = memberName?.let { activeMembers[run]?.get(it) }?.let { workers[it] } ?: leader
             when (e.kind) {
                 "routed" -> {
                     leader.agent = u.agent ?: leader.agent
                     leader.name = u.customAgent
                     leader.skill = u.skill
                     leader.nth = renumber(leader.agent, leader.name, except = leader.run)
+                    if (leader.agent == "TEAM") leader.name?.let { moveTo(leader, it) }
                 }
-                "status" -> actor.bubble = e.title
+                "status" -> actor.bubble = e.title.replace(Regex("^\\[[^\\]]+\\]\\s*"), "")
                 "tool_started" -> {
-                    val tool = e.title.removePrefix("도구 ").substringBefore(' ')
+                    val tool = e.title.removePrefix("도구 ").substringBefore(' ').substringAfter('/')
                     goTo(actor, stationFor(tool, actor.agent))
                     actor.bubble = e.detail ?: tool
                 }
@@ -177,23 +216,34 @@ internal class Office(private val userName: String, private val onCount: (Int) -
                     leader.bubble = e.title
                     val id = nextMemberId--
                     val mail = stations.getValue("mail")
-                    val m = Worker(id, "TEAM", e.title.removePrefix("나눠 맡김: ").substringBefore(':').take(12), mail.col, mail.row).apply { member = true; parent = run }
-                    m.desk = freeDesk()
+                    val who = e.title.removePrefix("나눠 맡김: ").substringBefore("에게").substringBefore(':').trim().take(12)
+                    val m = Worker(id, "MEMBER", who, mail.col, mail.row).apply { member = true; parent = run; room = leader.room }
+                    m.desk = freeDesk(leader.room)
                     desks.getOrNull(m.desk)?.let { (c, r) -> m.tx = c; m.ty = r }
                     workers[id] = m
-                    activeMember[run] = id
-                    envelopes += Envelope(leader.x, leader.y, m.tx, m.ty)
+                    activeMembers.getOrPut(run) { HashMap() }[who] = id
+                    envelopes += Envelope(leader.x, leader.y, m.tx, m.ty, leader.room)
                 }
                 "delegate_finished" -> {
-                    activeMember.remove(run)?.let { id -> workers[id]?.let { m -> envelopes += Envelope(m.x, m.y, leader.x, leader.y); leave(m) } }
+                    // "받음: 이름: …" — 그 멤버만 보낸다 (여럿이 일하는 중일 수 있다)
+                    val who = e.title.substringAfter(": ").substringBefore(':').trim()
+                    val ids = activeMembers[run] ?: HashMap()
+                    (ids.remove(who) ?: ids.keys.firstOrNull()?.let { ids.remove(it) })
+                        ?.let { id -> workers[id]?.let { m -> envelopes += Envelope(m.x, m.y, leader.x, leader.y, leader.room); leave(m) } }
                     back(leader)
                     leader.bubble = e.title
                 }
-                "answer" -> leader.report = plain(e.title)
+                // 답 첫머리의 "…하겠습니다·할게요" 같은 계획 줄은 건너뛰고 결과 줄을 보고한다
+                "answer" -> leader.report = (e.detail ?: e.title).lines().map(::plain).filter { it.isNotBlank() }
+                    .let { lines -> lines.firstOrNull { !INTENT.containsMatchIn(it) } ?: lines.firstOrNull() }
                 "error" -> leader.report = "오류가 났어요"
                 "done" -> leader.bubble = "보고하러 가요"
             }
             if (e.kind != "approval" && e.kind != "status") actor.approval = false
+            // 메인 모델이 생각·글쓰기 중인지 (도구가 도는 동안·승인 대기는 아니다)
+            actor.thinking = e.kind in setOf("input", "routed", "status", "tool_finished", "delegate_finished")
+            if (e.kind in setOf("answer", "done", "error")) leader.thinking = false
+            publish()
         }
         u.run?.let { r ->
             val w = workers[r.id] ?: if (r.status == "RUNNING") { enter(r.id, r.agent, r.customAgent); workers[r.id] } else {
@@ -208,9 +258,21 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         }
     }
 
-    private fun freeDesk(): Int {
-        val used = workers.values.filter { !it.leaving }.map { it.desk }.toSet()
+    private fun freeDesk(inRoom: String = MAIN): Int {
+        val used = workers.values.filter { !it.leaving && it.room == inRoom }.map { it.desk }.toSet()
         return desks.indices.firstOrNull { it !in used } ?: -1
+    }
+
+    /** 팀 일이면 그 팀 방으로 옮겨 앉힌다 (문에서 다시 들어온다) */
+    private fun moveTo(w: Worker, target: String) {
+        if (w.room == target) return
+        if (target != MAIN && target !in themes) addRoom(target, null)
+        w.room = target
+        val door = stations.getValue("door")
+        w.x = door.col; w.y = door.row
+        w.desk = freeDesk(target)
+        back(w)
+        publish()
     }
 
     private fun stationFor(tool: String, agent: String): String = when {
@@ -234,7 +296,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
     }
 
     /** 말풍선용: 마크다운 표시·출처 번호를 뺀다 */
-    private fun plain(text: String) = text.replace(Regex("\\s*\\[\\d+(?:\\s*,\\s*\\d+)*]"), "").replace(Regex("[*_`#>]+"), "").trim()
+    private fun plain(text: String) = text.replace(Regex("\\s*\\[\\d+(?:\\s*,\\s*\\d+)*\\]"), "").replace(Regex("[*_`#>]+"), "").trim()
 
     /** 사용자 책상 앞으로 가서 보고한 뒤 나간다 (멤버는 리더에게 편지로 보고했으니 바로) */
     private fun report(w: Worker) {
@@ -283,7 +345,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
                 if (w.reportLeft <= 0) { w.reporting = false; leave(w) }
             }
         }
-        if (gone.isNotEmpty()) { gone.forEach { workers.remove(it) }; onCount(workers.values.count { !it.member }) }
+        if (gone.isNotEmpty()) { gone.forEach { workers.remove(it) }; onCount(workers.values.count { !it.member }); publish() }
         envelopes.removeAll { e ->
             val dx = e.tx - e.x; val dy = e.ty - e.y
             val d = kotlin.math.sqrt(dx * dx + dy * dy)
@@ -304,11 +366,20 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         g.setTransform(ratio, 0.0, 0.0, ratio, 0.0, 0.0)
         g.asDynamic().imageSmoothingEnabled = false
         // 바닥·벽
+        val theme = THEME_LOOK.getValue(themes[room] ?: "office")
         for (row in 0 until 10) for (col in 0 until 16) {
-            g.fillStyle = if (row < 2) "#3d3a4f" else if ((row + col) % 2 == 0) "#e8dcc3" else "#e0d3b8"
+            g.fillStyle = when {
+                row < 2 -> theme.wall
+                theme.planks -> if ((col + (row % 2) * 2) % 4 == 0) theme.floorB else theme.floorA
+                else -> if ((row + col) % 2 == 0) theme.floorA else theme.floorB
+            }
             g.fillRect(col * tile, row * tile, tile + 0.5, tile + 0.5)
         }
-        g.fillStyle = "#2b2838"; g.fillRect(0.0, 2 * tile - 4, width, 4.0)
+        g.fillStyle = theme.trim; g.fillRect(0.0, 2 * tile - 4, width, 4.0)
+        // 방 장식 (테마마다)
+        g.font = "${(tile * 0.55).toInt()}px sans-serif"; g.fillStyle = "#000"
+        for ((c0, r0, icon) in theme.decor) g.fillText(icon, c0 * tile, r0 * tile)
+        if (room != MAIN) { g.font = "${(tile * 0.3).toInt()}px sans-serif"; g.fillStyle = "#fff"; g.fillText("팀 $room · ${theme.label}", 8.0 * tile, 0.45 * tile) }
         // 자리
         g.asDynamic().textAlign = "center"
         for (s in stations.values.filter { it.icon.isNotEmpty() }) {
@@ -322,7 +393,14 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         }
         // 사용자 책상과 사용자
         val boss = stations.getValue("boss")
-        drawPerson(g, boss.col, boss.row - 0.35, "USER", 0.0, t, 99)
+        // 메인 모델이 어느 직원 일로든 생각·글쓰기 중이면 사용자가 타자를 친다 (모델 = 나의 머리)
+        val typing = workers.values.any { it.thinking && !it.leaving && !it.reporting }
+        drawPerson(g, boss.col, boss.row - 0.35, "USER", if (typing) t * 14 else 0.0, t, 99)
+        if (typing) {
+            g.fillStyle = "#9be7ff"; g.fillRect((boss.col + 0.55) * tile, (boss.row - 0.35) * tile, tile * 0.55, tile * 0.3)
+            g.font = "${(tile * 0.22).toInt()}px sans-serif"; g.fillStyle = "#333"
+            pill(g, "생각하는 중" + ".".repeat(((t * 2).toInt() % 3) + 1), boss.col * tile, (boss.row - 1.55) * tile, "#eef6ff", "#245")
+        }
         g.fillStyle = "#6b4a2e"; g.fillRect((boss.col - 1.3) * tile, (boss.row - 0.1) * tile, tile * 2.6, tile * 0.6)
         g.fillStyle = "#c9a227"; g.fillRect((boss.col - 1.3) * tile, (boss.row - 0.1) * tile, tile * 2.6, tile * 0.08)
         g.font = "${(tile * 0.24).toInt()}px sans-serif"; g.fillStyle = "#fff"
@@ -330,7 +408,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         workers.values.any { it.reporting && abs(it.ty - it.y) < 0.05 && abs(it.tx - it.x) < 0.05 }.takeIf { it }?.let { pill(g, "👍", boss.col * tile, (boss.row - 1.15) * tile, "#fff", "#333") }
         // 직원 (아래쪽이 앞에 오게), 책상은 앉은 직원 앞에 그린다
         // 앉은 직원은 책상 뒤에, 걸어다니는·보고하는 직원은 책상 앞에
-        val (seated, walking) = workers.values.sortedBy { it.y }.partition { w -> desks.getOrNull(w.desk)?.let { (c0, r0) -> abs(w.x - c0) < 0.05 && abs(w.y - r0) < 0.05 } == true }
+        val (seated, walking) = workers.values.filter { it.room == room }.sortedBy { it.y }.partition { w -> desks.getOrNull(w.desk)?.let { (c0, r0) -> abs(w.x - c0) < 0.05 && abs(w.y - r0) < 0.05 } == true }
         seated.forEach { drawWorker(g, it, t) }
         for ((c0, r0) in desks) {
             g.fillStyle = "#2f3542"; g.fillRect((c0 + 0.15) * tile, (r0 - 0.05) * tile, tile * 0.45, tile * 0.32)
@@ -339,7 +417,7 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         walking.forEach { drawWorker(g, it, t) }
         // 편지
         g.font = "${(tile * 0.45).toInt()}px sans-serif"
-        for (e in envelopes) g.fillText("✉️", e.x * tile, e.y * tile)
+        for (e in envelopes.filter { it.room == room }) g.fillText("✉️", e.x * tile, e.y * tile)
     }
 
     private fun drawWorker(g: CanvasRenderingContext2D, w: Worker, t: Double) {
@@ -503,8 +581,21 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         "IMAGE" -> "이미지"; "VIDEO" -> "영상"; "TEAM" -> "팀"; "CURATOR" -> "학습"; "SKILL" -> "스킬"; else -> agent.lowercase()
     }
 
-    private companion object {
+    private class Theme(val label: String, val wall: String, val trim: String, val floorA: String, val floorB: String, val planks: Boolean, val decor: List<Triple<Double, Double, String>>)
+
+    companion object {
+        const val MAIN = ""
+        val THEMES = listOf("office", "cafe", "lab", "library", "studio", "factory")
+        private val THEME_LOOK = mapOf(
+            "office" to Theme("사무실", "#3d3a4f", "#2b2838", "#e8dcc3", "#e0d3b8", false, listOf(Triple(0.6, 3.2, "🪴"), Triple(15.4, 3.2, "🪴"), Triple(0.6, 6.0, "🗓️"))),
+            "cafe" to Theme("카페", "#5d4037", "#3e2723", "#c8a27a", "#b8915f", true, listOf(Triple(0.6, 3.2, "🪴"), Triple(15.4, 3.2, "☕"), Triple(15.4, 6.0, "🪴"), Triple(0.6, 6.0, "🧁"))),
+            "lab" to Theme("연구소", "#cfd8dc", "#90a4ae", "#f5f7f8", "#e7ecef", false, listOf(Triple(0.6, 3.2, "🧪"), Triple(15.4, 3.2, "🔬"), Triple(0.6, 6.0, "🧬"), Triple(15.4, 6.0, "⚗️"))),
+            "library" to Theme("도서관", "#4e342e", "#3e2723", "#8e3b46", "#7d3340", false, listOf(Triple(0.6, 3.2, "📚"), Triple(15.4, 3.2, "📚"), Triple(0.6, 6.0, "🕯️"), Triple(15.4, 6.0, "📜"))),
+            "studio" to Theme("스튜디오", "#1f1f2e", "#000000", "#3a3a4a", "#33334a", false, listOf(Triple(0.6, 3.2, "💡"), Triple(15.4, 3.2, "🎬"), Triple(0.6, 6.0, "🎧"), Triple(15.4, 6.0, "🎛️"))),
+            "factory" to Theme("공장", "#546e7a", "#37474f", "#9e9e9e", "#8f8f8f", false, listOf(Triple(0.6, 3.2, "⚙️"), Triple(15.4, 3.2, "📦"), Triple(0.6, 6.0, "🔧"), Triple(15.4, 6.0, "🏗️"))),
+        )
         const val SKIN = "#f1c9a5"
+        private val INTENT = Regex("(하겠습니다|할게요|할게|맡기겠|드리겠|해 볼게|찾아볼게)[.!]?$")
         const val REPORT_SECONDS = 2.5
     }
 }

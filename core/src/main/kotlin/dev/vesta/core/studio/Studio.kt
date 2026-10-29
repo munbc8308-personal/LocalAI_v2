@@ -46,9 +46,12 @@ data class TeamDef(
     val leader: String,
     val members: List<String>,
     val updatedAt: Instant = Instant.EPOCH,
+    /** 사무실 화면의 팀 방 꾸미기 (M38 OF-10): [THEMES] 중 하나, null이면 팀 이름으로 정한다 */
+    val theme: String? = null,
 ) {
     companion object {
         const val MAX_MEMBERS = 6
+        val THEMES = listOf("office", "cafe", "lab", "library", "studio", "factory")
     }
 }
 

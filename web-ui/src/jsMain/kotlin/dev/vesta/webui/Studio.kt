@@ -491,6 +491,7 @@ private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
 private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: List<A2aAgentDto>, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial.name) }
     var description by remember(initial) { mutableStateOf(initial.description) }
+    var theme by remember(initial) { mutableStateOf(initial.theme.orEmpty()) }
     var leader by remember(initial) { mutableStateOf(initial.leader) }
     var members by remember(initial) { mutableStateOf(initial.members.toSet()) }
     Div({ classes("card", "stack") }) {
@@ -516,10 +517,16 @@ private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: L
                 Span({ classes("muted") }) { Text(memberDescription.take(40)) }
             }
         }
+        Div({ classes("row", "small") }) {
+            Span { Text("사무실 방 꾸미기") }
+            Select({ onChange { e -> theme = e.value.orEmpty() } }) {
+                listOf("" to "자동", "office" to "사무실", "cafe" to "카페", "lab" to "연구소", "library" to "도서관", "studio" to "스튜디오", "factory" to "공장").forEach { (v, l) -> Option(v, { if (v == theme) selected() }) { Text(l) } }
+            }
+        }
         Button({
             classes("primary")
             if (leader.isEmpty() || members.isEmpty()) disabled()
-            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members })) }
+            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members }, theme = theme.ifEmpty { null })) }
         }) { Text("저장") }
     }
 }

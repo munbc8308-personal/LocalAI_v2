@@ -319,6 +319,8 @@ object AgentTeams : LongIdTable("agent_team") {
     val leader = varchar("leader", 40)
     val members = text("members")
     val updatedAt = timestamp("updated_at")
+    /** 사무실 팀 방 꾸미기 (M38) */
+    val theme = varchar("theme", 16).nullable()
 
     init { uniqueIndex(owner, name) }
 }
