@@ -31,6 +31,16 @@ object BotTokens {
     fun keychain(service: String, account: String): String? =
         run(listOf("/usr/bin/security", "find-generic-password", "-s", service, "-a", account, "-w"))?.trim()?.takeIf { it.isNotEmpty() }
 
+    /** 키체인에 비밀 하나 저장 (값은 빈 칸·따옴표 없는 글자만: base64 등). 저장 뒤 읽어서 확인한다 */
+    fun writeKeychain(service: String, account: String, value: String): Boolean {
+        require(value.isNotEmpty() && value.none { it.isWhitespace() || it == '"' || it == '\'' || it == '\\' }) { "키체인 값 형식이 아닙니다" }
+        return run(listOf("/usr/bin/security", "-i"), stdin = "add-generic-password -U -s $service -a $account -w $value\n") != null &&
+            keychain(service, account) == value
+    }
+
+    fun deleteKeychain(service: String, account: String): Boolean =
+        run(listOf("/usr/bin/security", "delete-generic-password", "-s", service, "-a", account)) != null
+
     private fun envName(channel: String, account: String) =
         "VESTA_${channel.uppercase()}_" + if (account == APP) "APP_TOKEN" else "TOKEN"
 

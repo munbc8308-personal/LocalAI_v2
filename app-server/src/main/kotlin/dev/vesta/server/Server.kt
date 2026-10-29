@@ -156,6 +156,7 @@ fun main() {
         allowedHosts = app.config.server.allowedHosts.map { it.lowercase() }.toSet(),
         serveWebUi = webUi,
         publicGate = publicGate(app.config.publicAccess, app.config.server.port),
+        google = app.googleAuth,
         memories = app.memories,
         memoryScan = { memoryKeeper?.runOnce(force = true)?.saved.orEmpty() },
         schedules = app.schedules,

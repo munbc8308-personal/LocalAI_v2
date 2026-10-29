@@ -48,6 +48,12 @@ class AppGroupSelector(
             "location" to "Maps: places, addresses, routes, travel time, current location",
             "shortcuts" to "Apple Shortcuts automation",
             "clock" to "Current time, time zones, date calculation",
+            // Google (M40): 사용자의 Google 계정
+            "gmail" to "Gmail (Google account): search, read, draft or send email",
+            "drive" to "Google Drive: find and read files (Google Docs/Sheets/Slides, Word, Excel, PDF), upload new files",
+            "sheets" to "Google Sheets: read cells, update, append rows, create spreadsheets",
+            "docs" to "Google Docs: create documents or append text",
+            "gcal" to "Google Calendar: list or create events",
         )
 
         private val KEYWORDS = mapOf(
@@ -61,6 +67,11 @@ class AppGroupSelector(
             "weather" to Regex("날씨|비 ?와|우산|기온"),
             "location" to Regex("길찾기|경로|가는 길|얼마나 걸려|위치|주소|근처"),
             "shortcuts" to Regex("단축어|shortcut", RegexOption.IGNORE_CASE),
+            "gmail" to Regex("메일|이메일|지메일|gmail|편지함|답장", RegexOption.IGNORE_CASE),
+            "drive" to Regex("드라이브|drive|파일|문서|시트|스프레드|엑셀|excel|워드|word|docx|xlsx|pdf|슬라이드", RegexOption.IGNORE_CASE),
+            "sheets" to Regex("시트|스프레드|엑셀|excel|표에|가계부|줄 ?추가", RegexOption.IGNORE_CASE),
+            "docs" to Regex("구글 ?문서|google docs|문서(를|로)? ?(만들|작성|써|추가|덧붙)|워드", RegexOption.IGNORE_CASE),
+            "gcal" to Regex("일정|약속|회의|캘린더|미팅|스케줄|구글 ?캘린더"),
         )
     }
 }

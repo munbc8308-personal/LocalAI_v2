@@ -18,7 +18,7 @@ object RoutingQuestions {
         AgentType.WEB to "Needs current or recent information from the internet: news, prices, exchange rates, stock, sports results, latest versions, releases.",
         AgentType.CODE to "Programming help: write, explain, debug or review code, error messages, SQL, git, build tools.",
         AgentType.TASK to "Perform actions on files or the computer: organize, move, convert or save files, run commands or builds, schedule jobs.",
-        AgentType.PERSONAL to "Personal assistant on the user's Mac apps: calendar, schedule, reminders, to-dos, mail, text messages, contacts, notes app, weather, music.",
+        AgentType.PERSONAL to "Personal assistant on the user's Mac apps and Google account: calendar, schedule, reminders, to-dos, mail, Gmail, Google Drive files, Google Sheets, Google Docs, text messages, contacts, notes app, weather, music.",
         AgentType.IMAGE to "Create or draw a new image, picture, illustration, logo or artwork.",
     )
 
@@ -28,7 +28,7 @@ object RoutingQuestions {
         AgentType.WEB to "인터넷의 최신 정보가 필요: 뉴스, 가격, 환율, 주가, 경기 결과, 최신 버전, 출시 소식.",
         AgentType.CODE to "프로그래밍 도움: 코드 작성·설명·디버깅·리뷰, 오류 메시지, SQL, git, 빌드 도구.",
         AgentType.TASK to "파일이나 컴퓨터에 작업 수행: 파일 정리·이동·변환·저장, 명령·빌드 실행, 예약 작업.",
-        AgentType.PERSONAL to "Mac 앱 개인 비서: 캘린더 일정, 미리 알림, 할 일, 메일, 문자, 연락처, 메모 앱, 날씨, 음악.",
+        AgentType.PERSONAL to "Mac 앱·Google 계정 개인 비서: 캘린더 일정, 미리 알림, 할 일, 메일·Gmail, 구글 드라이브 파일, 구글 시트, 구글 문서, 문자, 연락처, 메모 앱, 날씨, 음악.",
         AgentType.IMAGE to "새 이미지·그림·일러스트·로고 생성.",
     )
 

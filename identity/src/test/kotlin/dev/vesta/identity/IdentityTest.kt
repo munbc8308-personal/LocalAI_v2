@@ -32,7 +32,7 @@ import kotlin.io.path.createTempDirectory
 class IdentityTest : FunSpec({
     test("역할 표: MEMBER는 Apple 앱·셸 없음, GUEST는 대화·웹만, 관리는 OWNER만") {
         RolePolicy.agents(UserRole.OWNER) shouldBe AgentType.entries.toSet()
-        (AgentType.PERSONAL in RolePolicy.agents(UserRole.MEMBER)) shouldBe false
+        (AgentType.PERSONAL in RolePolicy.agents(UserRole.MEMBER)) shouldBe true
         RolePolicy.agents(UserRole.GUEST) shouldBe setOf(AgentType.CHAT, AgentType.WEB)
         RolePolicy.allowsRisk(UserRole.MEMBER, RiskLevel.EXEC) shouldBe false
         RolePolicy.allowsRisk(UserRole.MEMBER, RiskLevel.WRITE) shouldBe true

@@ -276,7 +276,7 @@ internal fun replaceTopLevelBlock(text: String, key: String, block: String): Str
     return (lines.take(start) + block.trimEnd().lines() + after).joinToString("\n").let { if (after.isEmpty()) it + "\n" else it }
 }
 
-private fun restartServer() {
+internal fun restartServer() {
     val services = Services(listOf("dev.vesta.server"))
     if (!Files.exists(Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.vesta.server.plist"))) return
     services.stop()

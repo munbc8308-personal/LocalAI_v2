@@ -19,6 +19,17 @@ data class VestaConfig(
     val users: UsersConfig = UsersConfig(),
     val evolution: EvolutionConfig = EvolutionConfig(),
     val publicAccess: PublicAccessConfig = PublicAccessConfig(),
+    val google: GoogleConfig = GoogleConfig(),
+)
+
+/**
+ * Google 연동 (PROJECT.md 7.34, M40). 주인이 만든 OAuth 클라이언트(웹 애플리케이션)의 ID. 비밀은 키체인 `dev.vesta.google`/`client-secret`.
+ * 설정: `vesta google setup`. [redirectUri]가 비면 `https://<publicAccess.hostname>/api/google/callback`
+ */
+data class GoogleConfig(
+    val enabled: Boolean = false,
+    val clientId: String = "",
+    val redirectUri: String = "",
 )
 
 /**

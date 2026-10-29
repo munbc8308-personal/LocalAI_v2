@@ -18,6 +18,7 @@ import dev.vesta.api.EventDto
 import dev.vesta.api.HealthDto
 import dev.vesta.api.LoginDto
 import dev.vesta.api.MeDto
+import dev.vesta.api.GoogleStatusDto
 import dev.vesta.api.MessageDto
 import dev.vesta.api.OaiChatRequest
 import dev.vesta.api.SessionDto
@@ -75,6 +76,7 @@ import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondRedirect
 import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
 import io.ktor.server.response.header
@@ -156,6 +158,8 @@ class ServerDeps(
     val publicGate: PublicGate? = null,
     /** 사용자의 바깥 접속 이메일 (M26) */
     val userEmail: suspend (dev.vesta.core.UserId) -> String? = { null },
+    /** Google 연동 (M40). null이면 설정 안 함 */
+    val google: dev.vesta.google.GoogleAuth? = null,
 )
 
 /** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
@@ -751,6 +755,39 @@ fun Application.vestaApi(deps: ServerDeps) {
                 }
             }
             // 내 설정 (U-07, M20): 호칭·말투·음성 답장·목소리
+            // Google 연결 (M40 GW-02): 자기 계정만. 손님은 쓰지 않는다
+            route("/google") {
+                get {
+                    val user = call.principal(deps) ?: return@get
+                    val google = deps.google?.takeIf { user.role != dev.vesta.core.UserRole.GUEST }
+                    call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(GoogleStatusDto.serializer(), GoogleStatusDto(google != null, google?.email(user.userId))))
+                }
+                post("/connect") {
+                    val user = call.principal(deps) ?: return@post
+                    val google = deps.google ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"Google 연동이 설정되지 않았습니다 (Mac에서 vesta google setup)"}""")
+                    if (user.role == dev.vesta.core.UserRole.GUEST) return@post call.respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 Google을 연결할 수 없습니다"}""")
+                    call.respondJson(HttpStatusCode.OK, buildJsonObject { put("url", google.connectUrl(user.userId)) }.toString())
+                }
+                delete {
+                    val user = call.principal(deps) ?: return@delete
+                    deps.google?.disconnect(user.userId)
+                    call.respondJson(HttpStatusCode.OK, """{"ok":true}""")
+                }
+                // Google 로그인에서 돌아오는 곳. 다른 사이트에서 오는 이동이라 로그인 쿠키(SameSite=Strict)가 없다: state만으로 사용자를 찾는다
+                get("/callback") {
+                    val google = deps.google ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
+                    val state = call.request.queryParameters["state"].orEmpty()
+                    val code = call.request.queryParameters["code"]
+                    val result = when {
+                        code == null || state.isEmpty() -> "denied"
+                        else -> when (val finished = google.finish(state, code)) {
+                            is dev.vesta.google.GoogleAuth.Finish.Ok -> "ok"
+                            is dev.vesta.google.GoogleAuth.Finish.Failed -> finished.message
+                        }
+                    }
+                    call.respondRedirect("/?google=" + java.net.URLEncoder.encode(result, Charsets.UTF_8))
+                }
+            }
             route("/me/settings") {
                 get {
                     val user = call.principal(deps) ?: return@get

@@ -68,6 +68,7 @@ include(
     "memory",
     "scheduler",
     "mcp",
+    "google",
     "a2a",
     "agents",
     "conversation",

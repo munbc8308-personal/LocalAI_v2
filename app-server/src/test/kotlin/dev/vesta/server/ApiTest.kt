@@ -1,5 +1,6 @@
 package dev.vesta.server
 
+import io.ktor.client.engine.mock.respondError
 import dev.vesta.core.AgentType
 import dev.vesta.core.ChannelType
 import dev.vesta.core.RiskLevel
@@ -411,4 +412,42 @@ class ApiTest : FunSpec({
         client.get("/api/training") { bearerAuth("secret") }.status shouldBe HttpStatusCode.ServiceUnavailable
     } }
 
+    test("Google 연결 (M40): 손님은 못 쓰고, 돌아오는 곳은 쿠키 없이 state로만, 틀린 state는 이유와 함께 설정으로") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val repo = WebAuthRepository(db.db)
+        val users = dev.vesta.identity.UserService(dev.vesta.storage.ExposedUserRepository(db.db), repo)
+        users.create("mina", UserRole.MEMBER, "mina-pass-0001")
+        users.create("guest", UserRole.GUEST, "guest-pass-0001")
+        val store = object : dev.vesta.google.GoogleTokenStore {
+            override fun read(user: dev.vesta.core.UserId) = null
+            override fun write(user: dev.vesta.core.UserId, credentials: dev.vesta.google.GoogleCredentials) = true
+            override fun delete(user: dev.vesta.core.UserId) = Unit
+        }
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { respondError(HttpStatusCode.BadRequest) })
+        val google = dev.vesta.google.GoogleAuth(http, "1-abc.apps.googleusercontent.com", { "test-client-secret" }, "https://vesta.example/api/google/callback", store)
+        val deps = ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", auth = WebAuth(repo), users = users, google = google)
+        application { vestaApi(deps) }
+        val noRedirect = createClient { followRedirects = false }
+        suspend fun login(name: String, password: String): io.ktor.client.request.HttpRequestBuilder.() -> Unit {
+            val r = client.post("/api/login") { setBody("""{"name":"$name","password":"$password"}""") }
+            val cookie = r.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+            val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), r.bodyAsText()).csrf
+            return { header("Cookie", cookie); header("X-Vesta-CSRF", csrf) }
+        }
+        val mina = login("mina", "mina-pass-0001")
+        client.get("/api/google", mina).bodyAsText() shouldBe """{"available":true}"""
+        val url = io.ktor.http.Url(dev.vesta.api.ApiJson.parseToJsonElement(client.post("/api/google/connect", mina).bodyAsText()).let { (it as kotlinx.serialization.json.JsonObject)["url"].toString().trim('"') })
+        url.host shouldBe "accounts.google.com"
+        url.parameters["redirect_uri"] shouldBe "https://vesta.example/api/google/callback"
+        // 다른 사람의 state를 만들 수 없다: 모르는 state·취소는 설정 화면으로
+        noRedirect.get("/api/google/callback?state=guess&code=x").headers["Location"]!! shouldContain "/?google="
+        noRedirect.get("/api/google/callback?error=access_denied").headers["Location"] shouldBe "/?google=denied"
+        // Google이 코드를 거절하면 이유와 함께 (state는 이제 못 쓴다)
+        noRedirect.get("/api/google/callback?state=${url.parameters["state"]}&code=x").headers["Location"]!! shouldNotContain "google=ok"
+        val guest = login("guest", "guest-pass-0001")
+        client.get("/api/google", guest).bodyAsText() shouldBe """{"available":false}"""
+        client.post("/api/google/connect", guest).status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/google/connect").status shouldBe HttpStatusCode.Unauthorized
+    } }
 })

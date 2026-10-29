@@ -10,14 +10,14 @@ import dev.vesta.core.UserRole
  * | 역할 | 에이전트 | 도구 |
  * |---|---|---|
  * | OWNER | 전부 | 전부 (셸은 매번 승인) |
- * | MEMBER | Apple 앱(PERSONAL) 제외 | 셸(EXEC) 제외, 파일은 자기 폴더만 |
+ * | MEMBER | 전부 (개인 비서는 자기 Google만, Apple 앱 없음) | 셸(EXEC) 제외, 파일은 자기 폴더만 |
  * | GUEST | 일반 대화·웹 | 없음 (로컬 문서·도구 없음) |
  */
 object RolePolicy {
     fun agents(role: UserRole): Set<AgentType> = when (role) {
         UserRole.OWNER -> AgentType.entries.toSet()
-        // Apple 앱은 Mac 주인 계정의 데이터
-        UserRole.MEMBER -> AgentType.entries.toSet() - AgentType.PERSONAL
+        // 개인 비서: Apple 앱은 Mac 주인 계정의 데이터라 주인만, 멤버는 자기 Google 계정만 (M40). 도구 단계에서 나눈다
+        UserRole.MEMBER -> AgentType.entries.toSet()
         UserRole.GUEST -> setOf(AgentType.CHAT, AgentType.WEB)
     }
 

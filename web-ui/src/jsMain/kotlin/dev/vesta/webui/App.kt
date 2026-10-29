@@ -122,7 +122,8 @@ private fun LoginView(onLogin: (MeDto) -> Unit) {
 private fun Main(me: MeDto, onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
     val chat = remember { ChatController(scope) }
-    var tab by remember { mutableStateOf(Tab.CHAT) }
+    // Google 연결에서 돌아오면(?google=) 설정이 있는 상태 탭으로 (M40)
+    var tab by remember { mutableStateOf(if ("google=" in window.location.search) Tab.DASHBOARD else Tab.CHAT) }
     var drawer by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { chat.refreshSessions() }
@@ -852,6 +853,7 @@ private fun DashboardView(me: MeDto) {
         if (me.role == "OWNER") TrainingCard()
         if (me.role == "OWNER") UsersCard(me)
         SettingsCard()
+        if (me.role != "GUEST") GoogleCard()
         if (me.role != "GUEST") MemoriesCard()
         if (me.role != "GUEST") SchedulesCard()
         MessengersCard()

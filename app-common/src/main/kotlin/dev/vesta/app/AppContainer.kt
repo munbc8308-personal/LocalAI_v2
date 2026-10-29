@@ -301,7 +301,11 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     }
     val users = dev.vesta.identity.UserService(
         userRepository, webAuth,
-        deleteMedia = { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() } },
+        deleteMedia = { id ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { paths.home.resolve("media").resolve(id.value.toString()).toFile().deleteRecursively() }
+            // Google 연결도 함께 끊는다 (M40). 설정을 끈 뒤라도 키체인에 남은 토큰은 지운다
+            googleAuth?.disconnect(id) ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { GoogleKeychain.delete(id) }
+        },
         maxUsers = config.users.maxUsers,
     )
     private val memberTools = java.util.concurrent.ConcurrentHashMap<Long, ToolRegistry>()
@@ -338,6 +342,17 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     val orchard: McpToolSource? = config.mcp.servers["orchard"]
         ?.takeIf { it.enabled && java.io.File(it.command).canExecute() }
         ?.let { McpToolSource("orchard", it, config.tools.maxOutputChars) }
+    /** Google 연동 (M40, 7.34): 사용자마다 자기 계정. 클라이언트 ID를 정했을 때만 */
+    private val googleHttp by lazy { dev.vesta.google.googleHttpClient() }
+    val googleAuth: dev.vesta.google.GoogleAuth? = config.google.takeIf { it.enabled && it.clientId.isNotBlank() }?.let { g ->
+        val redirect = g.redirectUri.ifBlank {
+            config.publicAccess.hostname.takeIf { it.isNotBlank() }?.let { "https://$it/api/google/callback" } ?: "http://localhost:${config.server.port}/api/google/callback"
+        }
+        dev.vesta.google.GoogleAuth(googleHttp, g.clientId, GoogleKeychain::clientSecret, redirect, GoogleKeychain)
+    }
+    val googleTools: List<dev.vesta.google.GoogleTool> = googleAuth?.let { dev.vesta.google.googleTools(dev.vesta.google.GoogleApi(googleHttp, it), config.tools.maxOutputChars) }.orEmpty()
+    /** 이 사용자가 Google을 쓸 수 있는지 (손님 아님 + 연결함) */
+    fun googleReady(user: UserContext) = user.role != UserRole.GUEST && googleAuth?.email(user.userId) != null
     /** 학습으로 만든 결정 모델이 켜져 있으면 그것, 아니면 설정의 모델 (L-07). 10초마다 다시 읽는다 */
     val decisionModel = DecisionModelSelector(config.decision.model) { modelVersions.active("decision")?.name }
     private val decisionClient = OllayaClient(config.decision.baseUrl, { decisionModel.current() }, http)
@@ -363,7 +378,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
             buildSet {
                 addAll(listOf(AgentType.CHAT, AgentType.WEB, AgentType.CODE, AgentType.TASK))
                 // Apple 앱은 Mac 주인 계정의 데이터 → OWNER만 (7.12)
-                if (orchard != null && user.role == UserRole.OWNER) add(AgentType.PERSONAL)
+                if (orchard != null && user.role == UserRole.OWNER || googleReady(user)) add(AgentType.PERSONAL)
                 if (dev.vesta.identity.RolePolicy.usesLocalData(user.role) && knowledge.accessibleCollections(user.userId).any { it.kind == CollectionKind.DOCS }) add(AgentType.DOCS)
                 if (imageGenerator != null) add(AgentType.IMAGE)
                 // 영상은 그림이 있어야 만든다 (M24). 내레이션(say)은 없어도 자막만으로
@@ -404,11 +419,12 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 rules = Prompts.PERSONAL_RULES,
                 // D11로 고른 앱 그룹의 Orchard 도구만 준다
                 toolsFor = { request ->
-                    // Apple 앱은 Mac 주인만 (7.12). 라우팅에서 이미 막지만 도구 단계에서도 확인한다
-                    if (request.user.role != UserRole.OWNER) return@TaskAgent emptyList()
-                    val all = orchard?.tools().orEmpty()
-                    val groups = appGroups.select(request.history.last().content, all.map { it.group }.toSet())
-                    all.filter { it.group in groups }
+                    // Apple 앱은 Mac 주인만 (7.12). 라우팅에서 이미 막지만 도구 단계에서도 확인한다. Google은 자기 계정을 연결한 사람 (M40)
+                    val apple = if (request.user.role == UserRole.OWNER) orchard?.tools().orEmpty().map { it.group to it } else emptyList()
+                    val google = if (googleReady(request.user)) googleTools.map { it.group to it } else emptyList()
+                    val all: List<Pair<String, dev.vesta.core.tools.Tool>> = apple + google
+                    val groups = appGroups.select(request.history.last().content, all.map { it.first }.toSet())
+                    all.filter { it.first in groups }.map { it.second }
                 },
                 judge = judge,
             ),

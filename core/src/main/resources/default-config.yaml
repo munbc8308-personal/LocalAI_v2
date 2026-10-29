@@ -90,3 +90,8 @@ publicAccess:
   enabled: false
   port: 8788                   # cloudflared가 넘겨주는 곳 (127.0.0.1)
   ownerAdmin: false            # 바깥에서도 주인 관리 기능(사용자·설정·학습)을 쓸지
+
+# Google 연동 (PROJECT.md 7.34, M40). 직접 고치지 말고 vesta google setup 으로
+google:
+  enabled: false
+  clientId: ""
