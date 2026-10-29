@@ -201,3 +201,4 @@ button.danger { color: #c0392b; margin-top: 8px; }
 /* 지난 대화 찾기 (M30) */
 .session-search { width: 100%; margin: 8px 0 4px; box-sizing: border-box; }
 .office { display: block; width: 100%; border-radius: 8px; image-rendering: pixelated; cursor: pointer; }
+input[type=color] { width: 44px; height: 28px; padding: 0; border: 1px solid #ccc; vertical-align: middle; }

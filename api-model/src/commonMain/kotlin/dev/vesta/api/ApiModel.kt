@@ -393,6 +393,8 @@ data class SettingsDto(
     val memoryAuto: Boolean? = null,
     /** 스킬 제안 (M28). null이면 기본(켬) */
     val skillAuto: Boolean? = null,
+    /** 사무실 내 캐릭터 (M38). 저장할 때 null이면 그대로 두고, 빈 글이면 기본으로 */
+    val avatar: String? = null,
 )
 
 /** 장기 기억 하나 (`/api/memories`, M27) */

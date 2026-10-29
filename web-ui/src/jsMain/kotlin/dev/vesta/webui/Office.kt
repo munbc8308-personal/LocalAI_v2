@@ -46,6 +46,7 @@ fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
                     ?.firstOrNull { it.id == run }?.sessionId?.let(onOpenSession)
             }
         }
+        scope.launch { runCatching { Http.get("/api/me/settings", dev.vesta.api.SettingsDto.serializer()) }.getOrNull()?.avatar?.let { office.avatar = it } }
         scope.launch {
             runCatching { Http.get("/api/runs?limit=30", ListSerializer(RunDto.serializer())) }.getOrNull()
                 ?.filter { it.status == "RUNNING" }?.forEach { office.enter(it.id, it.agent, it.customAgent, atDesk = true) }
@@ -63,7 +64,9 @@ fun OfficeView(userName: String, onOpenSession: (String) -> Unit) {
 }
 
 /** 사무실 상태와 그리기. Compose 상태 대신 매 프레임 직접 그린다 (직원이 많아도 가볍게) */
-private class Office(private val userName: String, private val onCount: (Int) -> Unit) {
+internal class Office(private val userName: String, private val onCount: (Int) -> Unit) {
+    /** 내 캐릭터 꾸미기 (설정, M38) */
+    var avatar: String? = null
     private class Station(val key: String, val col: Double, val row: Double, val icon: String, val label: String)
     private class Envelope(var x: Double, var y: Double, val tx: Double, val ty: Double)
 
@@ -121,6 +124,16 @@ private class Office(private val userName: String, private val onCount: (Int) ->
         frame = window.requestAnimationFrame(::tick)
     }
 
+    /** 설정 화면 미리 보기: 내 캐릭터 하나만 */
+    fun preview(c: HTMLCanvasElement) {
+        tile = 72.0
+        c.width = 120; c.height = 140
+        val g = c.getContext("2d") as CanvasRenderingContext2D
+        g.clearRect(0.0, 0.0, 120.0, 140.0)
+        g.asDynamic().imageSmoothingEnabled = false
+        drawPerson(g, 60 / tile, 112 / tile, "USER", 0.0, 0.0, 99)
+    }
+
     fun detach() {
         window.cancelAnimationFrame(frame)
         canvas = null
@@ -176,7 +189,7 @@ private class Office(private val userName: String, private val onCount: (Int) ->
                     back(leader)
                     leader.bubble = e.title
                 }
-                "answer" -> leader.report = e.title
+                "answer" -> leader.report = plain(e.title)
                 "error" -> leader.report = "오류가 났어요"
                 "done" -> leader.bubble = "보고하러 가요"
             }
@@ -219,6 +232,9 @@ private class Office(private val userName: String, private val onCount: (Int) ->
     private fun back(w: Worker) {
         desks.getOrNull(w.desk)?.let { (c, r) -> w.tx = c; w.ty = r }
     }
+
+    /** 말풍선용: 마크다운 표시·출처 번호를 뺀다 */
+    private fun plain(text: String) = text.replace(Regex("\\s*\\[\\d+(?:\\s*,\\s*\\d+)*]"), "").replace(Regex("[*_`#>]+"), "").trim()
 
     /** 사용자 책상 앞으로 가서 보고한 뒤 나간다 (멤버는 리더에게 편지로 보고했으니 바로) */
     private fun report(w: Worker) {
@@ -340,7 +356,7 @@ private class Office(private val userName: String, private val onCount: (Int) ->
         val lift = if (w.desk % 2 == 1) tile * 0.42 else 0.0
         w.skill?.let { s -> pill(g, "/$s", w.x * tile, y - 9.5 * px - lift, "#5b4bd6", "#fff") }
         if (w.approval) pill(g, "! 승인 필요", w.x * tile, y - 4.8 * px - lift, "#e5484d", "#fff")
-        else w.bubble?.takeIf { it.isNotBlank() }?.let { b -> val n = if (w.reporting) 26 else 14; pill(g, b.take(n) + if (b.length > n) "…" else "", w.x * tile, y - 4.8 * px - lift, if (w.reporting) "#fff8d6" else "#fff", "#333") }
+        else w.bubble?.takeIf { it.isNotBlank() }?.let { b -> val n = if (w.reporting) 60 else 40; pill(g, b.take(n) + if (b.length > n) "…" else "", w.x * tile, y - 4.8 * px - lift, if (w.reporting) "#fff8d6" else "#fff", "#333") }
     }
 
     private fun displayName(w: Worker): String {
@@ -411,10 +427,29 @@ private class Office(private val userName: String, private val onCount: (Int) ->
         return y0
     }
 
+    /** 설정의 꾸미기 값으로 (`top=hoodie,#7d4cdb;bottom=#263238;hair=long,#4a2f1d;acc=glasses`), 없으면 왕관 쓴 정장 */
+    private fun userLook(): Look {
+        val m = avatar.orEmpty().split(';').mapNotNull { p -> p.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1].split(',') } }.toMap()
+        val top = m["top"]; val hair = m["hair"]; val acc = m["acc"]?.firstOrNull() ?: "crown"
+        val shirt = top?.getOrNull(1) ?: "#2c3e50"
+        val hat = acc.takeIf { it in setOf("crown", "cap", "beret", "explorer") } ?: ""
+        val gear = acc.takeIf { it in setOf("glasses", "headphones", "earpiece") } ?: ""
+        val outfit = when (top?.firstOrNull()) { null -> "crown"; "tee" -> ""; else -> top.first() }
+        return Look(shirt, m["bottom"]?.firstOrNull() ?: "#1e272e", if (outfit == "crown") "#f1c40f" else darker(shirt), outfit,
+            hair?.firstOrNull() ?: "short", hair?.getOrNull(1) ?: "#2b1b10", hat, gear)
+    }
+
+    /** 옷 장식 색: 바탕보다 조금 어둡게 */
+    private fun darker(hex: String): String {
+        val v = hex.removePrefix("#").toIntOrNull(16) ?: return "#333333"
+        fun ch(shift: Int) = ((v shr shift and 0xff) * 0.7).toInt()
+        return "#" + listOf(16, 8, 0).joinToString("") { ch(it).toString(16).padStart(2, '0') }
+    }
+
     private class Look(val shirt: String, val pants: String, val accent: String, val outfit: String, val hair: String, val hairColor: String, val hat: String = "", val gear: String = "")
 
     private fun look(agent: String, name: String?): Look = when (agent) {
-        "USER" -> Look("#2c3e50", "#1e272e", "#f1c40f", "crown", "short", "#2b1b10", "crown")
+        "USER" -> userLook()
         "CHAT" -> Look("#4f8ef7", "#34495e", "#2f6fd6", "cardigan", "long", "#4a2f1d")
         "WEB" -> Look("#2bb673", "#5d4037", "#1e8c57", "vest", "short", "#3b2a1a", "explorer", "glasses")
         "DOCS" -> Look("#f2994a", "#4e342e", "#d97a2b", "cardigan", "bun", "#c58b4c", gear = "book")
@@ -433,13 +468,29 @@ private class Office(private val userName: String, private val onCount: (Int) ->
         }
     }
 
+    /** 말풍선: 넓이를 넘으면 두 줄까지 (넘치면 …). 아래쪽이 [y] */
     private fun pill(g: CanvasRenderingContext2D, text: String, x: Double, y: Double, bg: String, fg: String) {
         g.font = "${(tile * 0.24).toInt()}px sans-serif"
-        val w = g.measureText(text).width + tile * 0.3
-        val h = tile * 0.38
+        val maxWidth = tile * 3.4
+        val lines = mutableListOf<String>()
+        var line = ""
+        for (ch in text) {
+            if (g.measureText(line + ch).width > maxWidth) {
+                if (lines.size == 1) { line = line.dropLast(1) + "…"; break }
+                lines += line; line = ""
+            }
+            line += ch
+        }
+        lines += line
+        val w = lines.maxOf { g.measureText(it).width } + tile * 0.3
+        // 방 밖으로 잘리지 않게 안쪽으로 민다
+        val x = x.coerceIn(w / 2 + 2, tile * 16 - w / 2 - 2)
+        val lh = tile * 0.3
+        val h = lh * lines.size + tile * 0.1
         g.fillStyle = bg; g.fillRect(x - w / 2, y - h, w, h)
         g.strokeStyle = "rgba(0,0,0,0.25)"; g.strokeRect(x - w / 2, y - h, w, h)
-        g.fillStyle = fg; g.fillText(text, x, y - h * 0.28)
+        g.fillStyle = fg
+        lines.forEachIndexed { i, l -> g.fillText(l, x, y - h + tile * 0.05 + lh * (i + 0.78)) }
     }
 
     private fun persona(agent: String) = when (agent) {

@@ -44,6 +44,8 @@ class VestaDatabase private constructor(val db: Database) {
         if ("memory_auto" !in settingColumns) exec("ALTER TABLE user_settings ADD COLUMN memory_auto BOOLEAN NULL")
         // v25: skill.status·origin·run_id (스킬 초안, M28), user_settings.skill_auto
         if ("skill_auto" !in settingColumns) exec("ALTER TABLE user_settings ADD COLUMN skill_auto BOOLEAN NULL")
+        // 사무실 캐릭터 (M38)
+        if ("avatar" !in settingColumns) exec("ALTER TABLE user_settings ADD COLUMN avatar VARCHAR(200) NULL")
         val skillColumns = exec("PRAGMA table_info(skill)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("status" !in skillColumns) exec("ALTER TABLE skill ADD COLUMN status VARCHAR(8) DEFAULT 'ACTIVE' NOT NULL")
         if ("origin" !in skillColumns) exec("ALTER TABLE skill ADD COLUMN origin VARCHAR(8) DEFAULT 'MANUAL' NOT NULL")

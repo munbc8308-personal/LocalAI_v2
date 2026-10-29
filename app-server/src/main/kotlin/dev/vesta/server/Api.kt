@@ -756,7 +756,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val user = call.principal(deps) ?: return@get
                     val repo = deps.userSettings ?: return@get call.respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"설정을 쓸 수 없습니다"}""")
                     val s = repo.get(user.userId)
-                    val dto = dev.vesta.api.SettingsDto(s.nickname, s.tone.name, s.voiceReply, s.voice, deps.voices(), s.memoryAuto, s.skillAuto)
+                    val dto = dev.vesta.api.SettingsDto(s.nickname, s.tone.name, s.voiceReply, s.voice, deps.voices(), s.memoryAuto, s.skillAuto, s.avatar)
                     call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(dev.vesta.api.SettingsDto.serializer(), dto))
                 }
                 put {
@@ -772,7 +772,14 @@ fun Application.vestaApi(deps: ServerDeps) {
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"말투는 DEFAULT·FORMAL·CASUAL 중 하나입니다"}""")
                     val voice = dto.voice?.ifBlank { null }
                     if (voice != null && voice !in deps.voices()) return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"이 Mac에 없는 목소리입니다"}""")
-                    repo.save(user.userId, dev.vesta.core.identity.UserSettings(nickname, tone, dto.voiceReply, voice, dto.memoryAuto, dto.skillAuto))
+                    // 캐릭터는 이 화면에서 안 보내면(null) 그대로, 빈 글이면 기본으로
+                    val avatar = when (val a = dto.avatar?.trim()) {
+                        null -> repo.get(user.userId).avatar
+                        "" -> null
+                        else -> a.takeIf { dev.vesta.core.identity.Avatar.parse(it) != null }
+                            ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"캐릭터 꾸미기 값이 맞지 않습니다"}""")
+                    }
+                    repo.save(user.userId, dev.vesta.core.identity.UserSettings(nickname, tone, dto.voiceReply, voice, dto.memoryAuto, dto.skillAuto, avatar))
                     call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
                 }
             }

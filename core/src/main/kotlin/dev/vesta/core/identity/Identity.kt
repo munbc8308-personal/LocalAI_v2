@@ -58,6 +58,8 @@ data class UserSettings(
     val memoryAuto: Boolean? = null,
     /** 스킬 제안 (M28 SK-13). null이면 기본: 켬 (GUEST는 늘 끔) */
     val skillAuto: Boolean? = null,
+    /** 사무실 화면의 내 캐릭터 (M38): `top=hoodie,#7d4cdb;bottom=#263238;hair=long,#4a2f1d;acc=glasses`. 검사는 [Avatar] */
+    val avatar: String? = null,
 ) {
     /** 시스템 프롬프트에 붙일 말. 아무것도 정하지 않았으면 null */
     fun persona(): String? = buildList {
@@ -78,4 +80,30 @@ data class UserSettings(
 interface UserSettingsRepository {
     suspend fun get(user: UserId): UserSettings
     suspend fun save(user: UserId, settings: UserSettings)
+}
+
+/** 사무실 화면의 내 캐릭터 꾸미기 (M38). 정해 둔 값만 받는다 (그대로 그리기에 쓰므로) */
+object Avatar {
+    val TOPS = listOf("tee", "hoodie", "tie", "vest", "cardigan", "apron")
+    val HAIRS = listOf("short", "long", "bun", "spiky")
+    val ACCESSORIES = listOf("none", "crown", "glasses", "headphones", "cap", "beret", "explorer", "earpiece")
+    private val COLOR = Regex("^#[0-9a-f]{6}$")
+
+    /** 키=값 묶음. 형식이 틀리면 null */
+    fun parse(text: String): Map<String, List<String>>? {
+        if (text.length > 200) return null
+        val parts = text.split(';').filter { it.isNotBlank() }.map { it.split('=', limit = 2) }
+        if (parts.any { it.size != 2 }) return null
+        val map = parts.associate { (k, v) -> k.trim() to v.split(',').map { it.trim().lowercase() } }
+        val ok = map.all { (k, v) ->
+            when (k) {
+                "top" -> v.size == 2 && v[0] in TOPS && COLOR.matches(v[1])
+                "bottom" -> v.size == 1 && COLOR.matches(v[0])
+                "hair" -> v.size == 2 && v[0] in HAIRS && COLOR.matches(v[1])
+                "acc" -> v.size == 1 && v[0] in ACCESSORIES
+                else -> false
+            }
+        }
+        return map.takeIf { ok }
+    }
 }

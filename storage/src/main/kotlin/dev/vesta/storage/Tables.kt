@@ -292,6 +292,8 @@ object UserSettingsTable : org.jetbrains.exposed.v1.core.Table("user_settings") 
     val memoryAuto = bool("memory_auto").nullable()
     /** 스킬 제안 (M28, v25) */
     val skillAuto = bool("skill_auto").nullable()
+    /** 사무실 캐릭터 (M38) */
+    val avatar = varchar("avatar", 200).nullable()
     override val primaryKey = PrimaryKey(userId)
 }
 

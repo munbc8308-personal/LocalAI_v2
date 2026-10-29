@@ -224,6 +224,36 @@ fun SettingsCard() {
                 s.voices.forEach { v -> Option(v, { if (v == s.voice) selected() }) { Text(v) } }
             }
         }
+        AvatarEditor(s.avatar) { save(s.copy(avatar = it)) }
+    }
+}
+
+/** 사무실 내 캐릭터 꾸미기 (M38): 상의(모양·색)·하의 색·머리(모양·색)·액세서리, 미리 보기 */
+@Composable
+private fun AvatarEditor(current: String?, onSave: (String) -> Unit) {
+    val parts = current.orEmpty().split(';').mapNotNull { p -> p.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1].split(',') } }.toMap()
+    var top by remember(current) { mutableStateOf(parts["top"]?.getOrNull(0) ?: "tie") }
+    var topColor by remember(current) { mutableStateOf(parts["top"]?.getOrNull(1) ?: "#2c3e50") }
+    var bottom by remember(current) { mutableStateOf(parts["bottom"]?.getOrNull(0) ?: "#1e272e") }
+    var hair by remember(current) { mutableStateOf(parts["hair"]?.getOrNull(0) ?: "short") }
+    var hairColor by remember(current) { mutableStateOf(parts["hair"]?.getOrNull(1) ?: "#2b1b10") }
+    var acc by remember(current) { mutableStateOf(parts["acc"]?.getOrNull(0) ?: "crown") }
+    val value = "top=$top,$topColor;bottom=$bottom;hair=$hair,$hairColor;acc=$acc"
+    LaunchedEffect(value) {
+        (kotlinx.browser.document.getElementById("avatar-preview") as? org.w3c.dom.HTMLCanvasElement)?.let { c -> Office("") {}.apply { avatar = value }.preview(c) }
+    }
+    Div({ classes("row", "small") }) { Span { B { Text("사무실 내 캐릭터") } } }
+    Div({ classes("row", "small") }) {
+        org.jetbrains.compose.web.dom.Canvas({ id("avatar-preview"); classes("office"); style { property("width", "120px"); property("height", "140px"); property("background", "#e8dcc3") } }) {}
+        Div({ style { property("display", "grid"); property("gap", "6px") } }) {
+            Div { Text("상의 "); Select({ onChange { e -> e.value?.let { top = it } } }) { listOf("tee" to "티셔츠", "hoodie" to "후드티", "tie" to "정장·넥타이", "vest" to "조끼", "cardigan" to "카디건", "apron" to "앞치마").forEach { (v, l) -> Option(v, { if (v == top) selected() }) { Text(l) } } }
+                Input(InputType.Color) { value(topColor); onInput { topColor = it.value } } }
+            Div { Text("하의 "); Input(InputType.Color) { value(bottom); onInput { bottom = it.value } } }
+            Div { Text("머리 "); Select({ onChange { e -> e.value?.let { hair = it } } }) { listOf("short" to "짧은 머리", "long" to "긴 머리", "bun" to "올림머리", "spiky" to "삐죽 머리").forEach { (v, l) -> Option(v, { if (v == hair) selected() }) { Text(l) } } }
+                Input(InputType.Color) { value(hairColor); onInput { hairColor = it.value } } }
+            Div { Text("액세서리 "); Select({ onChange { e -> e.value?.let { acc = it } } }) { listOf("crown" to "왕관", "none" to "없음", "glasses" to "안경", "headphones" to "헤드폰", "cap" to "모자", "beret" to "베레모", "explorer" to "탐험 모자", "earpiece" to "이어셋").forEach { (v, l) -> Option(v, { if (v == acc) selected() }) { Text(l) } } } }
+            Button({ classes("primary", "small"); onClick { onSave(value) } }) { Text("캐릭터 저장") }
+        }
     }
 }
 
