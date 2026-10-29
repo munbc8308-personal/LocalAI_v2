@@ -37,6 +37,7 @@ import org.jetbrains.compose.web.dom.Input
 import org.jetbrains.compose.web.dom.Option
 import org.jetbrains.compose.web.dom.P
 import org.jetbrains.compose.web.dom.Select
+import org.jetbrains.compose.web.dom.Pre
 import org.jetbrains.compose.web.dom.Span
 import org.jetbrains.compose.web.dom.Text
 
@@ -112,8 +113,12 @@ fun UsersCard(me: MeDto) {
                         Button({
                             classes("link", "small")
                             onClick {
-                                val password = window.prompt("${u.name} 의 새 비밀번호 (8자 이상)") ?: return@onClick
-                                act("${u.name} 의 비밀번호를 바꿨습니다") { Http.post("$path/password", ApiJson.encodeToString(PasswordDto.serializer(), PasswordDto(password))) }
+                                // 임시 비밀번호를 미리 채워 둔다 (그대로 두면 그것으로). 바꾼 뒤 전해 줄 안내를 띄운다
+                                val password = window.prompt("${u.name} 의 새 비밀번호 (12자 이상, 임시 비밀번호를 채워 두었습니다)", tempPassword())?.trim() ?: return@onClick
+                                act("${u.name} 의 비밀번호를 바꿨습니다. 아래 안내를 전해 주세요") {
+                                    Http.post("$path/password", ApiJson.encodeToString(PasswordDto.serializer(), PasswordDto(password)))
+                                    invite = u.name to password
+                                }
                             }
                         }) { Text("비밀번호") }
                         Button({
@@ -138,8 +143,15 @@ fun UsersCard(me: MeDto) {
                     Span { B { Text("$name 에게 전해 줄 안내") } }
                     Button({ classes("link", "small"); onClick { invite = null } }) { Text("닫기") }
                 }
-                Div({ classes("small") }) { Text("웹: ${window.location.origin} · 이름 $name · 비밀번호 ${password ?: "(없음: 비밀번호 단추로 정하기)"}") }
-                Div({ classes("small", "muted") }) { Text("휴대폰은 Tailscale에 같은 계정으로 로그인한 뒤 위 주소로. 메신저로 쓰려면 아래 코드를 만들어 봇에게 보내게 하세요 (10분)") }
+                val text = inviteText(me.publicUrl ?: window.location.origin, name, password)
+                Pre({ classes("small") }) { Text(text) }
+                Div({ classes("row", "small") }) {
+                    Span({ classes("muted") }) { Text("메신저로 쓰려면 아래 코드를 만들어 봇에게 보내게 하세요 (10분)") }
+                    Button({
+                        classes("link", "small")
+                        onClick { window.navigator.clipboard.writeText(text).then { notice = "안내를 복사했습니다" }.catch { error = "복사하지 못했습니다. 직접 골라 복사하세요"; it } }
+                    }) { Text("안내 복사") }
+                }
                 messengers?.enabled?.let { enabled ->
                     Div({ classes("row", "small") }) { Span {}; Span { enabled.forEach { ch -> Button({ classes("link", "small"); onClick { pairFor(name, ch) } }) { Text("${messengerName(ch)} 코드") } } } }
                     enabled.mapNotNull { codes["$name/$it"] }.forEach { CodeView(it) }
@@ -163,7 +175,11 @@ fun UsersCard(me: MeDto) {
         }) {
             Div({ classes("small") }) { B { Text("추가") } }
             Input(InputType.Text) { value(newName); onInput { newName = it.value }; placeholder("이름"); attr("autocapitalize", "off") }
-            Input(InputType.Password) { value(newPassword); onInput { newPassword = it.value }; placeholder("비밀번호 (8자 이상)"); attr("autocomplete", "new-password") }
+            // 다른 사람에게 전해 줄 비밀번호라 보이게 둔다
+            Div({ classes("row") }) {
+                Input(InputType.Text) { value(newPassword); onInput { newPassword = it.value }; placeholder("비밀번호 (12자 이상)"); attr("autocomplete", "off"); attr("autocapitalize", "off") }
+                Button({ type(ButtonType.Button); classes("link", "small"); onClick { newPassword = tempPassword() } }) { Text("임시 비밀번호") }
+            }
             Select({ onChange { e -> e.value?.let { newRole = it } } }) {
                 listOf("MEMBER", "GUEST").forEach { r -> Option(r, { if (r == newRole) selected() }) { Text(roleName(r)) } }
             }
@@ -171,6 +187,30 @@ fun UsersCard(me: MeDto) {
         }
         P({ classes("muted", "small") }) { Text("MEMBER: 문서·웹·이미지·자기 폴더 파일(승인), 셸은 Mac 주인 승인. Apple 앱 없음. GUEST: 대화·웹 검색만. 로그인한 사람: ${me.name}") }
     }
+}
+
+/** 읽기 쉬운 임시 비밀번호 (헷갈리는 글자 0·O·1·l·I 없이, 4자씩 4묶음 = 19자) */
+private fun tempPassword(): String {
+    val alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    val out = StringBuilder()
+    // 248(31의 배수) 이상은 버려 글자마다 확률이 같게
+    while (out.length < 16) {
+        val bytes = org.khronos.webgl.Uint8Array(32).also { js("crypto").getRandomValues(it) }
+        for (i in 0 until 32) {
+            val v = bytes.asDynamic()[i] as Int
+            if (v < 248 && out.length < 16) out.append(alphabet[v % alphabet.length])
+        }
+    }
+    return out.chunked(4).joinToString("-")
+}
+
+/** 새 사용자에게 그대로 보낼 안내 글 */
+private fun inviteText(url: String, name: String, password: String?) = buildString {
+    appendLine("Vesta 초대")
+    appendLine("주소: $url")
+    appendLine("이름: $name")
+    appendLine("비밀번호: ${password ?: "(아직 없음, 주인이 정해 줍니다)"}")
+    append("로그인한 뒤 설정 > 내 비밀번호에서 바꿔 주세요 (12자 이상)")
 }
 
 /** 내 설정 (U-07, M20): 부르는 이름, 말투, 메신저 음성 답장, 목소리. 누구나 */
@@ -499,7 +539,7 @@ fun PasswordCard() {
             }
         }) {
             Input(InputType.Password) { value(current); onInput { current = it.value }; placeholder("지금 비밀번호"); attr("autocomplete", "current-password") }
-            Input(InputType.Password) { value(next); onInput { next = it.value }; placeholder("새 비밀번호 (8자 이상)"); attr("autocomplete", "new-password") }
+            Input(InputType.Password) { value(next); onInput { next = it.value }; placeholder("새 비밀번호 (12자 이상)"); attr("autocomplete", "new-password") }
             Button({ type(ButtonType.Submit); classes("primary"); if (sending) disabled() }) { Text("저장") }
         }
     }

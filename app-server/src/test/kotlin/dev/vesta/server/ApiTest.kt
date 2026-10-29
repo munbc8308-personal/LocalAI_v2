@@ -231,12 +231,12 @@ class ApiTest : FunSpec({
         val userRepo = dev.vesta.storage.ExposedUserRepository(db.db)
         val users = dev.vesta.identity.UserService(userRepo, repo)
         val bindings = dev.vesta.storage.ExposedChannelBindingStore(db.db)
-        val mina = users.create("mina", UserRole.MEMBER, "mina-pass-1")
+        val mina = users.create("mina", UserRole.MEMBER, "mina-pass-0001")
         bindings.bind(owner.userId, ChannelType.TELEGRAM, "100", "100")
         val messengers = MessengerEndpoints(bindings, { setOf(ChannelType.TELEGRAM) }, { userRepo.get(it)?.name }, { userRepo.find(it) })
         val deps = ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", auth = WebAuth(repo), users = users, messengers = messengers)
         application { vestaApi(deps) }
-        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-1"}""") }
+        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-0001"}""") }
         val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
         val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText()).csrf
         fun io.ktor.client.request.HttpRequestBuilder.asMina() { header("Cookie", cookie); header("X-Vesta-CSRF", csrf) }
@@ -276,11 +276,11 @@ class ApiTest : FunSpec({
         application { vestaApi(multi) }
 
         // Mac 주인(CLI 토큰)이 사용자를 만든다. 규칙 위반은 400
-        client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"mina","role":"MEMBER","password":"mina-pass-1"}""") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"mina","role":"MEMBER","password":"mina-pass-0001"}""") }.status shouldBe HttpStatusCode.OK
         client.post("/api/users") { bearerAuth("secret"); setBody("""{"name":"boss","role":"OWNER","password":"boss-pass-1"}""") }.status shouldBe HttpStatusCode.BadRequest
         client.get("/api/users") { bearerAuth("secret") }.bodyAsText().let { it shouldContain "\"mina\""; it shouldContain "\"questionsToday\":1" }
 
-        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-1"}""") }
+        val login = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-0001"}""") }
         login.status shouldBe HttpStatusCode.OK
         val me = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText())
         me.role shouldBe "MEMBER"
@@ -291,19 +291,19 @@ class ApiTest : FunSpec({
         client.delete("/api/users/owner") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf) }.status shouldBe HttpStatusCode.Forbidden
 
         // 본인 비밀번호 바꾸기: 지금 비밀번호가 맞아야 하고, 바꾸면 로그인이 풀린다
-        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"nope","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.Forbidden
-        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"mina-pass-1","new":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.OK
+        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"nope","new":"mina-pass-0002"}""") }.status shouldBe HttpStatusCode.Forbidden
+        client.post("/api/me/password") { header("Cookie", cookie); header("X-Vesta-CSRF", me.csrf); setBody("""{"current":"mina-pass-0001","new":"mina-pass-0002"}""") }.status shouldBe HttpStatusCode.OK
         // 세션을 훔쳐도 지금 비밀번호를 무제한 대입할 수 없다: 로그인과 같은 잠금
-        val again = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }
+        val again = client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-0002"}""") }
         val cookie2 = again.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
         val csrf2 = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), again.bodyAsText()).csrf
-        repeat(5) { client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"guess$it","new":"mina-pass-3"}""") } }
-        client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"mina-pass-2","new":"mina-pass-3"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        repeat(5) { client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"guess$it","new":"mina-pass-0003"}""") } }
+        client.post("/api/me/password") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2); setBody("""{"current":"mina-pass-0002","new":"mina-pass-0003"}""") }.status shouldBe HttpStatusCode.TooManyRequests
         client.post("/api/logout") { header("Cookie", cookie2); header("X-Vesta-CSRF", csrf2) }
         client.get("/api/sessions") { header("Cookie", cookie) }.status shouldBe HttpStatusCode.Unauthorized
 
         // mina(위에서 잠김)가 잠겨도 Mac 주인은 로그인할 수 있다
-        client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-2"}""") }.status shouldBe HttpStatusCode.TooManyRequests
+        client.post("/api/login") { setBody("""{"name":"mina","password":"mina-pass-0002"}""") }.status shouldBe HttpStatusCode.TooManyRequests
         // 없는 이름 하나를 잠가도 다른 없는 이름은 401: 잠김 응답으로 계정 유무를 알 수 없다
         repeat(5) { client.post("/api/login") { setBody("""{"name":"ghost","password":"x"}""") } }
         client.post("/api/login") { setBody("""{"name":"ghost","password":"x"}""") }.status shouldBe HttpStatusCode.TooManyRequests

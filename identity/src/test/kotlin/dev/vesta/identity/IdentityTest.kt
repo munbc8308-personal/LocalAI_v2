@@ -103,11 +103,11 @@ class IdentityTest : FunSpec({
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
         val owner = db.ensureOwner("owner")
         val service = UserService(ExposedUserRepository(db.db), WebAuthRepository(db.db), maxUsers = 3)
-        shouldThrow<UserException> { service.create("boss", UserRole.OWNER, "password1") }
-        shouldThrow<UserException> { service.create("a b", UserRole.MEMBER, "password1") }
-        listOf(".", "..", ".hidden", "-x", "_x").forEach { shouldThrow<UserException> { service.create(it, UserRole.MEMBER, "password1") } }
+        shouldThrow<UserException> { service.create("boss", UserRole.OWNER, "password-0001") }
+        shouldThrow<UserException> { service.create("a b", UserRole.MEMBER, "password-0001") }
+        listOf(".", "..", ".hidden", "-x", "_x").forEach { shouldThrow<UserException> { service.create(it, UserRole.MEMBER, "password-0001") } }
         shouldThrow<UserException> { service.create("mina", UserRole.MEMBER, "short") }
-        val mina = service.create("mina", UserRole.MEMBER, "password1")
+        val mina = service.create("mina", UserRole.MEMBER, "password-0001")
         mina.hasPassword shouldBe true
         shouldThrow<UserException> { service.create("mina", UserRole.GUEST, null) }
         service.create("손님", UserRole.GUEST, null).hasPassword shouldBe false
@@ -128,8 +128,8 @@ class IdentityTest : FunSpec({
         service.setEmail("mina", null).email shouldBe null
 
         shouldThrow<UserException> { service.setOwnPassword(mina.id, "short") }
-        service.setOwnPassword(mina.id, "password2")
-        PasswordHasher.verify("password2", WebAuthRepository(db.db).credential("mina")!!.passwordHash!!) shouldBe true
+        service.setOwnPassword(mina.id, "password-0002")
+        PasswordHasher.verify("password-0002", WebAuthRepository(db.db).credential("mina")!!.passwordHash!!) shouldBe true
     }
 
     test("사용자를 지우면 대화·컬렉션·공유가 함께 지워지고, 다른 사람 데이터는 남는다. 오늘 사용량은 사용자별") {
@@ -137,7 +137,7 @@ class IdentityTest : FunSpec({
         val owner = db.ensureOwner("owner")
         var mediaDeleted: UserId? = null
         val service = UserService(ExposedUserRepository(db.db), WebAuthRepository(db.db), deleteMedia = { mediaDeleted = it })
-        val mina = service.create("mina", UserRole.MEMBER, "password1")
+        val mina = service.create("mina", UserRole.MEMBER, "password-0001")
         val sessions = ExposedSessionRepository(db.db)
         val messages = ExposedMessageRepository(db.db)
         val knowledge = KnowledgeRepository(db.db)

@@ -104,7 +104,7 @@ class UserService(
     }
 
     companion object {
-        const val MIN_PASSWORD = 8
+        const val MIN_PASSWORD = 12
         /** 공개 대화방 손님처럼 서버가 만드는 계정 (사용자 수에 세지 않는다, M18) */
         val SYSTEM_USERS = setOf("discord-guest")
         /** 글자·숫자로 시작: "."·".."처럼 경로를 벗어나는 이름을 막는다 (MEMBER 폴더 `<memberRoot>/<이름>`) */

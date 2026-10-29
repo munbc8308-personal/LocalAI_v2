@@ -291,7 +291,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                                 secure = call.isHttps(), extensions = mapOf("SameSite" to "Strict"),
                             ),
                         )
-                        call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), result.session.toMe()))
+                        call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), result.session.toMe(deps.publicGate)))
                     }
                     LoginResult.Invalid -> call.respondJson(HttpStatusCode.Unauthorized, """{"error":"비밀번호가 맞지 않습니다"}""")
                     LoginResult.NoPassword -> call.respondJson(HttpStatusCode.Conflict, """{"error":"비밀번호가 아직 없습니다. 이 Mac 터미널에서 vesta passwd 로 정하세요"}""")
@@ -311,7 +311,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                 val session = call.request.cookies[SESSION_COOKIE]?.let { deps.auth?.session(it) }
                     ?: return@get call.respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
                 call.publicMismatch(deps, session.user)?.let { return@get call.respondJson(HttpStatusCode.Unauthorized, buildJsonObject { put("error", it) }.toString()) }
-                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe()))
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe(deps.publicGate)))
             }
             post("/chat") {
                 val user = call.principal(deps) ?: return@post
@@ -1189,7 +1189,7 @@ private fun chunk(id: String, content: String?, finish: String?, session: String
     })
 }.toString()
 
-private fun dev.vesta.storage.WebSession.toMe() = MeDto(name, user.role.name, csrf)
+private fun dev.vesta.storage.WebSession.toMe(gate: PublicGate?) = MeDto(name, user.role.name, csrf, gate?.hostname?.let { "https://$it" })
 
 private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, body: String) =
     respondText(body, ContentType.Application.Json, status)

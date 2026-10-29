@@ -18,8 +18,8 @@ class PasswdCommand : CliktCommand(name = "passwd") {
         .prompt("새 비밀번호", hideInput = true, requireConfirmation = true, confirmationPrompt = "한 번 더")
 
     override fun run() = runBlocking {
-        if (password.length < 8) {
-            echo("비밀번호는 8자 이상이어야 합니다", err = true)
+        if (password.length < dev.vesta.identity.UserService.MIN_PASSWORD) {
+            echo("비밀번호는 ${dev.vesta.identity.UserService.MIN_PASSWORD}자 이상이어야 합니다", err = true)
             throw ProgramResult(1)
         }
         val paths = VestaPaths.default()

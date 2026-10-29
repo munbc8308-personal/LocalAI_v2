@@ -140,7 +140,8 @@ class PublicAccessTest : FunSpec({
         val users = UserService(repo, auth)
         runBlocking {
             auth.setPasswordHash(owner, PasswordHasher.hash("correct horse"))
-            users.create("mina", UserRole.GUEST, "mina-pass-1")
+            // 하한이 12자가 되기 전에 만든 짧은 비밀번호 계정
+            auth.setPasswordHash(users.create("mina", UserRole.GUEST, null).id, PasswordHasher.hash("mina-pass-1"))
             users.create("long", UserRole.GUEST, "long-enough-pass")
             users.setEmail("mina", "mina@example.com")
             users.setEmail("owner", "owner@example.com")
@@ -225,7 +226,7 @@ class PublicAccessTest : FunSpec({
         client.get("/api/me", ip(1)).status shouldBe HttpStatusCode.Unauthorized
         client.get("/api/me") { header("Host", "munbc.iptime.org") }.status shouldBe HttpStatusCode.Forbidden
         client.get("/v1/models") { ip(1)(); bearerAuth("local-api-key") }.status shouldBe HttpStatusCode.NotFound
-        // 8자 비밀번호(mina)는 맞아도 바깥에서는 안 된다
+        // 예전 짧은 비밀번호(mina)는 맞아도 바깥에서는 안 된다
         client.post("/api/login") { ip(1)(); setBody("""{"name":"mina","password":"mina-pass-1"}""") }.bodyAsText() shouldContain "12자 이상"
         val login = client.post("/api/login") { ip(1)(); setBody("""{"name":"long","password":"long-enough-pass"}""") }
         login.status shouldBe HttpStatusCode.OK

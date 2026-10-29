@@ -286,7 +286,7 @@ data class LoginDto(val password: String, /** 없으면 OWNER */ val name: Strin
 
 /** 로그인한 사용자. [csrf]는 쿠키로 인증한 POST 요청의 `X-Vesta-CSRF` 헤더 값 */
 @Serializable
-data class MeDto(val name: String, val role: String, val csrf: String)
+data class MeDto(val name: String, val role: String, val csrf: String, /** 바깥 주소 (공개 운영 중일 때, 초대 안내용) */ val publicUrl: String? = null)
 
 @Serializable
 data class NewCollectionDto(val name: String, val description: String? = null)
