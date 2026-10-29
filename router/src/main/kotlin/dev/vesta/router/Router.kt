@@ -46,6 +46,12 @@ class Router(
         // 영상 만들기 (M24): 결정 모델 선택지에 영상이 없어(학습한 D1을 바꾸지 않으려고) 확실한 말은 규칙으로
         if (VIDEO_REQUEST.containsMatchIn(text) && !NOT_VIDEO.containsMatchIn(text)) return done(RoutingDecision(AgentType.VIDEO, 1.0, RoutingStage.RULE, question = text))
 
+        // Google 서비스 (M40): 결정 모델은 "구글 시트"를 문서(DOCS)로 골랐다 → 이름이 나오면 규칙으로.
+        // 조사·여러 단계가 함께면 작업 에이전트(웹 + Google 도구), 아니면 개인 비서. 개인 비서를 쓸 수 있을 때만(연결했거나 주인)
+        if (GOOGLE_WORD.containsMatchIn(text) && AgentType.PERSONAL in available) {
+            val agent = if (MULTI_STEP.containsMatchIn(text) && AgentType.TASK in available) AgentType.TASK else AgentType.PERSONAL
+            return done(RoutingDecision(agent, 1.0, RoutingStage.RULE, question = text))
+        }
         // 영상 고치기 (M24 G-05): 직전이 영상이고 장면·내레이션·자막 등을 고치라는 말이면 영상으로 ("2번 장면을 노을로 바꿔"가 그림으로 간 적이 있다)
         val videoRecently = previous?.agent == AgentType.VIDEO ||
             recent.takeLast(4).any { it.role == dev.vesta.core.inference.ChatRole.ASSISTANT && VIDEO_ANSWER.containsMatchIn(it.content) }
@@ -115,6 +121,8 @@ class Router(
 
     private companion object {
         val CODE_BLOCK = Regex("```")
+        val GOOGLE_WORD = Regex("구글 ?(시트|드라이브|문서|독스|캘린더|메일|스프레드시트|슬라이드)|지메일|gmail|google ?(sheets?|drive|docs|calendar|slides)|스프레드시트", RegexOption.IGNORE_CASE)
+        private val MULTI_STEP = Regex("조사|검색해|찾아서|찾아 ?보고|자료|통계|정리해|분석|에이전트|팀(을|으로|에게)|웹에서|인터넷")
         private val VIDEO_WORD = Regex("영상|동영상|비디오|쇼츠|릴스|숏폼|브이로그|슬라이드쇼|\\bvideo\\b", RegexOption.IGNORE_CASE)
         /** "영상 만들어 줘", "30초 쇼츠 제작해 줘": 영상 낱말 바로 뒤(10자 안)에 만들기 */
         val VIDEO_REQUEST = Regex("(영상|동영상|비디오|쇼츠|릴스|숏폼|슬라이드쇼|\\bvideo\\b)\\s*(을|를|으로|로|하나|한 편|좀)?\\s*.{0,6}(만들어|만들자|제작해|생성해|뽑아|make|create)", RegexOption.IGNORE_CASE)

@@ -315,7 +315,11 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 이 사용자에게 줄 도구 (U-06, T-04). OWNER는 전부, MEMBER는 셸 없이 자기 폴더(`users.memberRoot/<이름>` + `users.paths`)만,
      * GUEST는 없음. 역할이 바뀌면 다음 요청부터 반영된다
      */
-    suspend fun toolsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.tools.Tool> = when (user.role) {
+    suspend fun toolsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.tools.Tool> =
+        // Google은 자기 계정을 연결한 사람만 (M40): 작업 에이전트·사용자 정의 에이전트·팀도 쓸 수 있게
+        localTools(user, workspace) + if (googleReady(user)) googleTools else emptyList()
+
+    private suspend fun localTools(user: UserContext, workspace: dev.vesta.core.agent.Workspace?): List<dev.vesta.core.tools.Tool> = when (user.role) {
         // CLI 작업 폴더(M17)가 있으면 그 폴더를 첫 허용 폴더로 둔다: 상대 경로·셸 작업 위치가 그 폴더가 된다
         UserRole.OWNER -> workspace?.let { ws ->
             workspaceTools.getOrPut(ws.path) { tools(PathSandbox(listOf(ws.path) + sandbox.roots.map { it.toString() }), shell = true) }.all
@@ -429,7 +433,11 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
                 inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
                 maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
                 maxToolOutputChars = config.tools.maxOutputChars, reasoningEffort = config.tools.taskReasoning,
-                toolsFor = { request -> toolsFor(request.user, request.workspace) },
+                // Google 도구는 질문에 나온 서비스 것만 (15개를 다 주면 로컬 모델이 헷갈린다, M40)
+                toolsFor = { request ->
+                    val groups = AppGroupSelector(null).select(request.history.last().content, googleTools.map { it.group }.toSet())
+                    toolsFor(request.user, request.workspace).filter { it !is dev.vesta.google.GoogleTool || it.group in groups }
+                },
                 judge = judge,
                 escalation = escalation,
                 plans = planRepository,

@@ -10,6 +10,7 @@ import dev.vesta.core.inference.ChatMessage
 import dev.vesta.core.inference.ChatRole
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 
 private class FakeDecision(val agent: String, val confidence: Double, val web: Double = 0.0) : DecisionClient {
     var calls = 0
@@ -60,6 +61,14 @@ class RouterTest : FunSpec({
         val recentVideo = recent.dropLast(1) + ChatMessage(ChatRole.ASSISTANT, "영상을 만들었습니다: **제주**") + ChatMessage(ChatRole.USER, "2번 장면 바꿔") + ChatMessage(ChatRole.ASSISTANT, "이미지를 만들었습니다")
         val image = dev.vesta.core.decision.RoutingDecision(AgentType.IMAGE, 0.9, RoutingStage.DECISION_MODEL, question = "2번 장면 바꿔")
         Router(DecisionConfig(), FakeDecision("IMAGE", 0.9), null).route("2번 장면을 노을로 바꾸고 내레이션 빠르게", recentVideo, all, image).agent shouldBe AgentType.VIDEO
+    }
+
+    test("Google 서비스 (M40): 이름이 나오면 개인 비서, 조사가 함께면 작업 에이전트, 개인 비서를 못 쓰면 결정 모델대로") {
+        val router = Router(DecisionConfig(), FakeDecision("DOCS", 0.82), null)
+        router.route("통계청 자료를 조사해서 구글 시트에 정리해 줘", emptyList(), all).agent shouldBe AgentType.TASK
+        router.route("가계부 구글 시트에 오늘 점심 12000원 추가해 줘", emptyList(), all).agent shouldBe AgentType.PERSONAL
+        router.route("지메일에 안 읽은 메일 요약해 줘", emptyList(), all).agent shouldBe AgentType.PERSONAL
+        router.route("구글 시트에 써 줘", emptyList(), all - AgentType.PERSONAL).agent shouldNotBe AgentType.PERSONAL
     }
 
     test("결정 모델 신뢰도가 임계값 이상이면 그대로 쓴다") {
