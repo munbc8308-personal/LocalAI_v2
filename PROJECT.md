@@ -3295,6 +3295,14 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **OF-09~OF-12 (같은 날)**: 방마다 직원·편지·책상을 따로(`Worker.room`), 팀 일은 routed(TEAM, 팀 이름)에 그 팀 방으로 옮겨 앉힘. 방 탭("본사", "팀 이름" + 직원 수 + 승인 🔴). 테마 6가지(`THEME_LOOK`: 벽·테두리·바닥 두 색·나무 바닥 무늬·장식 이모지), 팀 방 위에 "팀 이름 · 테마". `TeamDef.theme`·`agent_team.theme`(VARCHAR 16)·`TeamDto.theme`, 팀 편집기 "사무실 방 꾸미기", 서버는 정해 둔 6가지만. 병렬 맡기기: `TaskAgent.runParallel`(delegate 둘 이상이면 async로 동시에, 멤버 소식은 채널로 모아 흐름에서 차례로 emit, 결과는 call id로 원래 순서), 멤버는 "[이름]"·"이름/도구"로 구분해 각자 움직임. 사용자 캐릭터는 직원 중 하나라도 메인 모델 단계(input·routed·status·tool_finished·delegate_finished 뒤)면 타자 + "생각하는 중…". 보고 글은 답에서 "…하겠습니다" 같은 계획 줄을 건너뛴 첫 결과 줄.
 - 확인: 시험 계정에 사용자 정의 에이전트 셋·카페 테마 팀 → `/team` 실행에서 멤버 둘에게 0.001초 차이로 맡기고 둘이 동시에 "계획 중", 1.7초 만에 둘 다 결과(실행 기록). 팀 방이 카페(나무 바닥·화분·커피·컵케이크)로, 팀장이 "보고: …"하고 사용자 👍. 긴 대화 생성 중 사용자 "생각하는 중."·화면 켜짐. 브라우저 정규식 오류 두 개(JS 유니코드 정규식에서 `[^]]`·이스케이프 안 한 `]`)를 콘솔에서 찾아 고침. 테스트: TaskAgentTest(멤버 둘이 실제로 겹침·결과 순서). 시험 계정(에이전트·팀 함께) 지움.
 
+
+### 13.51 개발 프로젝트용 팀 구성 (2026-10-29)
+- 사용자 요청: 개발 프로젝트에 필요한 팀을 에이전트·지침·스킬까지 만들어 둔다. `scripts/dev-teams.py`(서버 API, 주인 토큰, 다시 돌려도 같은 결과)로 만들었다.
+- 팀 6개(방 테마): 기획팀(도서관: plan-lead · researcher·planner·plan-reviewer), 개발팀(스튜디오: dev-lead · explorer·coder·tester), 품질팀(연구소: qa-lead · analyst·test-writer·tester), 리뷰보안팀(사무실: review-lead · reviewer·security·impact), 문서팀(도서관: docs-lead · explorer·doc-writer), 릴리스팀(공장: release-lead · builder·checker). 에이전트 20개는 역할별 도구만(읽기 공통 + 웹·쓰기·패치·셸 중 필요한 것), 리더는 도구 없이 delegate.
+- 지침: 역할·순서·보고 형식 + 관련 pstack 원칙 이름(예: 코더 principle-fix-root-causes·laziness-protocol, 테스터 prove-it-works, 테스트 작성자 tdd, 리뷰어·영향 분석가 blast-radius, 문서 unslop·technical-writing) + 공통("실제로 실행한 것만 했다고, 맡은 일 밖은 고치지 않음"). 에이전트에 스킬을 붙이는 칸은 없어 지침에 녹였다. 리뷰보안팀·릴리스팀 리더는 멤버에게 동시에 맡긴다(OF-11). 릴리스팀은 배포·푸시를 하지 않는다.
+- 웹 스킬 6개(TASK): `/plan-feature`·`/review-diff`·`/qa-check`·`/security-scan`·`/update-docs`·`/release-check`.
+- 확인: `/team 기획팀`(독서 기록 앱 첫 버전) → 56초에 범위 밖·완료 조건·우선순위 할 일 목록. 다른 팀은 아직 실제로 돌려 보지 않았다.
+
 ---
 
 ## 14. 결정 사항 / 남은 질문
