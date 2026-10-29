@@ -81,7 +81,9 @@ class TaskAgent(
             else rules.lineSequence().filterNot { "run_shell" in it }.joinToString("\n") + "\n- 이 사용자는 셸 명령을 쓸 수 없다. 셸이 꼭 필요한 요청이면 할 수 없다고 짧게 알리고, 있는 도구로 할 수 있는 것만 한다."
         // 예약 실행: 없는 쓰기 도구를 설명하는 규칙은 빼고, 한 척하지 말라고 질문 자체에도 붙인다 (시스템 프롬프트만으로는 "만들었다"고 지어냈다)
         val rulesNow = if (request.unattended) effectiveRules.lineSequence().filterNot { "파일을 쓰거나" in it }.joinToString("\n") + "\n- $UNATTENDED" else effectiveRules
-        val system = Prompts.system(request, clock, zone) + "\n" + rulesNow
+        // Google 도구가 있으면 (M40): 첫 실사용에서 도구가 있는데도 "직접 쓸 수 없다"며 CSV를 건넸다
+        val googleRules = if (available.keys.any { GOOGLE_TOOL.containsMatchIn(it) }) "\n- $GOOGLE_RULES" else ""
+        val system = Prompts.system(request, clock, zone) + "\n" + rulesNow + googleRules
         if (available.isNotEmpty()) emit(AgentEvent.Status("도구: ${available.keys.joinToString()}"))
         // 작업 계획 (M32): "이어서"면 이 대화의 계획을 이어 쓰고, 새 작업 요청이면 새로 시작한다
         val sessionId = request.session.id
@@ -359,6 +361,8 @@ class TaskAgent(
         /** 단계 하나의 생성 한도 (토큰). 200줄 파일 하나는 넉넉히 쓴다 */
         const val STEP_TOKENS = 8_192
         /** 예약 실행 안내 (M29 SC-05) */
+        private val GOOGLE_TOOL = Regex("^(gmail|drive|sheets|docs|gcal)_")
+        const val GOOGLE_RULES = "gmail_·drive_·sheets_·docs_·gcal_ 도구는 사용자의 Google 계정(연결됨)에 실제로 읽고 쓴다. 구글 시트·문서·캘린더에 써 달라거나 메일을 보내 달라면 표·글을 답에 붙여 주지 말고 그 도구로 직접 한다(새 시트는 sheets_create에 values로 줄을 넣는다). 승인은 시스템이 사용자에게 받는다. 이 대화의 앞선 답에서 \"Google에 직접 쓸 수 없다\"고 했어도 지금은 쓸 수 있다. 끝나면 만든 시트·문서 링크를 알려 준다."
         const val UNATTENDED = "예약 실행: 지켜보는 사람이 없어 파일 쓰기·옮기기·셸·보내기 도구가 없다. 그런 일은 하지 않았으면 했다고 말하지 말고, \"예약 실행에서는 할 수 없으니 직접 대화에서 시켜 달라\"고 알린다. 읽기·검색으로 할 수 있는 것만 한다."
         const val DENIED = "거부됨"
         const val TIMED_OUT = "응답 없음"
