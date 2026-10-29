@@ -3367,6 +3367,10 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
   - 라우터 규칙: Google 서비스 이름(구글 시트·지메일·구글 드라이브 등)이 나오면 개인 비서로, 조사·자료·에이전트 같은 말이 함께면 작업 에이전트로. 개인 비서를 쓸 수 있을 때만.
   - 작업 에이전트·사용자 정의 에이전트·팀도 Google 도구를 받는다(연결한 사람만). 작업 에이전트에는 질문에 나온 서비스 것만 준다.
   - 두 번째 시도: 작업 에이전트가 sheets_create 등을 받았는데도 "직접 쓸 수 없다"며 CSV를 건넸다(같은 대화의 앞선 답을 따름). Google 도구가 있으면 작업 에이전트 규칙에 "답에 표를 붙이지 말고 도구로 직접, 앞선 답에서 못 한다고 했어도 지금은 된다"를 넣는다.
+- 구글팀 (`scripts/google-team.py`, 주인 계정, 다시 돌려도 같은 결과):
+  - 팀: 구글팀(카페 방). 리더 google-lead, 멤버 g-researcher(웹·드라이브 읽기)·sheet-writer(시트)·gdoc-writer(문서)·mail-assistant(메일·캘린더).
+  - 리더는 쓰기 담당에게 맡길 때 넣을 줄·글을 맡기는 글에 모두 담는다(멤버끼리는 결과를 못 본다).
+  - 스킬 2개(TASK): `/research-sheet`(조사 → 새 시트), `/mail-digest`(안 읽은 메일 요약). 스킬은 개인 비서(PERSONAL)를 고를 수 없다.
 - 확인: `./gradlew test` 통과(google 7개, ApiTest Google 연결), 설치 후 health, `vesta google status`(꺼짐). 실제 Google Cloud 클라이언트·계정 연결은 아직(주인이 `vesta google setup` 후).
 
 ---
