@@ -49,6 +49,8 @@ class DefaultConversationService(
     private val routingLog: RoutingLogRepository? = null,
     /** 사용자별로 지금 쓸 수 있는 에이전트 (예: 컬렉션이 있어야 DOCS) */
     private val availability: suspend (UserContext) -> Set<AgentType> = { agents.keys },
+    /** 팀 자동 배정 (M41): 질문에 맞는 팀·에이전트. 없으면 null */
+    private val teamRoute: suspend (UserContext, String) -> dev.vesta.router.TeamPick? = { _, _ -> null },
     /** `@이름`으로 지정한 컬렉션이 모두 코드 저장소면 CODE 등, 지정 대상에 맞는 에이전트 */
     private val mentionAgent: suspend (UserContext, List<String>) -> AgentType? = { _, _ -> null },
     /** 도구 승인 중계 (M6). 에이전트와 같은 인스턴스를 써야 한다. */
@@ -199,7 +201,14 @@ class DefaultConversationService(
             // 서버를 다시 띄우면 직전 판정(메모리)이 없으니, 저장된 마지막 답의 에이전트로
             (lastDecision[session.id] ?: all.lastOrNull { it.role == ChatRole.ASSISTANT && it.model != POLICY_MODEL && it.agent != null }?.agent
                 ?.let { RoutingDecision(it, 1.0, RoutingStage.EXPLICIT, question = input.text) })?.takeIf { it.agent != AgentType.CHAT && it.agent in allowed } else null
+        // 팀 자동 배정 (M41): 명령·스킬·이어서·이미지·예약 실행이 아니고 작업 에이전트를 쓸 수 있을 때. 확실하면 맡기고 애매하면 추천만
+        val text = input.text.trim()
+        val picked = if (call == null && skill == null && continued == null && input.images.isEmpty() && !input.unattended && AgentType.TASK in allowed &&
+            !text.startsWith("/") && !text.startsWith("@") && !text.startsWith("!"))
+            runCatching { teamRoute(user, input.text) }.onFailure { log.warn(it) { "팀 자동 배정 실패, 평소대로" } }.getOrNull() else null
+        val autoTeam = picked?.takeIf { it.auto }?.let { p -> teams(user, p.name)?.let { p to it } }
         val custom = call?.let { if (it.team) teams(user, it.name) else customAgents(user, it.name) }
+            ?: autoTeam?.second
             ?: skill?.first?.takeIf { it.agent == AgentType.TASK }?.let { skillAgent(user, it) }
             ?: continued?.customAgent?.let { name -> if (continued.team) teams(user, name) else customAgents(user, name) }
         if (call != null && custom == null) {
@@ -211,6 +220,7 @@ class DefaultConversationService(
         }
         val routed = if (call != null) RoutingDecision(AgentType.TASK, 1.0, RoutingStage.EXPLICIT, question = call.task, customAgent = call.name, team = call.team)
             else if (skill != null) RoutingDecision(skill.first.agent, 1.0, RoutingStage.EXPLICIT, question = skill.first.expand(skill.second.arguments), skill = skill.first.name)
+            else if (autoTeam != null) RoutingDecision(AgentType.TASK, autoTeam.first.score, RoutingStage.SEMANTIC, question = input.text, customAgent = autoTeam.first.name, team = true)
             else if (continued != null) continued.copy(question = input.text, stage = RoutingStage.EXPLICIT, confidence = 1.0, requested = null, continued = true)
             else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
@@ -225,6 +235,7 @@ class DefaultConversationService(
         // 일반 대화 모델은 일정·메일·파일을 볼 수 없어 그럴듯하게 지어내기 때문이다 (예: MEMBER의 "내일 일정")
         val denied = decision.requested?.takeIf { it !in allowed }
         emit(AgentEvent.Routed(decision))
+        if (picked != null && autoTeam == null) emit(AgentEvent.Status("이 일은 '${picked.name}' ${if (picked.team) "팀" else "에이전트"}이 잘 맞을 것 같습니다. 맡기려면: /${if (picked.team) "team" else "agent"} ${picked.name} 할 일"))
         lastDecision[session.id] = decision
         routingLog?.let { log -> runCatching { log.record(session.id, decision) } }
         if (denied != null) {

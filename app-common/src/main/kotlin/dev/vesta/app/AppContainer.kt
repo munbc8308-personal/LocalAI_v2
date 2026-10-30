@@ -352,6 +352,23 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         dev.vesta.google.GoogleAuth(googleHttp, g.clientId, GoogleKeychain::clientSecret, googleRedirectUris(config), GoogleKeychain)
     }
     val googleTools: List<dev.vesta.google.GoogleTool> = googleAuth?.let { dev.vesta.google.googleTools(dev.vesta.google.GoogleApi(googleHttp, it), config.tools.maxOutputChars) }.orEmpty()
+    /** 팀 자동 배정 (M41 7.35): 팀(멤버 도구 합)과, 팀에 속하지 않은 사용자 정의 에이전트(추천만) */
+    private val teamRouter by lazy {
+        dev.vesta.router.TeamRouter({ embeddingModel() }, { model, texts -> inference.embed(model, texts) }, config.decision.teamRouting)
+    }
+
+    suspend fun teamPick(user: UserContext, text: String): dev.vesta.router.TeamPick? {
+        if (!config.decision.teamRouting.enabled || user.role == UserRole.GUEST) return null
+        val teams = teamRepository.list(user.userId)
+        val agents = customAgentRepository.list(user.userId).associateBy { it.name }
+        if (teams.isEmpty() && agents.isEmpty()) return null
+        val inTeam = teams.flatMap { it.members + it.leader }.toSet()
+        val candidates = teams.map { t ->
+            dev.vesta.router.TeamCandidate(t.name, true, listOf("${t.name}: ${t.description}") + t.examples, t.members.flatMap { agents[it]?.tools.orEmpty() }.toSet())
+        } + agents.values.filter { it.name !in inTeam }.map { a -> dev.vesta.router.TeamCandidate(a.name, false, listOf("${a.name}: ${a.description}"), a.tools.toSet()) }
+        return teamRouter.pick(text, candidates)
+    }
+
     /** 이 사용자가 Google을 쓸 수 있는지 (손님 아님 + 연결함) */
     fun googleReady(user: UserContext) = user.role != UserRole.GUEST && googleAuth?.email(user.userId) != null
     /** 학습으로 만든 결정 모델이 켜져 있으면 그것, 아니면 설정의 모델 (L-07). 10초마다 다시 읽는다 */
@@ -374,6 +391,7 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         messages = messages,
         router = router,
         routingLog = ExposedRoutingLogRepository(database.db),
+        teamRoute = { user, text -> teamPick(user, text) },
         // 문서 컬렉션이 있어야 DOCS로 보낸다
         availability = { user ->
             buildSet {

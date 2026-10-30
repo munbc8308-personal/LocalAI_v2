@@ -48,6 +48,7 @@ class VestaDatabase private constructor(val db: Database) {
         if ("avatar" !in settingColumns) exec("ALTER TABLE user_settings ADD COLUMN avatar VARCHAR(200) NULL")
         val teamColumns = exec("PRAGMA table_info(agent_team)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if (teamColumns.isNotEmpty() && "theme" !in teamColumns) exec("ALTER TABLE agent_team ADD COLUMN theme VARCHAR(16) NULL")
+        if (teamColumns.isNotEmpty() && "examples" !in teamColumns) exec("ALTER TABLE agent_team ADD COLUMN examples TEXT NULL")
         val skillColumns = exec("PRAGMA table_info(skill)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("status" !in skillColumns) exec("ALTER TABLE skill ADD COLUMN status VARCHAR(8) DEFAULT 'ACTIVE' NOT NULL")
         if ("origin" !in skillColumns) exec("ALTER TABLE skill ADD COLUMN origin VARCHAR(8) DEFAULT 'MANUAL' NOT NULL")

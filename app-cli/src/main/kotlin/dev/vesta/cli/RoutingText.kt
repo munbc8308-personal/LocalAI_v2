@@ -21,6 +21,7 @@ internal object RoutingText {
         val stage = when (decision.stage) {
             RoutingStage.EXPLICIT -> "직접 지정"
             RoutingStage.RULE -> "규칙"
+            RoutingStage.SEMANTIC -> "팀 자동 배정 %.2f".format(decision.confidence)
             RoutingStage.DECISION_MODEL -> "결정 모델 %.2f".format(decision.confidence)
             RoutingStage.LLM -> "메인 모델 판정"
             RoutingStage.DEFAULT -> "기본값"

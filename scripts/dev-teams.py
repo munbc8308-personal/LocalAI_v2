@@ -68,9 +68,19 @@ skills = {
         "출시 전 점검을 하라. $ARGUMENTS\n\n- 깨끗한 빌드와 전체 테스트 실행(결과·걸린 시간)\n- 버전 번호와 변경 기록이 맞는지\n- 최근 로그의 오류\n- 하나라도 실패하면 '출시 보류'와 이유, 모두 통과하면 '출시 가능'과 근거\n- 배포·푸시는 하지 않는다"),
 }
 
+# 맡을 질문 예시 (M41 팀 자동 배정: 비슷한 질문이 오면 /team 없이 이 팀이 맡는다)
+EXAMPLES = {
+    "기획팀": ['새 서비스 아이디어를 기획서로 정리해 줘', '이 기능의 요구사항과 범위를 정해 줘', '앱 MVP 할 일 목록 만들어 줘', '경쟁 서비스를 조사해서 기능을 비교해 줘'],
+    "개발팀": ['이 기능 코드로 구현해 줘', '버그 고치고 빌드까지 확인해 줘', 'API 엔드포인트 하나 추가해 줘', '앱에 새 화면을 만들고 테스트까지 해 줘'],
+    "품질팀": ['이 버그 재현해서 테스트 케이스 만들어 줘', '테스트 커버리지 늘려 줘', '실패하는 테스트 원인 분석해 줘'],
+    "리뷰보안팀": ['바뀐 코드 리뷰해 줘', '보안 취약점 점검해 줘', '이 변경이 어디에 영향 주는지 봐 줘'],
+    "문서팀": ['README 업데이트해 줘', '사용법 문서 써 줘', '변경 기록 정리해 줘'],
+    "릴리스팀": ['배포 전에 점검해 줘', '전체 빌드하고 테스트 돌려서 출시 가능한지 봐 줘', '버전이랑 변경 기록 맞는지 확인해 줘'],
+}
+
 for name, (desc, instr, tools) in agents.items():
     print("agent", name, put(f"/agents/{name}", {"name": name, "description": desc, "instructions": instr + "\n" + COMMON, "model": "GENERAL", "tools": tools}))
 for name, (desc, leader, members, theme) in teams.items():
-    print("team", name, put(f"/teams/{urllib.parse.quote(name)}", {"name": name, "description": desc, "leader": leader, "members": members, "theme": theme}))
+    print("team", name, put(f"/teams/{urllib.parse.quote(name)}", {"name": name, "description": desc, "leader": leader, "members": members, "theme": theme, "examples": EXAMPLES.get(name, [])}))
 for name, (desc, agent, tools, body) in skills.items():
     print("skill", name, put(f"/skills/{name}", {"name": name, "description": desc, "body": body, "agent": agent, "tools": tools}))

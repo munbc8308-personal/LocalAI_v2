@@ -492,6 +492,7 @@ private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: L
     var name by remember(initial) { mutableStateOf(initial.name) }
     var description by remember(initial) { mutableStateOf(initial.description) }
     var theme by remember(initial) { mutableStateOf(initial.theme.orEmpty()) }
+    var examples by remember(initial) { mutableStateOf(initial.examples.joinToString("\n")) }
     var leader by remember(initial) { mutableStateOf(initial.leader) }
     var members by remember(initial) { mutableStateOf(initial.members.toSet()) }
     Div({ classes("card", "stack") }) {
@@ -523,10 +524,12 @@ private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: L
                 listOf("" to "자동", "office" to "사무실", "cafe" to "카페", "lab" to "연구소", "library" to "도서관", "studio" to "스튜디오", "factory" to "공장").forEach { (v, l) -> Option(v, { if (v == theme) selected() }) { Text(l) } }
             }
         }
+        Div({ classes("small") }) { B { Text("맡을 질문 예시") }; Span({ classes("muted") }) { Text(" (한 줄에 하나, 8개까지. 비슷한 질문이 오면 /team 없이도 이 팀이 맡는다)") } }
+        TextArea(examples) { attr("rows", "4"); placeholder("예: 자료를 조사해서 구글 시트로 정리해 줘"); onInput { examples = it.value } }
         Button({
             classes("primary")
             if (leader.isEmpty() || members.isEmpty()) disabled()
-            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members }, theme = theme.ifEmpty { null })) }
+            onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members }, theme = theme.ifEmpty { null }, examples = examples.lines().map { it.trim() }.filter { it.isNotEmpty() })) }
         }) { Text("저장") }
     }
 }

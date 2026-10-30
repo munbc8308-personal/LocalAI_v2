@@ -321,6 +321,8 @@ object AgentTeams : LongIdTable("agent_team") {
     val updatedAt = timestamp("updated_at")
     /** 사무실 팀 방 꾸미기 (M38) */
     val theme = varchar("theme", 16).nullable()
+    /** 예시 질문 (M41), 줄마다 하나 */
+    val examples = text("examples").nullable()
 
     init { uniqueIndex(owner, name) }
 }

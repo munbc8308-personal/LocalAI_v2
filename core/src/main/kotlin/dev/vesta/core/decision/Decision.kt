@@ -23,7 +23,8 @@ interface DecisionClient {
 }
 
 /** 라우팅이 어느 단계에서 정해졌는지 (PROJECT.md 4.5). */
-enum class RoutingStage { EXPLICIT, RULE, DECISION_MODEL, LLM, DEFAULT }
+/** SEMANTIC: 팀 자동 배정 (M41, 임베딩 유사도) */
+enum class RoutingStage { EXPLICIT, RULE, SEMANTIC, DECISION_MODEL, LLM, DEFAULT }
 
 /** 라우팅 결과 (PROJECT.md 4.6). */
 data class RoutingDecision(

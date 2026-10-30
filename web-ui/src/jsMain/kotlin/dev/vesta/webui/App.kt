@@ -1120,6 +1120,7 @@ private fun agentName(agent: String) = when (agent) {
 private fun stageName(r: RoutingDto) = when (r.stage) {
     "EXPLICIT" -> "직접 지정"
     "RULE" -> "규칙"
+    "SEMANTIC" -> "팀 자동 배정 ${(r.confidence * 100).toInt()}%"
     "DECISION_MODEL" -> "결정 모델 ${(r.confidence * 100).toInt()}%"
     "LLM" -> "메인 모델 판정"
     "DEFAULT" -> "기본값"

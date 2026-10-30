@@ -103,6 +103,7 @@ class ExposedTeamRepository(private val db: Database, private val clock: Clock =
             it[members] = def.members.joinToString("\n")
             it[updatedAt] = now
             it[theme] = def.theme
+            it[examples] = def.examples.joinToString("\n").ifEmpty { null }
         }
         if (updated == 0) AgentTeams.insert {
             it[owner] = def.owner.value
@@ -112,6 +113,7 @@ class ExposedTeamRepository(private val db: Database, private val clock: Clock =
             it[members] = def.members.joinToString("\n")
             it[updatedAt] = now
             it[theme] = def.theme
+            it[examples] = def.examples.joinToString("\n").ifEmpty { null }
         }
         def.copy(updatedAt = now)
     }
@@ -128,6 +130,7 @@ class ExposedTeamRepository(private val db: Database, private val clock: Clock =
         members = this[AgentTeams.members].lines().filter { it.isNotBlank() },
         updatedAt = this[AgentTeams.updatedAt],
         theme = this[AgentTeams.theme],
+        examples = this[AgentTeams.examples].orEmpty().lines().filter { it.isNotBlank() },
     )
 }
 

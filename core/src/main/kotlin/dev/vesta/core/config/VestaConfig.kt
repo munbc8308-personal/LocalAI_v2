@@ -364,6 +364,24 @@ data class DecisionConfig(
     val enabled: Boolean = true,
     /** 결정 모델 질문 문구 언어 (M4 평가: en이 ko보다 정확) */
     val criteriaLanguage: String = "en",
+    /** 팀 자동 배정 (M41) */
+    val teamRouting: TeamRoutingConfig = TeamRoutingConfig(),
+)
+
+/**
+ * 팀 자동 배정 (PROJECT.md 7.35, M41). 점수 = 질문과 팀 설명·예시 질문의 임베딩 유사도 최댓값, 여유 = 점수 − 기준점(기본 에이전트·일상 질문) 최댓값.
+ * 기본값은 bge-m3 실측(13.54)으로 정했다: 맞는 팀 0.74~0.87·여유 +0.2 이상, 팀이 아닌 질문은 여유가 음수
+ */
+data class TeamRoutingConfig(
+    val enabled: Boolean = true,
+    /** 이 점수·여유 이상이면 그 팀에 바로 맡긴다 */
+    val auto: Double = 0.70,
+    val autoMargin: Double = 0.15,
+    /** 이 점수·여유 이상이면 맡기지 않고 추천만 */
+    val suggest: Double = 0.60,
+    val suggestMargin: Double = 0.05,
+    /** 이보다 짧은 질문은 보지 않는다 */
+    val minChars: Int = 12,
 )
 
 enum class WebMode { AUTO, ALWAYS, OFF }

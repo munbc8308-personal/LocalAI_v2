@@ -48,9 +48,16 @@ data class TeamDef(
     val updatedAt: Instant = Instant.EPOCH,
     /** 사무실 화면의 팀 방 꾸미기 (M38 OF-10): [THEMES] 중 하나, null이면 팀 이름으로 정한다 */
     val theme: String? = null,
+    /** 이 팀이 맡을 질문 예시 (M41 팀 자동 배정: 의미 비교에 쓴다). 한 줄에 하나 */
+    val examples: List<String> = emptyList(),
 ) {
     companion object {
         const val MAX_MEMBERS = 6
+        const val MAX_EXAMPLES = 8
+        const val MAX_EXAMPLE_CHARS = 200
+
+        /** 빈 줄·긴 줄을 정리한 예시 */
+        fun cleanExamples(lines: List<String>) = lines.map { it.trim() }.filter { it.isNotEmpty() }.map { it.take(MAX_EXAMPLE_CHARS) }.distinct().take(MAX_EXAMPLES)
         val THEMES = listOf("office", "cafe", "lab", "library", "studio", "factory")
     }
 }

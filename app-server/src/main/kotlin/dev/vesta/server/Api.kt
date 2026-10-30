@@ -1450,7 +1450,7 @@ class StudioEndpoints(
             .map { (type, label, description) -> dev.vesta.api.BuiltinAgentDto(type.name, label, description) }
         val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString()) }
         val tools = toolCatalog(user).map { dev.vesta.api.ToolInfoDto(it.spec.name, it.risk.name, it.spec.description) }
-        val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString(), it.theme) }
+        val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString(), it.theme, it.examples) }
         val owner = user.role == UserRole.OWNER && a2aRepo != null && a2aClient != null
         val a2a = if (owner) a2aRepo!!.list(user.userId).map {
             dev.vesta.api.A2aAgentDto(it.name, it.displayName, it.description, it.endpoint, it.protocol, it.streaming, it.auth, it.local, it.auth && a2aHasToken(it.name), it.skills, it.cardUrl)
@@ -1519,7 +1519,8 @@ class StudioEndpoints(
         if (dto.leader !in mine) return if (dto.leader in remote) "리더는 사용자 정의 에이전트여야 합니다 (A2A 에이전트는 멤버로)" else "없는 에이전트: ${dto.leader}"
         val unknown = members.filter { it !in mine && it !in remote }
         if (unknown.isNotEmpty()) return "없는 에이전트: ${unknown.joinToString()}"
-        repo.save(dev.vesta.core.studio.TeamDef(user.userId, dto.name, dto.description.trim(), dto.leader, members, theme = dto.theme?.takeIf { it in dev.vesta.core.studio.TeamDef.THEMES }))
+        repo.save(dev.vesta.core.studio.TeamDef(user.userId, dto.name, dto.description.trim(), dto.leader, members, theme = dto.theme?.takeIf { it in dev.vesta.core.studio.TeamDef.THEMES },
+            examples = dev.vesta.core.studio.TeamDef.cleanExamples(dto.examples)))
         return null
     }
 
