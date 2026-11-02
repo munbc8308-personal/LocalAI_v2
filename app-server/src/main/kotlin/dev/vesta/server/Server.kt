@@ -187,7 +187,7 @@ fun main() {
             Triple(if (media != null) "media" else "status", if (media != null) "영상 만듦" else "만들지 못함", job.title),
         ))
     }
-    // 예약 작업 (M29): 메신저에서 만든 예약은 그 메신저 대화방으로 결과를 보낸다. 웹·CLI는 대화 목록에 남는다
+    // 예약 작업 (M29, SC-07): 받을 곳이 메신저면 그 메신저 대화방으로 결과를 보낸다. 대화 목록에는 늘 남는다
     app.scheduleDeliver = { schedule, text, local ->
         if (schedule.channel !in MESSENGERS) 0
         else notifiers.filter { it.channel == schedule.channel }.sumOf { it.deliver(schedule.user, text, local) }

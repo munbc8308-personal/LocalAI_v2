@@ -190,6 +190,8 @@ interface ScheduleRepository {
     suspend fun get(id: Long): Schedule?
     suspend fun delete(user: UserId, id: Long): Boolean
     suspend fun setEnabled(user: UserId, id: Long, enabled: Boolean, nextAt: Instant?): Boolean
+    /** 결과를 받을 곳 바꾸기 (SC-07) */
+    suspend fun setChannel(user: UserId, id: Long, channel: ChannelType): Boolean
     /** 켜져 있고 [now]까지 때가 된 것, 이른 것부터 */
     suspend fun due(now: Instant): List<Schedule>
     /** 실행을 마치거나 건너뛴 뒤: 다음 시각(없으면 끔)·마지막 결과 */

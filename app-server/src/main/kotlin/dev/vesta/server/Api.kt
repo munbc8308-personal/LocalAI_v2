@@ -173,6 +173,10 @@ class MessengerEndpoints(
     suspend fun links(filter: (dev.vesta.core.channel.ChannelBinding) -> Boolean): List<dev.vesta.api.MessengerLinkDto> =
         MESSENGERS.flatMap { bindings.list(it) }.filter(filter).map { dev.vesta.api.MessengerLinkDto(it.channel.name, it.externalUserId, userName(it.user.userId) ?: "?") }
 
+    /** 이 사용자가 지금 결과를 받을 수 있는 메신저: 연결돼 있고 봇이 도는 것 (SC-07) */
+    suspend fun targets(user: dev.vesta.core.UserId): Set<ChannelType> =
+        enabled().filter { c -> c in MESSENGERS && bindings.list(c).any { it.user.userId == user } }.toSet()
+
     suspend fun pair(user: dev.vesta.core.UserId, channel: ChannelType): dev.vesta.api.PairCodeDto {
         val code = dev.vesta.channels.PairingCode.generate()
         bindings.createPairing(user, channel, dev.vesta.channels.PairingCode.hash(code), PAIR_TTL)
@@ -846,7 +850,8 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val (scheduler, _) = call.schedulesFor(user, deps) ?: return@post
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.ScheduleNewDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
-                    scheduler.add(user.userId, ChannelType.WEB, dto.text).fold(
+                    val target = scheduleTarget(user, dto.channel, deps) ?: return@post call.respondJson(HttpStatusCode.BadRequest, """{"error":"연결되지 않은 곳으로는 받을 수 없습니다"}""")
+                    scheduler.add(user.userId, target, dto.text).fold(
                         { call.respondJson(HttpStatusCode.OK, buildJsonObject { put("id", it.id); put("nextAt", it.nextAt?.toString()) }.toString()) },
                         { call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", it.message ?: "예약하지 못했습니다") }.toString()) },
                     )
@@ -857,7 +862,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val id = call.parameters["id"]?.toLongOrNull() ?: return@put call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
                     val dto = runCatching { ApiJson.decodeFromString(dev.vesta.api.ScheduleEditDto.serializer(), call.receiveText()) }.getOrNull()
                         ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"잘못된 요청입니다"}""")
-                    if (scheduler.setEnabled(user.userId, id, dto.enabled)) call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
+                    dto.channel?.let { name ->
+                        val target = scheduleTarget(user, name, deps) ?: return@put call.respondJson(HttpStatusCode.BadRequest, """{"error":"연결되지 않은 곳으로는 받을 수 없습니다"}""")
+                        if (!scheduler.setChannel(user.userId, id, target)) return@put call.respondJson(HttpStatusCode.NotFound, """{"error":"없는 예약입니다"}""")
+                    }
+                    if (dto.enabled?.let { scheduler.setEnabled(user.userId, id, it) } != false) call.respondJson(HttpStatusCode.OK, """{"saved":true}""")
                     else call.respondJson(HttpStatusCode.BadRequest, """{"error":"없는 예약이거나 다시 돌 때가 없습니다"}""")
                 }
                 post("/{id}/run") {
@@ -1374,6 +1383,12 @@ private suspend fun ApplicationCall.schedulesFor(user: UserContext, deps: Server
     if (s == null || r == null) { respondJson(HttpStatusCode.ServiceUnavailable, """{"error":"예약을 쓸 수 없습니다"}"""); return null }
     if (user.role == UserRole.GUEST) { respondJson(HttpStatusCode.Forbidden, """{"error":"손님 계정은 예약을 쓸 수 없습니다"}"""); return null }
     return s to r
+}
+
+/** 예약 결과를 받을 곳 (SC-07): 웹이거나, 이 사용자와 연결된 메신저. 아니면 null */
+private suspend fun scheduleTarget(user: UserContext, name: String, deps: ServerDeps): ChannelType? {
+    if (name == ChannelType.WEB.name) return ChannelType.WEB
+    return deps.messengers?.targets(user.userId)?.firstOrNull { it.name == name }
 }
 
 private suspend fun ApplicationCall.memoriesFor(user: UserContext, deps: ServerDeps): dev.vesta.memory.MemoryService? {

@@ -18,6 +18,7 @@ import dev.vesta.core.tools.ApprovalDecision
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -47,6 +48,8 @@ class ScheduleStore : ScheduleRepository {
     override suspend fun delete(user: UserId, id: Long) = items.removeIf { it.id == id && it.user == user }
     override suspend fun setEnabled(user: UserId, id: Long, enabled: Boolean, nextAt: Instant?) =
         update(id) { it.copy(enabled = enabled, nextAt = nextAt) }
+    override suspend fun setChannel(user: UserId, id: Long, channel: ChannelType) =
+        items.any { it.id == id && it.user == user } && update(id) { it.copy(channel = channel) }
     override suspend fun due(now: Instant) = items.filter { it.enabled && it.nextAt != null && !it.nextAt!!.isAfter(now) }.sortedBy { it.nextAt }
     override suspend fun advance(id: Long, nextAt: Instant?, lastAt: Instant?, lastStatus: String?) {
         update(id) { it.copy(nextAt = nextAt, enabled = it.enabled && nextAt != null, lastAt = lastAt ?: it.lastAt, lastStatus = lastStatus ?: it.lastStatus) }
@@ -246,6 +249,29 @@ class SchedulerTest : FunSpec({
         scheduler.add(me, ChannelType.WEB, "매일 8시 a").isSuccess shouldBe true
         scheduler.add(me, ChannelType.WEB, "매일 9시 b").isSuccess shouldBe true
         scheduler.add(me, ChannelType.WEB, "매일 10시 c").exceptionOrNull()!!.message!! shouldContain "2개까지"
+    }
+
+    test("받을 곳 (SC-07): 고른 메신저로 보내고, 못 보내면 마지막 결과에 남긴다. 웹은 보낼 것이 없어 괜찮다") {
+        val store = ScheduleStore()
+        val clock = TestClock(at(10, 20))
+        val targets = mutableListOf<ChannelType>()
+        var reachable = 1
+        val scheduler = Scheduler(store, FakeConversation(), SessionStore(), { UserRole.OWNER }, deliver = { s, _, _ -> targets += s.channel; reachable }, clock = clock, zone = zone)
+        val s = scheduler.add(me, ChannelType.WEB, "매일 11시 날씨").getOrThrow()
+        scheduler.setChannel(UserId(99), s.id, ChannelType.DISCORD) shouldBe false
+        scheduler.setChannel(me, s.id, ChannelType.DISCORD) shouldBe true
+        clock.now = at(11, 0)
+        scheduler.tick() shouldBe 1
+        targets shouldBe listOf(ChannelType.DISCORD)
+        store.get(s.id)!!.lastStatus!! shouldNotContain "보내지 못함"
+        reachable = 0
+        clock.now = at(11, 0, day = 26)
+        scheduler.tick() shouldBe 1
+        store.get(s.id)!!.lastStatus!! shouldContain "메신저로 보내지 못함"
+        scheduler.setChannel(me, s.id, ChannelType.WEB) shouldBe true
+        clock.now = at(11, 0, day = 27)
+        scheduler.tick() shouldBe 1
+        store.get(s.id)!!.lastStatus!! shouldNotContain "보내지 못함"
     }
 })
 

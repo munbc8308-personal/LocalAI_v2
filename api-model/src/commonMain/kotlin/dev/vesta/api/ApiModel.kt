@@ -529,11 +529,11 @@ data class ScheduleDto(
     val lastStatus: String? = null,
 )
 
-/** 예약 만들기: `/schedule` 뒤와 같은 글 (예: "매일 8시 오늘 날씨 알려 줘") */
+/** 예약 만들기: `/schedule` 뒤와 같은 글 (예: "매일 8시 오늘 날씨 알려 줘"). [channel]은 결과를 받을 곳 (WEB 또는 연결된 메신저, SC-07) */
 @Serializable
-data class ScheduleNewDto(val text: String)
+data class ScheduleNewDto(val text: String, val channel: String = "WEB")
 
-/** 예약 켜기·끄기 */
+/** 예약 켜기·끄기, 받을 곳 바꾸기 (SC-07). 없는 값은 그대로 둔다 */
 @Serializable
-data class ScheduleEditDto(val enabled: Boolean)
+data class ScheduleEditDto(val enabled: Boolean? = null, val channel: String? = null)
 

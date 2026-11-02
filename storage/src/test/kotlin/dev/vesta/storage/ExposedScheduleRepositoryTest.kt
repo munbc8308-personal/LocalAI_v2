@@ -22,6 +22,10 @@ class ExposedScheduleRepositoryTest : FunSpec({
         repo.setEnabled(owner, a.id, false, null) shouldBe true
         repo.due(t0.plusSeconds(3600)) shouldBe emptyList()
         repo.get(a.id)!!.channel shouldBe ChannelType.TELEGRAM
+        repo.setChannel(dev.vesta.core.UserId(owner.value + 99), a.id, ChannelType.SLACK) shouldBe false
+        repo.setChannel(owner, a.id, ChannelType.SLACK) shouldBe true
+        repo.get(a.id)!!.channel shouldBe ChannelType.SLACK
+        repo.setChannel(owner, a.id, ChannelType.TELEGRAM) shouldBe true
         (1..4).forEach { repo.addRun(a.id, SessionId("s$it"), t0) }
         repo.trimRuns(a.id, 2) shouldBe listOf(SessionId("s2"), SessionId("s1"))
         repo.trimRuns(a.id, 2) shouldBe emptyList()

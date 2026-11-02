@@ -31,8 +31,8 @@ import java.time.format.DateTimeFormatter
 private val log = KotlinLogging.logger {}
 
 /** 예약 실행 한 번의 결과 */
-/** [summary]는 마지막 결과 한 줄 (답의 마지막 줄: 앞머리 "…할게"보다 결론이 끝에 온다) */
-data class ScheduleOutcome(val session: SessionId, val text: String, val ok: Boolean, val denied: Boolean, val summary: String = "")
+/** [summary]는 마지막 결과 한 줄 (답의 마지막 줄: 앞머리 "…할게"보다 결론이 끝에 온다). [undelivered]면 받을 메신저로 보내지 못했다 */
+data class ScheduleOutcome(val session: SessionId, val text: String, val ok: Boolean, val denied: Boolean, val summary: String = "", val undelivered: Boolean = false)
 
 /**
  * 예약 작업 (PROJECT.md 7.23, M29).
@@ -46,7 +46,7 @@ class Scheduler(
     private val sessions: SessionRepository,
     /** 지금 이 사용자의 역할 (없는 사용자면 null) */
     private val roleOf: suspend (UserId) -> UserRole?,
-    /** 결과를 만든 곳으로 (메신저면 연결된 대화방에). 셋째 값은 로컬 자료(문서·파일·지난 대화)가 들어간 답인가. 보낸 대화방 수 */
+    /** 결과를 받을 곳으로 (메신저면 연결된 대화방에, SC-03·SC-07). 셋째 값은 로컬 자료(문서·파일·지난 대화)가 들어간 답인가. 보낸 대화방 수 */
     private val deliver: suspend (Schedule, String, Boolean) -> Int = { _, _, _ -> 0 },
     /** 오래된 실행 대화 지우기 (미디어 포함) */
     private val deleteSession: suspend (UserId, SessionId) -> Unit = { u, s -> sessions.delete(u, s) },
@@ -138,9 +138,9 @@ class Scheduler(
         }.trim()
         val text = "⏰ ${s.parsed?.describe().orEmpty()} · ${s.task}\n\n$body" +
             if (denied) "\n\n(승인이 필요한 단계는 예약 실행에서 하지 않았습니다. 직접 대화에서 시켜 주세요.)" else ""
-        runCatching { deliver(s, text, local) }.onFailure { log.warn(it) { "예약 결과 보내기 실패: ${s.id}" } }
+        val sent = runCatching { deliver(s, text, local) }.onFailure { log.warn(it) { "예약 결과 보내기 실패: ${s.id}" } }.getOrDefault(0)
         repo.trimRuns(s.id, keepRuns).forEach { old -> runCatching { deleteSession(s.user, old) } }
-        ScheduleOutcome(session.id, text, ok, denied, body.lineSequence().lastOrNull { it.isNotBlank() }.orEmpty().trim())
+        ScheduleOutcome(session.id, text, ok, denied, body.lineSequence().lastOrNull { it.isNotBlank() }.orEmpty().trim(), s.channel.isMessenger() && sent == 0)
     }
 
     /** 대화 명령 (S-01·S-04). 예약 명령이 아니면 null */
@@ -175,6 +175,9 @@ class Scheduler(
         val next = s.parsed?.next(clock.instant().atZone(zone))?.toInstant() ?: return false
         return repo.setEnabled(user, id, true, next)
     }
+
+    /** 결과를 받을 곳 바꾸기 (웹, SC-07). 고를 수 있는 곳인지는 부르는 쪽이 본다 */
+    suspend fun setChannel(user: UserId, id: Long, channel: ChannelType): Boolean = repo.setChannel(user, id, channel)
 
     /** 지금 돌리기 (웹·CLI): 기다리지 않는다. 다음 때는 그대로. 못 돌리면 그 이유 */
     suspend fun runNow(user: UserContext, id: Long): String? {
@@ -234,7 +237,9 @@ class Scheduler(
             (if (channel == ChannelType.WEB || channel == ChannelType.CLI) "웹 대화 목록(⏰)" else "대화방") + "으로 갑니다. 쓰기·셸 같은 승인 단계는 예약 실행에서 하지 않습니다."
     }
 
-    private fun status(o: ScheduleOutcome) = (if (o.ok) "끝" else "실패") + (if (o.denied) " · 승인 단계 거부" else "") + " · " + o.summary.take(60)
+    private fun status(o: ScheduleOutcome) = (if (o.ok) "끝" else "실패") + (if (o.denied) " · 승인 단계 거부" else "") + (if (o.undelivered) " · 메신저로 보내지 못함(대화 목록에 있음)" else "") + " · " + o.summary.take(60)
+
+    private fun ChannelType.isMessenger() = this != ChannelType.WEB && this != ChannelType.CLI
 
     private fun local(at: Instant) = at.atZone(zone).format(FORMAT)
 

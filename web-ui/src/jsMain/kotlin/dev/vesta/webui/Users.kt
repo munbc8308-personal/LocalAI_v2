@@ -378,15 +378,20 @@ fun MemoriesCard() {
 
 /**
  * 예약 작업 (M29 SC-04): 만들기·켜기/끄기·지금 실행·지우기. 대화에서는 /schedule …·/schedules
- * 여기서 만든 예약은 결과가 웹 대화 목록(⏰)에 남는다. 메신저로 받으려면 메신저에서 /schedule
+ * 결과는 늘 웹 대화 목록(⏰)에 남고, 받을 곳으로 연결된 메신저를 고르면 그 메신저로도 온다 (SC-07)
  */
 @Composable
 fun SchedulesCard() {
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<dev.vesta.api.ScheduleDto>?>(null) }
     var adding by remember { mutableStateOf("") }
+    var addTo by remember { mutableStateOf("WEB") }
+    /** 받을 수 있는 메신저: 연결돼 있고 봇이 도는 것 */
+    var targets by remember { mutableStateOf<List<String>>(emptyList()) }
     var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     fun load() = scope.launch {
+        runCatching { Http.get("/api/me/messengers", MessengersDto.serializer()) }
+            .onSuccess { m -> targets = m.links.map { it.channel }.distinct().filter { it in m.enabled } }
         runCatching { Http.get("/api/schedules", ListSerializer(dev.vesta.api.ScheduleDto.serializer())) }.onSuccess { items = it }.onFailure { message = false to (it.message ?: "불러오지 못했습니다") }
     }
     LaunchedEffect(Unit) { load() }
@@ -403,10 +408,13 @@ fun SchedulesCard() {
             addEventListener("submit") { e ->
                 e.preventDefault()
                 val text = adding.trim()
-                if (text.isNotEmpty()) act("예약했습니다") { Http.post("/api/schedules", ApiJson.encodeToString(dev.vesta.api.ScheduleNewDto.serializer(), dev.vesta.api.ScheduleNewDto(text))); adding = "" }
+                if (text.isNotEmpty()) act("예약했습니다") { Http.post("/api/schedules", ApiJson.encodeToString(dev.vesta.api.ScheduleNewDto.serializer(), dev.vesta.api.ScheduleNewDto(text, addTo))); adding = "" }
             }
         }) {
             Input(InputType.Text) { value(adding); placeholder("예: 매일 8시 오늘 날씨와 일정 알려 줘"); attr("maxlength", "1100"); onInput { adding = it.value } }
+            if (targets.isNotEmpty()) Select({ attr("aria-label", "결과 받을 곳"); onChange { e -> e.value?.let { addTo = it } } }) {
+                (listOf("WEB") + targets).forEach { c -> Option(c, { if (c == addTo) selected() }) { Text(targetName(c)) } }
+            }
             Button({ type(ButtonType.Submit); if (adding.isBlank()) disabled() }) { Text("예약하기") }
         }
         P({ classes("muted", "small") }) { Text("언제: 매일 8시 · 평일 7시 · 주말 10시 · 매주 월,수 9시 · 매달 1일 9시 · 3시간마다 · 내일 9시 · 10월 30일 14시") }
@@ -416,15 +424,24 @@ fun SchedulesCard() {
                     B { Text("${s.number}. ${s.whenText}") }; Text(" · ${s.task}")
                     Span({ classes("muted") }) {
                         Text(" · " + (if (!s.enabled) "멈춤" else s.nextAt?.let { "다음 ${localTime(it)}" } ?: "끝남") +
-                            (if (s.channel != "WEB" && s.channel != "CLI") " · ${messengerName(s.channel)}로" else "") +
                             (s.lastStatus?.let { " · 마지막: $it" } ?: ""))
                     }
                 }
                 Span {
-                    Button({ classes("link", "small"); onClick { act("돌리기 시작했습니다. 결과는 대화 목록(⏰)에") { Http.post("/api/schedules/${s.id}/run", "{}") } } }) { Text("지금") }
+                    val current = if (s.channel == "CLI") "WEB" else s.channel
+                    // 받을 곳: 연결을 끊은 메신저도 지금 값이면 그대로 보여 준다
+                    if (targets.isNotEmpty() || current != "WEB") Select({
+                        attr("aria-label", "결과 받을 곳")
+                        onChange { e -> e.value?.takeIf { it != current }?.let { to -> act("받을 곳을 바꿨습니다") { Http.put("/api/schedules/${s.id}", ApiJson.encodeToString(dev.vesta.api.ScheduleEditDto.serializer(), dev.vesta.api.ScheduleEditDto(channel = to))) } } }
+                    }) {
+                        (listOf("WEB") + targets + current).distinct().forEach { c ->
+                            Option(c, { if (c == current) selected() }) { Text(targetName(c) + if (c != "WEB" && c !in targets) " (연결 안 됨)" else "") }
+                        }
+                    }
+                    Button({ classes("link", "small"); onClick { act("돌리기 시작했습니다. 결과는 대화 목록(⏰)" + (if (current == "WEB") "에" else "과 ${messengerName(current)}로")) { Http.post("/api/schedules/${s.id}/run", "{}") } } }) { Text("지금") }
                     Button({
                         classes("link", "small")
-                        onClick { act { Http.put("/api/schedules/${s.id}", ApiJson.encodeToString(dev.vesta.api.ScheduleEditDto.serializer(), dev.vesta.api.ScheduleEditDto(!s.enabled))) } }
+                        onClick { act { Http.put("/api/schedules/${s.id}", ApiJson.encodeToString(dev.vesta.api.ScheduleEditDto.serializer(), dev.vesta.api.ScheduleEditDto(enabled = !s.enabled))) } }
                     }) { Text(if (s.enabled) "멈춤" else "켜기") }
                     Button({ classes("link", "small", "remove"); attr("aria-label", "지우기"); onClick { if (window.confirm("${s.number}번 예약을 지울까요?")) act { Http.delete("/api/schedules/${s.id}") } } }) { Text("🗑") }
                 }
@@ -500,6 +517,8 @@ fun MessengersCard() {
         }
     }
 }
+
+private fun targetName(channel: String) = if (channel == "WEB") "웹 대화 목록만" else messengerName(channel)
 
 private fun messengerName(channel: String) = when (channel) {
     "TELEGRAM" -> "Telegram"

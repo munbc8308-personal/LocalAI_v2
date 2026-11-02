@@ -225,6 +225,42 @@ class ApiTest : FunSpec({
         settings.get(owner.userId).nickname shouldBe "민아"
     } }
 
+    test("예약 받을 곳 (SC-07): 웹이나 내가 연결한 켜진 메신저만 고를 수 있다") { testApplication {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)
+        val userRepo = dev.vesta.storage.ExposedUserRepository(db.db)
+        val bindings = dev.vesta.storage.ExposedChannelBindingStore(db.db)
+        val other = dev.vesta.identity.UserService(userRepo, WebAuthRepository(db.db)).create("mina", UserRole.MEMBER, "mina-pass-0001")
+        bindings.bind(owner.userId, ChannelType.TELEGRAM, "100", "100")
+        bindings.bind(owner.userId, ChannelType.SLACK, "300", "300") // 연결했지만 봇이 꺼짐
+        bindings.bind(other.id, ChannelType.DISCORD, "200", "200") // 남의 연결
+        val messengers = MessengerEndpoints(bindings, { setOf(ChannelType.TELEGRAM, ChannelType.DISCORD) }, { userRepo.get(it)?.name }, { userRepo.find(it) })
+        val scheduleRepo = dev.vesta.storage.ExposedScheduleRepository(db.db)
+        val scheduler = dev.vesta.scheduler.Scheduler(scheduleRepo, conversation, NoSessions, { UserRole.OWNER })
+        val deps = ServerDeps(conversation, NoSessions, NoMessages, owner, token = "secret", version = "t", messengers = messengers, schedules = scheduler, scheduleRepo = scheduleRepo)
+        application { vestaApi(deps) }
+        fun io.ktor.client.request.HttpRequestBuilder.auth() { header(io.ktor.http.HttpHeaders.Authorization, "Bearer secret") }
+        fun new(to: String? = null) = """{"text":"매일 8시 날씨"""" + (to?.let { ""","channel":"$it"""" } ?: "") + "}"
+
+        // 안 고르면 웹
+        client.post("/api/schedules") { auth(); setBody(new()) }.status shouldBe HttpStatusCode.OK
+        // 연결한 켜진 메신저만
+        client.post("/api/schedules") { auth(); setBody(new("TELEGRAM")) }.status shouldBe HttpStatusCode.OK
+        listOf("DISCORD", "SLACK", "CLI", "없음").forEach { client.post("/api/schedules") { auth(); setBody(new(it)) }.status shouldBe HttpStatusCode.BadRequest }
+        scheduleRepo.list(owner.userId).map { it.channel } shouldBe listOf(ChannelType.WEB, ChannelType.TELEGRAM)
+        // 바꾸기: 받을 곳만 바꾸면 켜짐은 그대로
+        val id = scheduleRepo.list(owner.userId).first().id
+        client.put("/api/schedules/$id") { auth(); setBody("""{"channel":"TELEGRAM"}""") }.status shouldBe HttpStatusCode.OK
+        scheduleRepo.get(id)!!.let { it.channel shouldBe ChannelType.TELEGRAM; it.enabled shouldBe true }
+        client.put("/api/schedules/$id") { auth(); setBody("""{"channel":"DISCORD"}""") }.status shouldBe HttpStatusCode.BadRequest
+        scheduleRepo.get(id)!!.channel shouldBe ChannelType.TELEGRAM
+        client.put("/api/schedules/$id") { auth(); setBody("""{"channel":"WEB"}""") }.status shouldBe HttpStatusCode.OK
+        client.put("/api/schedules/999") { auth(); setBody("""{"channel":"WEB"}""") }.status shouldBe HttpStatusCode.NotFound
+        // 켜기·끄기는 예전 꼴 그대로
+        client.put("/api/schedules/$id") { auth(); setBody("""{"enabled":false}""") }.status shouldBe HttpStatusCode.OK
+        scheduleRepo.get(id)!!.enabled shouldBe false
+    } }
+
     test("메신저 연결 (M20): 본인 코드는 누구나, 남의 코드·연결은 주인만, 남의 연결은 못 끊는다") { testApplication {
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
         val owner = UserContext(db.ensureOwner("owner"), UserRole.OWNER)

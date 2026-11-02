@@ -59,6 +59,12 @@ class ExposedScheduleRepository(private val db: Database, private val clock: Clo
         } > 0
     }
 
+    override suspend fun setChannel(user: UserId, id: Long, channel: ChannelType): Boolean = io {
+        Schedules.update({ (Schedules.id eq id) and (Schedules.userId eq user.value) }) {
+            it[Schedules.channel] = channel.name
+        } > 0
+    }
+
     override suspend fun due(now: Instant): List<Schedule> = io {
         Schedules.selectAll().where { (Schedules.enabled eq true) and (Schedules.nextAt lessEq now) }
             .orderBy(Schedules.nextAt to SortOrder.ASC, Schedules.id to SortOrder.ASC).map { it.toSchedule() }
