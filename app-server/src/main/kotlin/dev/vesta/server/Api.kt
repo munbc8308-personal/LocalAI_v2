@@ -328,10 +328,12 @@ fun Application.vestaApi(deps: ServerDeps) {
                     is ImagesResult.Ok -> decoded.images
                     is ImagesResult.Invalid -> return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", decoded.message) }.toString())
                 }
+                val public = call.attributes.contains(PUBLIC_REQUEST)
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
-                    // 작업 폴더는 CLI에서만 받는다 (대화 서비스가 Mac 주인·홈 아래 폴더인지 다시 확인한다)
-                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI }?.let { path ->
+                    // 작업 폴더는 CLI에서만 받는다 (대화 서비스가 Mac 주인·홈 아래 폴더인지 다시 확인한다).
+                    // 바깥 입구로 온 CLI(다른 PC의 vesta login, RC-04)는 받지 않는다: 그 PC의 폴더는 이 Mac에 없다
+                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI && !public }?.let { path ->
                         val skills = request.skills.take(100).mapNotNull { dev.vesta.core.skill.Skill.parse(it.folder, it.text, dev.vesta.core.skill.SkillSource.PROJECT) }
                         dev.vesta.core.agent.Workspace(path, request.instructions, skills)
                     }

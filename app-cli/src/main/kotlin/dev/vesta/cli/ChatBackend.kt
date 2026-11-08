@@ -87,8 +87,16 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
     override fun close() = app.close()
 }
 
+/** 원격 서버 인증: 이 Mac은 API 토큰(Bearer, Mac 주인), 다른 PC는 `vesta login` 세션(쿠키 + CSRF, 그 사용자 권한) */
+sealed interface RemoteAuth {
+    data class Token(val token: String) : RemoteAuth
+    data class Login(val login: RemoteLogin) : RemoteAuth
+}
+
 /** 상시 실행 서버(app-server)에 HTTP로 붙는다 */
-class RemoteBackend(private val baseUrl: String, private val token: String, version: String) : ChatBackend {
+class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, override val description: String) : ChatBackend {
+    constructor(baseUrl: String, token: String, version: String) : this(baseUrl, RemoteAuth.Token(token), "서버 $baseUrl (v$version)")
+
     private val http = HttpClient(CIO) {
         expectSuccess = false
         install(HttpTimeout) {
@@ -97,16 +105,21 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
             socketTimeoutMillis = 15 * 60 * 1_000L
         }
     }
-    override val description = "서버 $baseUrl (v$version)"
     override val home: Path = VestaPaths.default().home
 
     override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?): Flow<AgentEvent> = flow {
         http.preparePost("$baseUrl/api/chat") {
-            bearerAuth(token)
+            authorize()
             contentType(ContentType.Application.Json)
-            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions,
-                skills = workspace?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) })))
+            // 다른 PC(로그인)의 폴더는 서버 Mac에 없다: 작업 폴더·지침·스킬을 보내지 않는다
+            val ws = workspace?.takeIf { auth is RemoteAuth.Token }
+            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = ws?.path, instructions = ws?.instructions,
+                skills = ws?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) })))
         }.execute { response ->
+            if (response.status.value == 401 && auth is RemoteAuth.Login) {
+                emit(AgentEvent.Error("로그인이 끝났습니다. vesta login ${auth.login.url} 로 다시 로그인하세요"))
+                return@execute
+            }
             if (!response.status.isSuccess()) {
                 emit(AgentEvent.Error("서버 오류 ${response.status.value}: ${response.bodyAsText().take(200)}"))
                 return@execute
@@ -127,7 +140,7 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
             is ApprovalDecision.ApproveEdited -> ApprovalDto("edit", edited = decision.editedArguments.mapValues { (it.value as? JsonPrimitive)?.content ?: it.value.toString() })
         }
         http.post("$baseUrl/api/approvals/$requestId") {
-            bearerAuth(token)
+            authorize()
             contentType(ContentType.Application.Json)
             setBody(ApiJson.encodeToString(ApprovalDto.serializer(), dto))
         }
@@ -145,7 +158,7 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
             }
 
     private suspend fun get(path: String): String? {
-        val response = http.get(baseUrl + path) { bearerAuth(token) }
+        val response = http.get(baseUrl + path) { authorize() }
         return if (response.status.isSuccess()) response.bodyAsText() else null
     }
 
@@ -154,7 +167,7 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
 
     override suspend fun setPrompt(id: SessionId, prompt: String?): String? {
         val response = http.put("$baseUrl/api/sessions/${id.value}/prompt") {
-            bearerAuth(token)
+            authorize()
             contentType(ContentType.Application.Json)
             setBody(ApiJson.encodeToString(dev.vesta.api.SessionPromptDto.serializer(), dev.vesta.api.SessionPromptDto(prompt)))
         }
@@ -162,16 +175,21 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
     }
 
     override suspend fun media(id: String): ByteArray? {
-        val response = http.get("$baseUrl/api/media/$id") { bearerAuth(token) }
+        val response = http.get("$baseUrl/api/media/$id") { authorize() }
         return if (response.status.isSuccess()) response.readRawBytes() else null
     }
 
     override suspend fun job(id: String): dev.vesta.api.JobDto? {
-        val response = http.get("$baseUrl/api/jobs/$id") { bearerAuth(token) }
+        val response = http.get("$baseUrl/api/jobs/$id") { authorize() }
         return if (response.status.isSuccess()) ApiJson.decodeFromString(dev.vesta.api.JobDto.serializer(), response.bodyAsText()) else null
     }
 
     override fun close() = http.close()
+
+    private fun io.ktor.client.request.HttpRequestBuilder.authorize() = when (auth) {
+        is RemoteAuth.Token -> bearerAuth(auth.token)
+        is RemoteAuth.Login -> auth.login.applyTo(this)
+    }
 
     companion object {
         /** 서버가 떠 있고 토큰이 있으면 원격 백엔드 */
@@ -188,6 +206,12 @@ class RemoteBackend(private val baseUrl: String, private val token: String, vers
                         ?.let { ApiJson.decodeFromString(HealthDto.serializer(), it.bodyAsText()) }
                 }
             }?.let { RemoteBackend(baseUrl, token, it.version) }
+        }
+
+        /** `vesta login`으로 붙은 서버. 서버에 닿지 않거나 로그인이 끝났으면 그 이유 */
+        suspend fun connect(login: RemoteLogin): Result<RemoteBackend> = runCatching {
+            val me = login.me()
+            RemoteBackend(login.url, RemoteAuth.Login(login), "서버 ${login.url} (${me.name} · ${RemoteLogin.roleName(me.role)})")
         }
     }
 }

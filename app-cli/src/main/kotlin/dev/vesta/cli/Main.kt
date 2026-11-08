@@ -47,7 +47,7 @@ fun main(args: Array<String>) = Vesta()
         RepoCommand().subcommands(RepoAddCommand(), RepoUpdateCommand()),
         SearchCommand(),
         EvalCommand().subcommands(EvalRoutingCommand(), EvalRetrievalCommand(), EvalGroundingCommand(), EvalAllCommand()),
-        StatusCommand(), DoctorCommand(), SetupCommand(), PasswdCommand(), UserCommand.create(),
+        StatusCommand(), DoctorCommand(), SetupCommand(), PasswdCommand(), LoginCommand(), LogoutCommand(), UserCommand.create(),
         *messengerCommands().toTypedArray(),
         TrainCommand.create(), EvolveCommand.create(),
         ConfigCommand().subcommands(ConfigInitCommand(), ConfigShowCommand()), BenchCommand(), ModelsCommand.create(), ExportCommand(), ImportCommand(), UpdateCommand(), UninstallCommand(), PublicCommand.create(), GoogleCommand.create(), MemoryCommand.create(), ScheduleCommand.create())

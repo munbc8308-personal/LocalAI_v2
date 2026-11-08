@@ -85,7 +85,7 @@ private class FakeAccess(val kid: String = "k1") {
 
 private class EchoConversation : ConversationService {
     override fun send(user: UserContext, channel: ChannelType, sessionId: SessionId?, input: UserInput): Flow<AgentEvent> = flow {
-        emit(AgentEvent.Token("user=${user.userId.value}"))
+        emit(AgentEvent.Token("user=${user.userId.value} channel=$channel workspace=${input.workspace?.path}"))
         emit(AgentEvent.Done(AgentType.CHAT, "m", null))
     }
     override suspend fun resolveApproval(user: UserContext, requestId: String, decision: ApprovalDecision) = true
@@ -255,6 +255,21 @@ class PublicAccessTest : FunSpec({
         owner.status shouldBe HttpStatusCode.OK
         val ownerCookie = owner.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
         client.get("/api/users") { ip(3)(); header("Cookie", ownerCookie) }.status shouldBe HttpStatusCode.Forbidden
+    } }
+
+    test("다른 PC의 CLI(vesta login): 쿠키 + CSRF로 대화하고, 보낸 작업 폴더는 받지 않는다 (RC-04)") { testApplication {
+        val (deps) = publicDeps(80, access = null)
+        application { vestaApi(deps) }
+        fun ip(): io.ktor.client.request.HttpRequestBuilder.() -> Unit = { header("Host", HOST); header("X-Forwarded-For", "203.0.113.9") }
+        val login = client.post("/api/login") { ip()(); setBody("""{"name":"long","password":"long-enough-pass"}""") }
+        val cookie = login.headers[io.ktor.http.HttpHeaders.SetCookie].orEmpty().substringBefore(';')
+        val csrf = dev.vesta.api.ApiJson.decodeFromString(dev.vesta.api.MeDto.serializer(), login.bodyAsText()).csrf
+        val body = """{"text":"hi","channel":"CLI","workspace":"/Users/owner/secret"}"""
+        val reply = client.post("/api/chat") { ip()(); header("Cookie", cookie); header("X-Vesta-CSRF", csrf); setBody(body) }.bodyAsText()
+        reply shouldContain "channel=CLI"
+        reply shouldContain "workspace=null"
+        // CSRF 없이는 안 된다
+        client.post("/api/chat") { ip()(); header("Cookie", cookie); setBody(body) }.status shouldBe HttpStatusCode.Forbidden
     } }
 
     test("IP 제한: 창이 지나면 다시 열리고, 기록 수는 고정") {

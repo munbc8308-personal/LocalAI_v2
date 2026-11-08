@@ -87,6 +87,7 @@ internal object PrintMode {
     /** 서버가 떠 있으면 원격, 아니면 임베디드 (대화와 같다) */
     private suspend fun openBackend(local: Boolean): ChatBackend {
         if (!local) {
+            loggedInBackend()?.let { return it }
             val config = dev.vesta.core.config.ConfigLoader.load(dev.vesta.core.config.VestaPaths.default().configFile)
             RemoteBackend.connect(config.server.baseUrl, dev.vesta.app.ApiToken.read())?.let { return it }
         }

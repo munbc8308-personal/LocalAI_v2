@@ -197,6 +197,7 @@ class ChatCommand : CliktCommand(name = "chat") {
     /** 서버가 떠 있으면 원격, 아니면(또는 --local·--model) 임베디드 (PROJECT.md 6.2) */
     private suspend fun openBackend(): ChatBackend {
         if (!local && model == null) {
+            loggedInBackend()?.let { return it }
             val config = dev.vesta.core.config.ConfigLoader.load(dev.vesta.core.config.VestaPaths.default().configFile)
             RemoteBackend.connect(config.server.baseUrl, dev.vesta.app.ApiToken.read())?.let { return it }
         }
@@ -321,6 +322,18 @@ internal suspend fun saveMedia(backend: ChatBackend, event: AgentEvent.Media): j
     val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
     dir.resolve("$stamp-${event.asset.id.take(8)}.${if (video) "mp4" else "png"}").also { java.nio.file.Files.write(it, bytes) }
 }.getOrNull()
+
+/**
+ * `vesta login`을 했으면 그 서버 (RC-03). 닿지 않거나 로그인이 끝났으면 이유를 알리고 끝낸다:
+ * 이 PC에는 모델이 없으니 임베디드로 넘어가지 않는다 (`--local`로만 임베디드)
+ */
+internal suspend fun loggedInBackend(): ChatBackend? {
+    val login = RemoteLogin.load() ?: return null
+    return RemoteBackend.connect(login).getOrElse {
+        System.err.println(it.message)
+        throw ProgramResult(1)
+    }
+}
 
 internal fun mediaLine(event: AgentEvent.Media, path: java.nio.file.Path) = if (event.asset.mime == "video/mp4") "🎬 영상: $path" else "🖼 이미지: $path"
 
