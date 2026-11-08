@@ -218,4 +218,25 @@ class VideoAgentTest : FunSpec({
         result.media!!.mime shouldBe "video/mp4"
         result.text shouldContain "영상을 만들었습니다"
     }
+
+    test("붙인 사진 (G-07): 사진마다 한 장면을 순서대로, 그리지 않고 장면 크기로 잘라 쓴다. 모델이 덜 쓰면 사진을 빼먹지 않게 채운다") {
+        val tall = dev.vesta.core.media.ImageInput("image/png", java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(java.awt.image.BufferedImage(300, 600, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", it) }.toByteArray())
+        val llm = OneReply("""{"title": "여행", "aspect": "portrait", "scenes": [
+            {"narration": "바다에 도착했다.", "image": "a beach", "motion": "zoom_out", "animate": true}]}""")
+        val generator = FakeGenerator()
+        val composer = FakeComposer()
+        val spoken = mutableListOf<String>()
+        val tts = object : TextToSpeech { override suspend fun synthesize(text: String, format: AudioFormat): ByteArray { spoken += text; return byteArrayOf(9) } }
+        var reserved = 0
+        VideoAgent(llm, models, generator, composer, SavedMedia(), tts, reserve = { reserved++ })
+            .handle(AgentRequest(user, session, listOf(ChatMessage(ChatRole.USER, "이 사진들 이어서 여행 영상", images = listOf(tall, tall))))).toList()
+        llm.requests.single().messages.single().let { it.images.size shouldBe 2; it.content shouldContain "exactly 2 scenes, scene N uses photo N"; it.content shouldContain "\"portrait\" (most photos' shape)" }
+        generator.calls.size shouldBe 0
+        reserved shouldBe 0
+        spoken shouldBe listOf("바다에 도착했다.")
+        composer.size shouldBe (720 to 1280)
+        composer.scenes.size shouldBe 2
+        composer.scenes.forEach { s -> javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(s.image)).let { it.width shouldBe 576; it.height shouldBe 1024 } }
+        composer.scenes.map { it.motion }.first() shouldBe Motion.ZOOM_OUT
+    }
 })

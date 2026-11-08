@@ -15,6 +15,7 @@ Vesta 미디어 워커 (PROJECT.md 7.11): mlx-whisper 음성 인식과 mflux 이
 브라우저에서 온 요청(Origin 헤더)과 다른 Host 이름(DNS 리바인딩)은 받지 않는다.
 """
 import argparse
+import base64
 import gc
 import hmac
 import io
@@ -22,6 +23,7 @@ import json
 import logging
 import os
 import secrets
+import tempfile
 import threading
 import time
 import wave
@@ -205,7 +207,8 @@ class Imager:
         finally:
             self.preparing = False
 
-    def generate(self, prompt: str, width: int, height: int, steps: int, seed: int) -> bytes:
+    def generate(self, prompt: str, width: int, height: int, steps: int, seed: int,
+                 reference: bytes | None = None, keep: float = 0.5) -> bytes:
         from mflux.models.common.config import ModelConfig
         from mflux.models.flux.variants.txt2img.flux import Flux1
         with self.lock:
@@ -216,12 +219,24 @@ class Imager:
                 self.flux = Flux1(model_config=ModelConfig.schnell(), model_path=self.directory)
                 log.info("image model loaded in %.1fs", time.time() - started)
             started = time.time()
-            result = self.flux.generate_image(seed=seed, prompt=prompt, num_inference_steps=steps, width=width, height=height)
+            # 기준 그림 (V-11): mflux img2img. image_strength가 클수록 기준을 많이 남긴다 (앞 단계를 건너뜀)
+            extra = {}
+            tmp = None
+            if reference:
+                tmp = tempfile.NamedTemporaryFile(suffix=".img", delete=False)
+                tmp.write(reference)
+                tmp.close()
+                extra = {"image_path": tmp.name, "image_strength": keep}
+            try:
+                result = self.flux.generate_image(seed=seed, prompt=prompt, num_inference_steps=steps, width=width, height=height, **extra)
+            finally:
+                if tmp:
+                    os.unlink(tmp.name)
             self.last_used = time.time()
             log.info("image %dx%d %d steps in %.1fs", width, height, steps, time.time() - started)
             info = PngInfo()
             info.add_text("Software", "Vesta")
-            info.add_text("Comment", "AI 생성 (Vesta, FLUX.1-schnell)")
+            info.add_text("Comment", "AI 생성 (Vesta, FLUX.1-schnell" + (", 기준 그림" if reference else "") + ")")
             info.add_text("ai_generated", "true")
             info.add_text("prompt", prompt)
             info.add_text("seed", str(seed))
@@ -377,7 +392,8 @@ def handler(stt: Stt, imager: Imager, token: str, port: int, tts: "Tts"):
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
                 return self.reply(415, {"error": "application/json only"})
             length = int(self.headers.get("Content-Length") or 0)
-            if length <= 0 or length > 64 * 1024:
+            # 기준 그림(base64)이 있으면 커진다 (V-11): 20MB까지
+            if length <= 0 or length > 20 * 1024 * 1024:
                 return self.reply(413, {"error": "bad request size"})
             try:
                 body = json.loads(self.rfile.read(length))
@@ -386,8 +402,12 @@ def handler(stt: Stt, imager: Imager, token: str, port: int, tts: "Tts"):
                 height = int(body.get("height", 1024))
                 steps = int(body.get("steps", 4))
                 seed = int(body.get("seed", secrets.randbelow(2**31)))
+                reference = base64.b64decode(body["image"], validate=True) if body.get("image") else None
+                keep = float(body.get("keep", 0.5))
             except Exception:
                 return self.reply(400, {"error": "bad request"})
+            if reference is not None and not (0.0 <= keep <= 1.0):
+                return self.reply(400, {"error": "keep 0~1"})
             if not prompt or len(prompt) > 2000 or not (1 <= steps <= 8) or \
                     any(v < 256 or v > 1536 or v % 16 for v in (width, height)):
                 return self.reply(400, {"error": "prompt 1~2000 chars, size 256~1536 (multiple of 16), steps 1~8"})
@@ -397,7 +417,7 @@ def handler(stt: Stt, imager: Imager, token: str, port: int, tts: "Tts"):
                 imager.prepare_async()
                 return self.reply(503, {"error": "preparing", "detail": previous})
             try:
-                png = imager.generate(prompt, width, height, steps, seed)
+                png = imager.generate(prompt, width, height, steps, seed, reference, keep)
             except Exception as e:
                 log.exception("image failed")
                 return self.reply(500, {"error": str(e)})

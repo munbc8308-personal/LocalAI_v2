@@ -44,9 +44,12 @@ internal class OneReply(private val text: String) : InferenceClient {
 internal class FakeGenerator(private val failure: String? = null) : ImageGenerator {
     override val model = "FLUX.1-schnell"
     val calls = mutableListOf<Triple<String, Int, Int>>()
-    override suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long?): GeneratedImage {
+    /** 기준 그림과 남길 정도 (V-11) */
+    val references = mutableListOf<Pair<ByteArray?, Double>>()
+    override suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long?, reference: ByteArray?, keep: Double): GeneratedImage {
         failure?.let { throw MediaException(it) }
         calls += Triple(prompt, width, height)
+        references += reference to keep
         return GeneratedImage(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47), 7)
     }
 }
@@ -102,5 +105,26 @@ class ImageAgentTest : FunSpec({
         events.filterIsInstance<AgentEvent.Token>().single().text shouldContain "준비하고"
         events.last().javaClass.simpleName shouldBe "Done"
         ImageAgent(OneReply("x"), models, FakeGenerator(), media).plan(listOf(ChatMessage(ChatRole.USER, "노을 진 바다"))).prompt shouldBe "노을 진 바다"
+    }
+
+    test("기준 그림 (V-11): 붙인 그림을 모델에게 보여 주고, 그 모양대로 잘라 기준으로 넘긴다. 남길 정도는 모델이 고른다. 실제 인물을 속이는 편집은 거절") {
+        val photo = dev.vesta.core.media.ImageInput("image/png", java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(java.awt.image.BufferedImage(800, 400, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", it) }.toByteArray())
+        val llm = OneReply("""{"prompt": "the same street as a watercolor painting", "aspect": "landscape", "keep": "high", "refuse": null}""")
+        val generator = FakeGenerator()
+        val events = ImageAgent(llm, models, generator, SavedMedia())
+            .handle(AgentRequest(user, session, listOf(ChatMessage(ChatRole.USER, "원본 느낌 살려서 수채화로", images = listOf(photo))))).toList()
+        llm.requests.single().messages.single().let { it.images.size shouldBe 1; it.content shouldContain "aspect: \"landscape\"" }
+        generator.calls.single() shouldBe Triple("the same street as a watercolor painting", 1024, 768)
+        generator.references.single().let { (ref, keep) ->
+            keep shouldBe ImageAgent.KEEP_HIGH
+            javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(ref)).let { it.width shouldBe 1024; it.height shouldBe 768 }
+        }
+        events.filterIsInstance<AgentEvent.Token>().joinToString("") { it.text } shouldContain "붙인 그림 기준 · 원본과 비슷하게"
+
+        val refused = FakeGenerator()
+        ImageAgent(OneReply("""{"prompt": "", "refuse": "실제 인물을 속이는 사진은 만들지 않아요"}"""), models, refused, SavedMedia())
+            .handle(AgentRequest(user, session, listOf(ChatMessage(ChatRole.USER, "이 사람이 체포되는 사진으로", images = listOf(photo))))).toList()
+            .filterIsInstance<AgentEvent.Token>().single().text shouldContain "만들지 않습니다"
+        refused.calls.size shouldBe 0
     }
 })

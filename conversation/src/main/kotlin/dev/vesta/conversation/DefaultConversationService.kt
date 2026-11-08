@@ -222,7 +222,11 @@ class DefaultConversationService(
             else if (skill != null) RoutingDecision(skill.first.agent, 1.0, RoutingStage.EXPLICIT, question = skill.first.expand(skill.second.arguments), skill = skill.first.name)
             else if (autoTeam != null) RoutingDecision(AgentType.TASK, autoTeam.first.score, RoutingStage.SEMANTIC, question = input.text, customAgent = autoTeam.first.name, team = true)
             else if (continued != null) continued.copy(question = input.text, stage = RoutingStage.EXPLICIT, confidence = 1.0, requested = null, continued = true)
-            else if (input.images.isNotEmpty()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = ExplicitRoute.parse(input.text)?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
+            // 이미지를 붙였으면 비전 대화. 단 /image·/video는 붙인 이미지를 기준·장면으로 쓰는 그 담당에게 (V-11·G-07)
+            else if (input.images.isNotEmpty()) ExplicitRoute.parse(input.text).let { e ->
+                if (e != null && e.agent in REFERENCE_AGENTS) RoutingDecision(e.agent, 1.0, RoutingStage.EXPLICIT, question = e.question.ifBlank { DEFAULT_REFERENCE_QUESTION.getValue(e.agent) })
+                else RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = e?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
+            }
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
@@ -341,6 +345,9 @@ class DefaultConversationService(
 
         /** 글 없이 이미지만 보냈을 때 */
         const val DEFAULT_IMAGE_QUESTION = "이 이미지를 설명해 줘."
+        /** 붙인 이미지를 재료로 쓰는 담당 (V-11·G-07) */
+        private val REFERENCE_AGENTS = setOf(AgentType.IMAGE, AgentType.VIDEO)
+        private val DEFAULT_REFERENCE_QUESTION = mapOf(AgentType.IMAGE to "이 이미지를 기준으로 그려 줘.", AgentType.VIDEO to "이 사진들을 이어서 영상으로 만들어 줘.")
     }
 }
 

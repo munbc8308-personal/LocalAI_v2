@@ -37,13 +37,15 @@ class WorkerImageGenerator(
 ) : ImageGenerator {
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long?): GeneratedImage {
+    override suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long?, reference: ByteArray?, keep: Double): GeneratedImage {
         val body = buildJsonObject {
             put("prompt", prompt)
             put("width", width)
             put("height", height)
             put("steps", steps)
             seed?.let { put("seed", it) }
+            // 기준 그림 (V-11): base64, 워커가 임시 파일로 받아 mflux img2img에 넘긴다
+            reference?.let { put("image", java.util.Base64.getEncoder().encodeToString(it)); put("keep", keep.coerceIn(0.0, 1.0)) }
         }
         val response = try {
             http.post("$baseUrl/image") {

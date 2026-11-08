@@ -306,6 +306,19 @@ class DefaultConversationServiceTest : FunSpec({
         second.last().images.shouldBeEmpty()
     }
 
+    test("이미지를 붙인 /image·/video는 그 담당에게 이미지와 함께 간다. 할 일이 없으면 기본 요청 (V-11·G-07)") {
+        val video = ScriptedAgent { emit(AgentEvent.Done(AgentType.VIDEO, "m", null)) }
+        val image = ScriptedAgent { emit(AgentEvent.Done(AgentType.IMAGE, "m", null)) }
+        val chat = ScriptedAgent { error("일반 대화로 가면 안 됨") }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.VIDEO to video, AgentType.IMAGE to image))
+        val photo = ImageInput("image/jpeg", byteArrayOf(1))
+        service.send(user, ChannelType.WEB, null, UserInput("/video 이 사진들 이어서 여행 영상", listOf(photo, photo))).toList()
+            .filterIsInstance<AgentEvent.Routed>().single().decision.agent shouldBe AgentType.VIDEO
+        video.requests.single().history.last().let { it.content shouldBe "이 사진들 이어서 여행 영상"; it.images.size shouldBe 2 }
+        service.send(user, ChannelType.WEB, null, UserInput("/image", listOf(photo))).toList()
+        image.requests.single().history.last().let { it.content shouldBe "이 이미지를 기준으로 그려 줘."; it.images.size shouldBe 1 }
+    }
+
     test("글 없이 이미지만 보내면 설명을 부탁한 것으로 본다") {
         val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat))

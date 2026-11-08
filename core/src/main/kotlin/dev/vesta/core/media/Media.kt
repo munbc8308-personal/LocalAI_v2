@@ -58,7 +58,10 @@ class GeneratedImage(val png: ByteArray, val seed: Long)
 interface ImageGenerator {
     /** 이 모델 이름 (답변·메타데이터에 표시) */
     val model: String
-    suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long? = null): GeneratedImage
+    /**
+     * [reference]가 있으면 그 그림을 기준으로 그린다 (img2img, V-11). [keep]은 기준을 얼마나 남길지 0~1 (높을수록 기준 그대로)
+     */
+    suspend fun generate(prompt: String, width: Int, height: Int, steps: Int, seed: Long? = null, reference: ByteArray? = null, keep: Double = 0.5): GeneratedImage
 }
 
 /** 음성 인식 (PROJECT.md 8장, V-01). [audio]는 형식 상관없음 (ffmpeg로 바꾼다) */

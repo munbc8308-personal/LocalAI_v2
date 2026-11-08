@@ -73,15 +73,22 @@ class VideoAgent(
     override val type = AgentType.VIDEO
     private val json = Json { ignoreUnknownKeys = true }
 
-    internal data class Scene(val narration: String, val image: String, val motion: Motion, val animate: Boolean = false)
+    /** [photo]: 붙인 사진 번호 (0부터, G-07). 있으면 그리지 않고 그 사진을 쓴다 */
+    internal data class Scene(val narration: String, val image: String, val motion: Motion, val animate: Boolean = false, val photo: Int? = null)
     internal data class Plan(val title: String, val aspect: String, val scenes: List<Scene>, val refuse: String? = null, val speed: Double = 1.0, val edit: Boolean = false)
 
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         val question = request.history.last().content
         val seconds = targetSeconds(question)
-        val previous = projects?.latest(request.user.userId, request.session.id.value)
-        emit(AgentEvent.Status(if (previous != null) "대본·장면 나누는 중 (앞 영상 \"${previous.title}\"을 고칠지 함께 봄)" else "대본·장면 나누는 중 (약 ${seconds}초)"))
-        val plan = plan(request.history, seconds, previous)
+        // 붙인 사진 (G-07): 순서대로 한 장이 한 장면. 사진을 붙였으면 늘 새 영상
+        val photos = request.history.last().images.take(MAX_SCENES).map { it.bytes }
+        val previous = if (photos.isEmpty()) projects?.latest(request.user.userId, request.session.id.value) else null
+        emit(AgentEvent.Status(when {
+            photos.isNotEmpty() -> "사진 ${photos.size}장을 보고 대본 쓰는 중"
+            previous != null -> "대본·장면 나누는 중 (앞 영상 \"${previous.title}\"을 고칠지 함께 봄)"
+            else -> "대본·장면 나누는 중 (약 ${seconds}초)"
+        }))
+        val plan = plan(request.history, seconds, previous, photos)
         // 거절은 장면이 비어 있으므로 먼저 본다
         plan?.refuse?.let {
             emit(AgentEvent.Token("이 영상은 만들지 않습니다: $it\n실제 인물의 얼굴·목소리를 흉내 내는 영상은 만들지 않아요. 가상의 인물로 바꿔 요청해 주세요."))
@@ -95,14 +102,14 @@ class VideoAgent(
         }
         if (jobs != null) {
             // 몇 분 걸리므로 백그라운드로: 답은 바로 마치고, 끝나면 같은 대화에 결과를 남기고 알린다
-            val job = jobs.submit(request.user, request.session, plan.title, type) { progress -> produce(request, plan, previous, progress) }
+            val job = jobs.submit(request.user, request.session, plan.title, type) { progress -> produce(request, plan, previous, photos, progress) }
             emit(AgentEvent.JobStarted(job.id, plan.title))
             emit(AgentEvent.Token(started(plan, previous, job.progress)))
             emit(AgentEvent.Done(type, generator.model, null))
             return@flow
         }
         try {
-            val result = produce(request, plan, previous) { emit(AgentEvent.Status(it)) }
+            val result = produce(request, plan, previous, photos) { emit(AgentEvent.Status(it)) }
             val asset = result.media
             val bytes = result.bytes
             if (asset != null && bytes != null) emit(AgentEvent.Media(asset, bytes, plan.title))
@@ -118,9 +125,11 @@ class VideoAgent(
     /** 백그라운드로 넘길 때의 답: 무엇을 얼마나 만드는지와 기다리는 동안 할 수 있는 것 */
     private fun started(plan: Plan, previous: VideoProject?, queue: String?) = buildString {
         val clipsPlanned = if (clips == null) 0 else plan.scenes.count { it.animate }.coerceAtMost(maxClips)
-        val minutes = (plan.scenes.size * 10 + clipsPlanned * 110 + 30) / 60.0
+        val drawing = plan.scenes.count { it.photo == null }
+        val minutes = (drawing * 10 + (plan.scenes.size - drawing) * 3 + clipsPlanned * 110 + 30) / 60.0
         append(if (previous != null && plan.edit) "영상을 고치기 시작했습니다" else "영상을 만들기 시작했습니다")
         append(": **${plan.title}** (장면 ${plan.scenes.size}개")
+        if (drawing < plan.scenes.size) append(", 붙인 사진 ${plan.scenes.size - drawing}장")
         if (clipsPlanned > 0) append(", 움직이는 장면 ${clipsPlanned}개")
         append(", 약 ${"%.0f".format(maxOf(1.0, minutes))}분)\n")
         queue?.let { append("$it.\n") }
@@ -131,7 +140,7 @@ class VideoAgent(
      * 장면마다 그림·내레이션(·클립)을 만들고 합쳐 갤러리에 남긴다. 고치기면 앞 영상의 같은 재료를 다시 쓴다.
      * 실패하면 [MediaException]
      */
-    private suspend fun produce(request: AgentRequest, plan: Plan, previous: VideoProject?, progress: suspend (String) -> Unit): JobResult {
+    private suspend fun produce(request: AgentRequest, plan: Plan, previous: VideoProject?, photos: List<ByteArray>, progress: suspend (String) -> Unit): JobResult {
         // 고치기면 비율은 앞 영상 그대로 (그림을 다시 쓰려면 크기가 같아야 한다)
         val base = previous?.takeIf { plan.edit }
         val aspect = base?.aspect ?: plan.aspect
@@ -148,7 +157,9 @@ class VideoAgent(
             // 앞 영상의 같은 그림·내레이션·클립은 다시 쓴다 (바뀐 장면만 다시 만든다)
             val oldImage = base?.scenes?.firstOrNull { it.image == scene.image }
             val reused = oldImage?.let { media.load(user, it.imageAsset)?.second }
-            val image = reused ?: run {
+            // 붙인 사진 (G-07): 장면 크기에 맞춰 가운데를 자른다. 못 읽는 형식(WebP 등)이면 그대로 (ffmpeg가 맞춘다)
+            val photo = scene.photo?.let { n -> photos.getOrNull(n) }?.let { ImageFit.cover(it, imageWidth, imageHeight) ?: it }
+            val image = reused ?: photo ?: run {
                 if (drawn == 0) reserve()
                 drawn++
                 progress("장면 ${i + 1}/${plan.scenes.size} 그리는 중")
@@ -156,7 +167,7 @@ class VideoAgent(
             }
             val imageAsset = if (reused != null && oldImage != null) oldImage.imageAsset else media.save(user, MediaKind.SCENE, "image/png", image, scene.image).id
             val oldVoice = base?.scenes?.firstOrNull { it.narration == scene.narration && it.voiceAsset != null }
-            val voice = oldVoice?.voiceAsset?.let { media.load(user, it)?.second } ?: speech?.let { tts ->
+            val voice = oldVoice?.voiceAsset?.let { media.load(user, it)?.second } ?: speech?.takeIf { scene.narration.isNotBlank() }?.let { tts ->
                 spoken++
                 runCatching { tts.synthesize(scene.narration, AudioFormat.M4A) }
                     .onFailure { if (it is CancellationException) throw it; log.warn { "내레이션 실패 (장면 ${i + 1}): ${it.message}" } }
@@ -194,15 +205,26 @@ class VideoAgent(
         redone?.let { (images, voices) -> append("새로 만든 것: 그림 ${images}개, 내레이션 ${voices}개 (나머지는 앞 영상 그대로)\n") }
         append("\n")
         scenes.forEachIndexed { i, s ->
-            append("${i + 1}. ${s.narration}\n   그림: `${s.image}` · ${s.motion.name.lowercase()}${if (s.animate) " · 움직이는 클립" else ""}\n")
+            val photo = plan.scenes.getOrNull(i)?.photo?.let { "붙인 사진 ${it + 1} · " }.orEmpty()
+            append("${i + 1}. ${s.narration}\n   ${photo}그림: `${s.image}` · ${s.motion.name.lowercase()}${if (s.animate) " · 움직이는 클립" else ""}\n")
         }
         append("\n장면 단위로 고칠 수 있어요 (예: \"2번 장면 더 밝게\", \"내레이션 빠르게\").")
     }
 
-    internal suspend fun plan(history: List<ChatMessage>, seconds: Int, previous: VideoProject? = null): Plan? {
+    /** [photos]가 있으면 사진마다 한 장면 (G-07): 메인 모델이 사진을 보고 순서대로 내레이션을 쓴다 */
+    internal suspend fun plan(history: List<ChatMessage>, seconds: Int, previous: VideoProject? = null, photos: List<ByteArray> = emptyList()): Plan? {
         val question = history.last().content
         val recent = history.dropLast(1).takeLast(6).joinToString("\n") { "${it.role.name.lowercase()}: ${it.content.take(1_500)}" }
-        val count = sceneCount(seconds)
+        val count = if (photos.isNotEmpty()) photos.size else sceneCount(seconds)
+        val shape = photos.mapNotNull { ImageFit.aspect(it) }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        val photoRule = if (photos.isNotEmpty()) """
+            - The user attached ${photos.size} photo(s), shown to you in order. Make exactly ${photos.size} scenes, scene N uses photo N (same order). Do NOT invent other scenes.
+              "narration" = 1-2 short natural Korean sentences about what that photo shows, connected into one story in the user's requested tone,
+              "image" = a short English description of that photo (used as the motion prompt), "motion" as below,
+              "animate" = true only if real movement would help AND the photo shows no real person's face; otherwise false.
+            - "aspect": "${shape ?: "landscape"}" (most photos' shape) unless the user asks for another shape.
+            - If the request asks to make a real person in the photos say or do things they did not (deepfake, fake statements), set "refuse".
+        """.trimIndent() else ""
         val earlier = previous?.let { p ->
             buildString {
                 append("Previous video in this conversation (title \"${p.title}\", aspect ${p.aspect}, speed ${p.speed}):\n")
@@ -217,7 +239,8 @@ class VideoAgent(
         val prompt = """
             You plan a short narrated slideshow video. Read the user's latest request (usually Korean) and the recent conversation.
             $editRule
-            - For a new video, write exactly $count scenes for about $seconds seconds. Each scene: "narration" = 1-2 short natural Korean sentences (read aloud, about ${seconds / count} seconds),
+            $photoRule
+            - For a new video without photos, write exactly $count scenes for about $seconds seconds. Each scene: "narration" = 1-2 short natural Korean sentences (read aloud, about ${seconds / count} seconds),
               "image" = one English FLUX prompt (max 60 words: subject, style, composition, lighting) that matches the narration, keep a consistent style across scenes,
               "motion" = one of zoom_in, zoom_out, pan_left, pan_right (vary them),
               "animate" = true only for at most two scenes where real movement matters (flowing water, walking people, moving vehicles), otherwise false.
@@ -236,9 +259,10 @@ class VideoAgent(
         return try {
             val spec = models.acquire(ModelRole.GENERAL)
             val text = inference.chat(
-                ChatRequest(spec.name, listOf(ChatMessage(ChatRole.USER, prompt)), temperature = 0.4, maxTokens = 2_500, reasoningEffort = spec.reasoningEffort, keepAlive = spec.keepAlive),
+                // 붙인 사진은 메인 모델(비전)이 보고 대본을 쓴다
+                ChatRequest(spec.name, listOf(ChatMessage(ChatRole.USER, prompt, images = if (photos.isNotEmpty()) history.last().images.take(photos.size) else emptyList())), temperature = 0.4, maxTokens = 2_500, reasoningEffort = spec.reasoningEffort, keepAlive = spec.keepAlive),
             ).filterIsInstance<ChatChunk.Delta>().fold(StringBuilder()) { acc, chunk -> acc.append(chunk.text) }.toString()
-            parse(text)
+            parse(text)?.let { if (photos.isEmpty() || it.refuse != null) it else withPhotos(it, photos.size) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -264,6 +288,15 @@ class VideoAgent(
         if (refuse == null && scenes.isEmpty()) return null
         val speed = obj.str("speed")?.toDoubleOrNull()?.coerceIn(0.7, 1.5) ?: 1.0
         return Plan(obj.str("title")?.take(80) ?: "Vesta 영상", obj.str("aspect") ?: "landscape", scenes, refuse, speed, obj.str("mode") == "edit")
+    }
+
+    /** 사진 수만큼 장면을 맞추고 장면 N에 사진 N을 붙인다. 모델이 덜 썼으면 내레이션 없는 장면으로 채운다 (사진을 빼먹지 않게) */
+    internal fun withPhotos(plan: Plan, count: Int): Plan {
+        val motions = Motion.entries
+        val scenes = (0 until count).map { i ->
+            (plan.scenes.getOrNull(i) ?: Scene("", "photo ${i + 1}", motions[i % motions.size])).copy(photo = i)
+        }
+        return plan.copy(scenes = scenes, edit = false)
     }
 
     companion object {
