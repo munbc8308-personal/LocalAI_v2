@@ -7,11 +7,28 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 
 /**
- * 붙인 그림을 만들 크기로 (V-11·G-07). PNG·JPEG·GIF만 읽는다 (JDK ImageIO). 못 읽으면 null: 부르는 쪽이 원본을 그대로 쓴다
+ * 붙인 그림을 만들 크기로 (V-11·G-07). PNG·JPEG·GIF만 읽는다 (JDK ImageIO). 못 읽으면 null: 부르는 쪽이 원본을 그대로 쓴다.
+ * 보안 검토(압축 폭탄): 작은 파일도 헤더에 거대한 크기를 적을 수 있어, 헤더로 크기를 먼저 보고 [MAX_PIXELS]를 넘으면 풀지 않는다
  */
 internal object ImageFit {
-    /** 너비·높이 */
-    fun size(bytes: ByteArray): Pair<Int, Int>? = read(bytes)?.let { it.width to it.height }
+    /** 이보다 큰 그림은 풀지 않는다 (40메가픽셀: 휴대폰 사진은 넉넉히 들어간다, 풀면 약 160MB) */
+    const val MAX_PIXELS = 40_000_000L
+
+    /** 너비·높이 (헤더만 읽는다) */
+    fun size(bytes: ByteArray): Pair<Int, Int>? = runCatching {
+        ImageIO.createImageInputStream(ByteArrayInputStream(bytes)).use { input ->
+            val reader = ImageIO.getImageReaders(input).asSequence().firstOrNull() ?: return null
+            try {
+                reader.input = input
+                reader.getWidth(0) to reader.getHeight(0)
+            } finally {
+                reader.dispose()
+            }
+        }
+    }.getOrNull()
+
+    /** 헤더의 크기가 [MAX_PIXELS]를 넘는가. 못 읽는 형식이면 false (WebP는 형식상 16383×16383까지) */
+    fun oversized(bytes: ByteArray): Boolean = size(bytes)?.let { (w, h) -> w.toLong() * h > MAX_PIXELS } ?: false
 
     /** 가운데를 기준으로 [width]×[height]를 채우게 줄이고 넘치는 쪽을 자른다 (늘이지 않는다). PNG */
     fun cover(bytes: ByteArray, width: Int, height: Int): ByteArray? {
@@ -40,5 +57,5 @@ internal object ImageFit {
         }
     }
 
-    private fun read(bytes: ByteArray): BufferedImage? = runCatching { ImageIO.read(ByteArrayInputStream(bytes)) }.getOrNull()
+    private fun read(bytes: ByteArray): BufferedImage? = if (oversized(bytes)) null else runCatching { ImageIO.read(ByteArrayInputStream(bytes)) }.getOrNull()
 }

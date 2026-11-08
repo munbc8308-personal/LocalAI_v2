@@ -82,6 +82,11 @@ class VideoAgent(
         val seconds = targetSeconds(question)
         // 붙인 사진 (G-07): 순서대로 한 장이 한 장면. 사진을 붙였으면 늘 새 영상
         val photos = request.history.last().images.take(MAX_SCENES).map { it.bytes }
+        if (photos.any { ImageFit.oversized(it) }) {
+            emit(AgentEvent.Token(ImageAgent.TOO_LARGE.replace("그림이", "사진 중에")))
+            emit(AgentEvent.Done(type, generator.model, null))
+            return@flow
+        }
         val previous = if (photos.isEmpty()) projects?.latest(request.user.userId, request.session.id.value) else null
         emit(AgentEvent.Status(when {
             photos.isNotEmpty() -> "사진 ${photos.size}장을 보고 대본 쓰는 중"

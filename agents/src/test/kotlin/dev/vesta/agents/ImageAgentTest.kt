@@ -127,4 +127,23 @@ class ImageAgentTest : FunSpec({
             .filterIsInstance<AgentEvent.Token>().single().text shouldContain "만들지 않습니다"
         refused.calls.size shouldBe 0
     }
+
+    test("보안 검토 (압축 폭탄): 헤더 크기가 4천만 화소를 넘는 그림은 풀지 않고 알린다") {
+        // 작은 파일이지만 헤더에 10000×10000이라고 적은 PNG (IHDR만 고침)
+        val small = java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(java.awt.image.BufferedImage(8, 8, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", it) }.toByteArray()
+        val bomb = small.copyOf().also { b ->
+            java.nio.ByteBuffer.wrap(b, 16, 8).putInt(10_000).putInt(10_000)
+            val crc = java.util.zip.CRC32().apply { update(b, 12, 17) }.value
+            java.nio.ByteBuffer.wrap(b, 29, 4).putInt(crc.toInt())
+        }
+        ImageFit.size(bomb) shouldBe (10_000 to 10_000)
+        ImageFit.oversized(bomb) shouldBe true
+        ImageFit.cover(bomb, 64, 64) shouldBe null
+        ImageFit.oversized(small) shouldBe false
+        val generator = FakeGenerator()
+        ImageAgent(OneReply("x"), models, generator, SavedMedia())
+            .handle(AgentRequest(user, session, listOf(ChatMessage(ChatRole.USER, "수채화로", images = listOf(dev.vesta.core.media.ImageInput("image/png", bomb)))))).toList()
+            .filterIsInstance<AgentEvent.Token>().single().text shouldContain "너무 큽니다"
+        generator.calls.size shouldBe 0
+    }
 })

@@ -53,6 +53,11 @@ class ImageAgent(
     override fun handle(request: AgentRequest): Flow<AgentEvent> = flow {
         // 붙인 첫 그림을 기준으로 (V-11)
         val reference = request.history.last().images.firstOrNull()
+        if (reference != null && ImageFit.oversized(reference.bytes)) {
+            emit(AgentEvent.Token(TOO_LARGE))
+            emit(AgentEvent.Done(type, generator.model, null))
+            return@flow
+        }
         emit(AgentEvent.Status(if (reference != null) "기준 그림을 보고 그림 설명을 쓰는 중" else "그림 설명을 쓰는 중"))
         val plan = plan(request.history, reference?.let { ImageFit.aspect(it.bytes) ?: "square" })
         plan.refuse?.let {
@@ -163,6 +168,7 @@ class ImageAgent(
         const val KEEP_HIGH = 0.375
         /** 기준 그림이 있으면 8단계 (남길 정도를 1/8씩 고를 수 있게, 1024×576 약 8초) */
         const val REFERENCE_STEPS = 8
+        const val TOO_LARGE = "붙인 그림이 너무 큽니다 (4천만 화소까지). 줄여서 다시 붙여 주세요."
     }
 
     /** FLUX는 16의 배수 크기. 세로·가로는 3:4·4:3 */
