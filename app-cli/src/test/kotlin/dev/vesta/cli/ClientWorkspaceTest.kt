@@ -4,6 +4,7 @@ import dev.vesta.core.RiskLevel
 import dev.vesta.core.agent.AgentEvent
 import dev.vesta.core.tools.ApprovalDecision
 import dev.vesta.core.tools.ApprovalDetails
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -61,5 +62,15 @@ class ClientWorkspaceTest : FunSpec({
         AutoApprove.allows(event("""{"path":".git/hooks/pre-commit","content":"x"}""", listOf("src/App.tsx")), root.toString()) shouldBe false
         AutoApprove.allows(event("""{"path":"~/x.kt","content":"x"}""", emptyList()), root.toString()) shouldBe false
         AutoApprove.allows(event("""{"path":"../other/x.kt","content":"x"}""", emptyList()), root.toString()) shouldBe false
+    }
+
+    test("셸 자동 승인은 실행 인자의 명령을 이 PC에서 다시 본다: 서버가 경고를 빼도 지우기·셸 안의 셸은 묻는다 (RC-07 보안 검토)") {
+        fun shell(command: String) = AgentEvent.ApprovalRequested(
+            "r", "run_shell", RiskLevel.EXEC, ApprovalDetails("셸", ""), null, arguments = """{"command":"$command","cwd":"."}""",
+        )
+        AutoApprove.shell(shell("npm.cmd test")) shouldBe true
+        AutoApprove.shell(shell(".\\\\gradlew.bat test")) shouldBe true
+        listOf("Remove-Item src -Recurse", "ri src", "cmd /c del x", "powershell -enc ZQBjAGgAbwA=", "[IO.File]::Delete('a')", "git clean -fdx; rm -rf build")
+            .forEach { withClue(it) { AutoApprove.shell(shell(it)) shouldBe false } }
     }
 })

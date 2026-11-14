@@ -358,6 +358,15 @@ class DefaultConversationServiceTest : FunSpec({
         DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.WEB to plainWeb))
             .send(user, ChannelType.WEB, null, UserInput("/web 오늘 뉴스")).toList()
         plainWeb.requests.size shouldBe 1
+
+        // 같은 대화에서 앞서 문서를 붙였으면, 다음 /web은 지난 대화 없이 이번 질문만 본다 (그때 답에 문서 속 지시가 섞였을 수 있다)
+        val laterWeb = ScriptedAgent { emit(AgentEvent.Done(AgentType.WEB, "m", null)) }
+        val sessions = MemorySessions()
+        val shared = DefaultConversationService(sessions, MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.WEB to laterWeb))
+        val first = shared.send(user, ChannelType.WEB, null, UserInput("요약해 줘", documents = listOf(doc))).toList()
+            .filterIsInstance<AgentEvent.SessionReady>().first().sessionId
+        shared.send(user, ChannelType.WEB, first, UserInput("/web 관련 뉴스")).toList()
+        laterWeb.requests.single().history.size shouldBe 1
     }
 
     test("글 없이 이미지만 보내면 설명을 부탁한 것으로 본다") {

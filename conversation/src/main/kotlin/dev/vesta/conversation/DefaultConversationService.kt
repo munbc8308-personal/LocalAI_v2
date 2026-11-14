@@ -293,8 +293,12 @@ class DefaultConversationService(
         val pastFound = (past?.first ?: 0) > 0
         if (pastFound) emit(AgentEvent.Sources(listOf(PAST_EVIDENCE)))
         val personaText = listOfNotNull(runCatching { persona(user.userId) }.getOrNull(), memoryPrompt(remembered), past?.second).joinToString("\n").ifBlank { null }
+        // 이 대화에 앞서 문서를 붙인 적이 있으면 웹 리서치는 지난 대화를 보지 않는다 (보안 검토):
+        // 그때의 답에 문서 속 지시가 섞여 있을 수 있고, 웹 리서치는 지난 대화로 검색어를 만들어 밖으로 보낸다
+        val documentsEarlier = stored.any { it.id != current.id && it.role == ChatRole.USER && it.content.lineSequence().any { line -> line.startsWith("📎 ") } }
+        val earlier = if (route.agent == AgentType.WEB && documentsEarlier) emptyList() else history.dropLast(1)
         suspend fun runAgent() =
-            agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { if (input.images.isEmpty() && input.documents.isNotEmpty()) DEFAULT_DOCUMENT_QUESTION else DEFAULT_IMAGE_QUESTION } } +
+            agent.handle(AgentRequest(user, session, earlier + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { if (input.images.isEmpty() && input.documents.isNotEmpty()) DEFAULT_DOCUMENT_QUESTION else DEFAULT_IMAGE_QUESTION } } +
                 (if (input.documents.isNotEmpty()) dev.vesta.core.agent.DocumentInput.block(input.documents) else "")), route.collections, route,
                 workspace = workspace,
                 spoken = input.spoken, persona = personaText, unattended = input.unattended,

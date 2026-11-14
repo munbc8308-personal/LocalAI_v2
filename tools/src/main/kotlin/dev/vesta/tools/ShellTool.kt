@@ -174,7 +174,7 @@ class ShellTool(
             "자격 증명(Windows)" to Regex("(?i)\\b(cmdkey|Get-Credential|vaultcmd)\\b|\\bmimikatz\\b"),
         )
 
-        private val DANGEROUS = Regex("\\b(rm|mv|cp\\s+-f|truncate|shred)\\b|>\\s*[^&]|(?i)\\b(Remove-Item|Move-Item|Rename-Item|Set-Content|Clear-Content|Out-File|del|erase|rd|rmdir)\\b")
+        private val DANGEROUS = Regex("\\b(rm|mv|cp\\s+-f|truncate|shred)\\b|>\\s*[^&]|(?i)\\b(Remove-Item|Move-Item|Rename-Item|Set-Content|Clear-Content|Out-File|Add-Content|Copy-Item|del|erase|rd|rmdir|ri|mi|rni|sc|ac|cpi)\\b|(?i)\\s-(e|ec|en|enc|encodedcommand)\\s|(?i)\\b(cmd(\\.exe)?\\s+/[ck]|powershell(\\.exe)?|pwsh(\\.exe)?|bash|sh|zsh|wsl)\\b|(?i)\\[(System\\.)?IO\\.(File|Directory|Path)\\]::")
 
         fun blocked(command: String): String? = BLOCKLIST.firstOrNull { (_, regex) -> regex.containsMatchIn(command) }?.first
 
