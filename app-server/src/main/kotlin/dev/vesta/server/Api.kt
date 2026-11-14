@@ -12,6 +12,7 @@ import dev.vesta.api.SpeechRequestDto
 import dev.vesta.api.TranscriptDto
 import dev.vesta.api.CSRF_HEADER
 import dev.vesta.api.ChatRequestDto
+import dev.vesta.api.CliPackageDto
 import dev.vesta.api.CollectionDto
 import dev.vesta.api.DashboardDto
 import dev.vesta.api.EventDto
@@ -50,6 +51,7 @@ import dev.vesta.core.tools.ApprovalDecision
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.http.ContentType
 import io.ktor.http.Cookie
+import io.ktor.http.ContentDisposition
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
@@ -76,6 +78,7 @@ import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondRedirect
 import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
@@ -160,6 +163,8 @@ class ServerDeps(
     val userEmail: suspend (dev.vesta.core.UserId) -> String? = { null },
     /** Google 연동 (M40). null이면 설정 안 함 */
     val google: dev.vesta.google.GoogleAuth? = null,
+    /** 다른 PC용 CLI zip (RC-06, 설치 스크립트가 `~/.vesta/app/vesta-cli.zip`에 둔다). 없으면 받기 버튼을 숨긴다 */
+    val cliPackage: java.nio.file.Path? = null,
 )
 
 /** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
@@ -320,6 +325,20 @@ fun Application.vestaApi(deps: ServerDeps) {
                     ?: return@get call.respondJson(HttpStatusCode.Unauthorized, """{"error":"로그인이 필요합니다"}""")
                 call.publicMismatch(deps, session.user)?.let { return@get call.respondJson(HttpStatusCode.Unauthorized, buildJsonObject { put("error", it) }.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe(deps.publicGate)))
+            }
+            // 다른 PC용 CLI 받기 (RC-06): 로그인한 사람 누구나 (CLI도 그 사람 권한으로만 붙는다)
+            get("/cli") {
+                call.principal(deps) ?: return@get
+                val zip = deps.cliPackage?.takeIf { java.nio.file.Files.isRegularFile(it) }
+                    ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"CLI 꾸러미가 없습니다 (Mac에서 scripts/install-vesta.sh 를 다시 실행하세요)"}""")
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(CliPackageDto.serializer(), CliPackageDto(deps.version, java.nio.file.Files.size(zip))))
+            }
+            get("/cli/download") {
+                call.principal(deps) ?: return@get
+                val zip = deps.cliPackage?.takeIf { java.nio.file.Files.isRegularFile(it) }
+                    ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"CLI 꾸러미가 없습니다"}""")
+                call.response.header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, "vesta-cli-${deps.version}.zip").toString())
+                call.respondFile(zip.toFile())
             }
             post("/chat") {
                 val user = call.principal(deps) ?: return@post

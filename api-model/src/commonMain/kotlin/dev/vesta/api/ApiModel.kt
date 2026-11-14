@@ -294,6 +294,10 @@ data class LoginDto(val password: String, /** 없으면 OWNER */ val name: Strin
 @Serializable
 data class MeDto(val name: String, val role: String, val csrf: String, /** 바깥 주소 (공개 운영 중일 때, 초대 안내용) */ val publicUrl: String? = null)
 
+/** 다른 PC용 CLI 꾸러미 (`GET /api/cli`, RC-06): 설치할 때 만든 zip의 크기 */
+@Serializable
+data class CliPackageDto(val version: String, val bytes: Long)
+
 /** Google 연결 상태 (`GET /api/google`, M40). [available]: 서버에 설정돼 있고 이 사용자가 쓸 수 있음 */
 @Serializable
 data class GoogleStatusDto(val available: Boolean, val email: String? = null)

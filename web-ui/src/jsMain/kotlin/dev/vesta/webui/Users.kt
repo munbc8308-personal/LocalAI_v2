@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ChangePasswordDto
+import dev.vesta.api.CliPackageDto
 import dev.vesta.api.ConsentDto
 import dev.vesta.api.MeDto
 import dev.vesta.api.MemoryDto
@@ -29,6 +30,7 @@ import org.jetbrains.compose.web.attributes.disabled
 import org.jetbrains.compose.web.attributes.placeholder
 import org.jetbrains.compose.web.attributes.selected
 import org.jetbrains.compose.web.attributes.type
+import org.jetbrains.compose.web.dom.A
 import org.jetbrains.compose.web.dom.B
 import org.jetbrains.compose.web.dom.Button
 import org.jetbrains.compose.web.dom.Div
@@ -561,6 +563,24 @@ fun PasswordCard() {
             Input(InputType.Password) { value(next); onInput { next = it.value }; placeholder("새 비밀번호 (12자 이상)"); attr("autocomplete", "new-password") }
             Button({ type(ButtonType.Submit); classes("primary"); if (sending) disabled() }) { Text("저장") }
         }
+    }
+}
+
+/** 다른 PC용 CLI 받기 (RC-06). 서버에 꾸러미가 있을 때만 보인다 */
+@Composable
+fun CliCard(me: MeDto) {
+    var pkg by remember { mutableStateOf<CliPackageDto?>(null) }
+    LaunchedEffect(Unit) { pkg = runCatching { Http.get("/api/cli", CliPackageDto.serializer()) }.getOrNull() }
+    val p = pkg ?: return
+    val server = me.publicUrl ?: window.location.origin
+    Div({ classes("card") }) {
+        Div({ classes("row") }) {
+            Span { B { Text("다른 PC에서 CLI") } }
+            A("/api/cli/download", { classes("button", "small"); attr("download", "vesta-cli-${p.version}.zip") }) { Text("CLI 받기 (${p.bytes / 1_048_576}MB)") }
+        }
+        P({ classes("muted", "small") }) { Text("JDK 21이 필요합니다. 압축을 풀고 풀린 폴더에서 아래처럼 로그인하면 이 웹과 같은 이름·권한으로 대화합니다. 작업 폴더·파일 도구는 이 서버 Mac에서 돕니다.") }
+        Pre({ classes("mono", "small") }) { Text("bin/vesta login $server${if (me.role == "OWNER") "" else " --name ${me.name}"}\nbin/vesta") }
+        P({ classes("muted", "small") }) { Text("Windows는 bin\\vesta.bat 를 씁니다.") }
     }
 }
 

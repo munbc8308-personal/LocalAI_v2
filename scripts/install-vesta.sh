@@ -1,7 +1,7 @@
 #!/bin/sh
 # Vesta 설치·업데이트 (PROJECT.md M8). 여러 번 실행해도 안전하다.
 #   1. CLI·서버 빌드 (./gradlew installDist)
-#   2. ~/.vesta/app/{cli,server} 로 복사, ~/.local/bin/vesta 링크
+#   2. ~/.vesta/app/{cli,server} 로 복사, ~/.local/bin/vesta 링크, 다른 PC용 CLI zip(~/.vesta/app/vesta-cli.zip)
 #   3. 미디어 워커(음성 인식)를 ~/.vesta/media-worker에 복사하고 uv로 Python 환경을 만든다 (M12)
 #   4. 학습기(결정 모델 미세조정)를 ~/.vesta/trainer에 복사하고 uv로 Python 환경을 만든다 (M14)
 #   5. 평가셋(eval/)을 ~/.vesta/evalsets에 복사 (주간 자가 개선, M16)
@@ -10,11 +10,14 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP="$HOME/.vesta/app"
 
-"$ROOT/gradlew" -p "$ROOT" -q :app-cli:installDist :app-server:installDist
+"$ROOT/gradlew" -p "$ROOT" -q :app-cli:installDist :app-cli:distZip :app-server:installDist
 mkdir -p "$APP" "$HOME/.local/bin" "$HOME/.vesta/logs"
 rsync -a --delete "$ROOT/app-cli/build/install/vesta/" "$APP/cli/"
 rsync -a --delete "$ROOT/app-server/build/install/vesta-server/" "$APP/server/"
 ln -sf "$APP/cli/bin/vesta" "$HOME/.local/bin/vesta"
+# 다른 PC용 CLI 꾸러미 (RC-06): 웹 설정의 "CLI 받기"가 내려준다
+ZIP=$(ls -t "$ROOT"/app-cli/build/distributions/vesta-*.zip | head -1)
+cp "$ZIP" "$APP/vesta-cli.zip.tmp" && mv "$APP/vesta-cli.zip.tmp" "$APP/vesta-cli.zip"
 echo "설치: $APP (CLI 링크 ~/.local/bin/vesta)"
 
 WORKER="$HOME/.vesta/media-worker"

@@ -870,6 +870,7 @@ private fun DashboardView(me: MeDto) {
         if (me.role != "GUEST") SchedulesCard()
         MessengersCard()
         PasswordCard()
+        CliCard(me)
         P({ classes("muted", "small") }) { Text("Vesta ${d.version} · ${me.name} (${me.role})") }
     }
 }

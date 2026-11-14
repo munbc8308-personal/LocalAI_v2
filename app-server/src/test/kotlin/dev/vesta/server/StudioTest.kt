@@ -43,19 +43,19 @@ private class NamedTool(name: String, override val risk: RiskLevel) : Tool {
     override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("ok")
 }
 
-private object SilentConversation : dev.vesta.core.conversation.ConversationService {
+internal object SilentConversation : dev.vesta.core.conversation.ConversationService {
     override fun send(user: UserContext, channel: dev.vesta.core.ChannelType, sessionId: dev.vesta.core.SessionId?, input: dev.vesta.core.agent.UserInput): Flow<AgentEvent> = emptyFlow()
     override suspend fun resolveApproval(user: UserContext, requestId: String, decision: dev.vesta.core.tools.ApprovalDecision) = false
 }
 
-private object EmptySessions : dev.vesta.core.session.SessionRepository {
+internal object EmptySessions : dev.vesta.core.session.SessionRepository {
     override suspend fun create(userId: UserId, channel: dev.vesta.core.ChannelType, title: String?) = error("x")
     override suspend fun find(userId: UserId, id: dev.vesta.core.SessionId): dev.vesta.core.session.Session? = null
     override suspend fun listRecent(userId: UserId, limit: Int) = emptyList<dev.vesta.core.session.Session>()
     override suspend fun updateTitle(userId: UserId, id: dev.vesta.core.SessionId, title: String) = Unit
 }
 
-private object EmptyMessages : dev.vesta.core.session.MessageRepository {
+internal object EmptyMessages : dev.vesta.core.session.MessageRepository {
     override suspend fun append(sessionId: dev.vesta.core.SessionId, message: dev.vesta.core.session.NewMessage) = error("x")
     override suspend fun list(sessionId: dev.vesta.core.SessionId) = emptyList<dev.vesta.core.session.StoredMessage>()
 }

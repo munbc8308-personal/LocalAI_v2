@@ -43,6 +43,7 @@ body {
 #root { height: 100%; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 14px; min-height: 40px; }
+a.button { display: inline-flex; align-items: center; text-decoration: none; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 6px 12px; min-height: 36px; }
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.danger { color: var(--bad); }
