@@ -243,7 +243,11 @@ class DefaultConversationService(
         val permitted = if (mentioned.agent in allowed) mentioned else mentioned.copy(agent = AgentType.CHAT, requested = mentioned.agent)
         // 문서를 붙인 질문은 웹 리서치로 보내지 않는다 (V-12 보안 검토): 웹 리서치는 tainted 승인을 보지 않고
         // 질문(+문서)으로 검색어를 만들어 밖으로 보내므로, 문서 안의 지시가 문서 내용을 검색어·주소에 실어 내보낼 수 있다
-        val decision = if (input.documents.isNotEmpty() && permitted.agent == AgentType.WEB) permitted.copy(agent = AgentType.CHAT) else permitted
+        val safe = if (input.documents.isNotEmpty() && permitted.agent == AgentType.WEB) permitted.copy(agent = AgentType.CHAT) else permitted
+        // 작업 폴더(CLI)에서는 코드 도우미·일반 대화 대신 작업 에이전트가 받는다 (RC-07 Windows 시험): 코드 도우미는 파일 도구가 없어
+        // "이 코드를 붙여넣어"라고만 답했고, 사용자가 매번 "파일에 직접 써 줘"라고 다시 말해야 했다. /code·/chat처럼 직접 고른 것과 이미지 질문(비전)은 그대로
+        val decision = if (workspace != null && input.images.isEmpty() && safe.stage != RoutingStage.EXPLICIT && safe.customAgent == null &&
+            safe.agent in setOf(AgentType.CODE, AgentType.CHAT) && AgentType.TASK in allowed && AgentType.TASK in agents) safe.copy(agent = AgentType.TASK) else safe
         // 역할 때문에 못 쓰는 에이전트가 판정됐으면 일반 대화로 넘기지 않고 바로 알린다.
         // 일반 대화 모델은 일정·메일·파일을 볼 수 없어 그럴듯하게 지어내기 때문이다 (예: MEMBER의 "내일 일정")
         val denied = decision.requested?.takeIf { it !in allowed }

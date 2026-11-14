@@ -56,6 +56,12 @@ class ChatCommand : CliktCommand(name = "chat") {
                 .terminal(terminal)
                 .appName("vesta")
                 .variable(LineReader.HISTORY_FILE, backend.home.resolve("cli-history"))
+                // `\`를 이스케이프로 먹지 않는다: Windows 경로(C:\Users\…)·로그가 그대로 가게 (RC-07 Windows 시험)
+                .parser(org.jline.reader.impl.DefaultParser().apply { setEscapeChars(CharArray(0)) })
+                // `!`로 지난 입력을 불러오는 기능을 끈다 (붙여 넣은 로그의 `!`가 바뀌지 않게)
+                .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
+                // 터미널이 붙여넣기 표시를 지원하면 여러 줄을 한 입력으로
+                .option(LineReader.Option.BRACKETED_PASTE, true)
                 .build()
             val out = terminal.writer()
 
@@ -114,7 +120,7 @@ class ChatCommand : CliktCommand(name = "chat") {
 
             while (true) {
                 val line = try {
-                    reader.readLine("› ")
+                    readInput(terminal, reader)
                 } catch (_: UserInterruptException) {
                     break
                 } catch (_: EndOfFileException) {
@@ -192,6 +198,18 @@ class ChatCommand : CliktCommand(name = "chat") {
             out.flush()
             terminal.close()
         }
+    }
+
+    /**
+     * 입력 한 번. 여러 줄을 붙여 넣으면 줄마다 따로 보내지 않고 한 입력으로 모은다 (RC-07 Windows 시험: 로그를 붙이면 줄마다 요청이 갔다).
+     * 붙여넣기 표시를 지원하지 않는 터미널(Windows 콘솔 등)도 되게, Enter 뒤 [PASTE_GAP_MS] 안에 다음 글자가 이미 와 있으면 이어 받는다
+     * (사람이 그렇게 빨리 다음 줄을 치지는 않는다)
+     */
+    private fun readInput(terminal: Terminal, reader: LineReader): String {
+        val lines = mutableListOf(reader.readLine("› "))
+        while (lines.size < MAX_PASTE_LINES && terminal.reader().peek(PASTE_GAP_MS) >= 0) lines += reader.readLine("")
+        if (lines.size > 1) terminal.writer().apply { println(dim("(붙여 넣은 ${lines.size}줄을 한 번에 보냅니다)")); flush() }
+        return lines.joinToString("\n")
     }
 
     /** 답변 하나를 스트리밍으로 출력한다. 생성 중 Ctrl+C면 중단한다. 이번 턴의 세션을 돌려준다. */
@@ -290,6 +308,9 @@ class ChatCommand : CliktCommand(name = "chat") {
     }
 
     private companion object {
+        /** 붙여넣기로 볼 간격: Enter 뒤 이 시간 안에 다음 글자가 와 있으면 같은 입력 */
+        const val PASTE_GAP_MS = 40L
+        const val MAX_PASTE_LINES = 2_000
         val CLI_COMMANDS = setOf("/exit", "/quit", "/help", "/new", "/sessions", "/resume", "/history", "/accept", "/prompt", "/again")
         /** `/again`으로 다시 물을 수 있는 담당 (명시 지정 명령이 있는 것) */
         val AGAIN = listOf("chat", "docs", "web", "code", "task", "image")

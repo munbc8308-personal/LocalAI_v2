@@ -3544,4 +3544,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **테스트**: TaskAgent(승인에 인자, CLI에 맡기고 결과 사용, 모르는 이름 버림), ClientWorkspace(읽기 바로·승인 없는 쓰기 거부·바꿔치기 거부·한 번만·고친 명령만), AutoApprove(인자 경로), ShellTool(Windows 차단 목록), API(remote 받기·결과는 본인만). 관련 모듈 테스트 모두 통과.
 - **Windows 첫 실행 (같은 날)**: `vesta.bat`이 어떤 명령이든 첫 출력에서 `ClassCastException: Cannot cast java.lang.Integer to java.lang.foreign.MemorySegment`(Mordant FFM `TerminalInterfaceFfmWindows.getTerminalSize`)로 죽었다. → app-cli에서 `mordant-jvm-ffm`을 빼 JNA 방식으로. 그 뒤 CLI가 Windows에서 열렸다. 로그인 뒤 다시 `login`을 치는 혼동이 있어 로그인 완료 글에 "login 없이 vesta(.bat)만"을 보인다.
 - **웹 설치 안내**: 설정의 "다른 PC에서 CLI" 카드에 [설치·실행 방법 보기]: Windows / macOS·Linux 탭, 단계마다 복사 버튼(Java 설치 → 받은 zip 풀기 `Expand-Archive` → PATH → `vesta login <주소>` → 프로젝트 폴더에서 `vesta`, 자주 쓰는 명령). `/api/cli`가 zip 안 폴더 이름(`folder`)도 돌려줘 PATH 명령에 쓴다.
-- **남은 것**: Windows에서 파일·셸 도구 실행 확인. 이 Mac에서 "다른 PC" 흉내 시험도 아직(로그인 비밀번호 필요). 멤버 계정의 원격 작업 폴더, 실행 전 스냅샷·`/undo`, `edit_file`, 명령 패턴 허용, 긴 대화 요약은 다음(코드 프로젝트 검토, 같은 날).
+- **Windows 실사용 (11-15, Rust network-monitor)**: 파일 도구는 그 PC에 잘 썼다(write_file 15번, `~\OneDrive\문서\Vesta\network-monitor`). 문제 두 가지:
+  1. 오류 글·질문은 라우터가 코드 도우미(CODE)로 보내 "이 코드를 붙여넣어"라고만 답했고, 사용자가 "파일에 직접 써 줘"라고 할 때마다 작업 에이전트로 갔다(CODE↔TASK 번갈아 8번). → 작업 폴더가 있으면 직접 고르지 않은(EXPLICIT 아님) CODE·CHAT 판정을 TASK로(이미지 질문·사용자 정의 에이전트 제외). 작업 폴더 안내에 "코드를 늘어놓지 말고 파일 도구로 직접 쓴다, 답에는 바꾼 것과 실행할 명령만".
+  2. 로그를 붙여 넣으면 줄마다 요청이 갔다(한 글자 답 10개). 경로의 `\`도 사라졌다(JLine 기본 파서의 이스케이프). → 이스케이프 문자 없음, `!` 기록 불러오기 끔, 붙여넣기 표시(bracketed paste) 켬. 그걸 못 하는 터미널도 되게 Enter 뒤 40ms 안에 다음 글자가 와 있으면 같은 입력으로 이어 받는다("붙여 넣은 n줄을 한 번에 보냅니다").
+- **남은 것**: 붙여넣기 합치기의 Windows 콘솔 실기 확인. 이 Mac에서 "다른 PC" 흉내 시험도 아직(로그인 비밀번호 필요). 멤버 계정의 원격 작업 폴더, 실행 전 스냅샷·`/undo`, `edit_file`, 명령 패턴 허용, 긴 대화 요약은 다음(코드 프로젝트 검토, 같은 날).

@@ -369,6 +369,22 @@ class DefaultConversationServiceTest : FunSpec({
         laterWeb.requests.single().history.size shouldBe 1
     }
 
+    test("작업 폴더(CLI)에서는 일반 대화·코드 질문도 파일 도구가 있는 작업 에이전트가 받는다. 직접 고른 /code는 그대로 (RC-07)") {
+        val task = ScriptedAgent { emit(AgentEvent.Done(AgentType.TASK, "m", null)) }
+        val code = ScriptedAgent { emit(AgentEvent.Done(AgentType.CODE, "m", null)) }
+        val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
+        val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat, AgentType.CODE to code, AgentType.TASK to task))
+        val ws = dev.vesta.core.agent.Workspace("C:\\dev\\app", remote = true, os = "Windows 11",
+            clientTools = listOf(dev.vesta.core.agent.ClientToolSpec("write_file", "쓰기", "{}")))
+        fun agentOf(text: String, workspace: dev.vesta.core.agent.Workspace?) = kotlinx.coroutines.runBlocking {
+            service.send(user, ChannelType.CLI, null, UserInput(text, workspace = workspace)).toList().filterIsInstance<AgentEvent.Routed>().single().decision.agent
+        }
+        agentOf("error: linking with link.exe failed", ws) shouldBe AgentType.TASK
+        agentOf("/code 이 함수 설명해 줘", ws) shouldBe AgentType.CODE
+        // 작업 폴더가 없으면 그대로
+        agentOf("error: linking with link.exe failed", null) shouldBe AgentType.CHAT
+    }
+
     test("글 없이 이미지만 보내면 설명을 부탁한 것으로 본다") {
         val chat = ScriptedAgent { emit(AgentEvent.Done(AgentType.CHAT, "m", null)) }
         val service = DefaultConversationService(MemorySessions(), MemoryMessages(), mapOf(AgentType.CHAT to chat))

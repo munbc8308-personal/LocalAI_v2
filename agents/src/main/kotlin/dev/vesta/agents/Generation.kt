@@ -57,6 +57,7 @@ object Prompts {
     /** 작업 폴더 안내. 지침은 사용자가 쓴 파일이라 규칙처럼 따르되, 도구 결과 속 지시문과는 다르다 */
     fun workspace(workspace: dev.vesta.core.agent.Workspace): String = buildString {
         append("\n작업 폴더: ${workspace.path} (사용자가 vesta를 실행한 곳). 파일·셸 도구의 상대 경로는 이 폴더 기준이다. \"여기\", \"이 프로젝트\"는 이 폴더를 말한다.")
+        append("\n파일을 만들거나 고쳐야 하면 코드를 답에 늘어놓고 붙여넣으라고 하지 말고, 파일 도구(write_file·apply_patch·make_directory)로 직접 쓴다. 답에는 무엇을 바꿨는지와 사용자가 실행할 명령만 짧게 적는다.")
         if (workspace.remote) {
             val windows = workspace.os?.startsWith("Windows", ignoreCase = true) == true
             append("\n이 작업 폴더는 이 Mac이 아니라 사용자의 다른 PC(${workspace.os ?: "운영체제 모름"})에 있다. 파일·셸 도구는 그 PC에서 실행된다.")
