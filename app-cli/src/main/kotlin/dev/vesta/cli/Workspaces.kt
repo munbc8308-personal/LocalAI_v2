@@ -18,9 +18,13 @@ import kotlin.io.path.readText
 internal object Workspaces {
     const val FILE = "VESTA.md"
 
-    fun current(cwd: Path = Path(System.getProperty("user.dir")), home: Path = Path(System.getProperty("user.home"))): Workspace? {
+    /** [anywhere]: 다른 PC에서 도구를 직접 실행할 때(RC-07)는 홈 밖(예: D:\\dev)도 된다. 홈 자체·드라이브 루트는 안 된다 */
+    fun current(cwd: Path = Path(System.getProperty("user.dir")), home: Path = Path(System.getProperty("user.home")), anywhere: Boolean = false): Workspace? {
         val dir = runCatching { cwd.toRealPath() }.getOrNull() ?: return null
-        if (!Workspace.usable(dir.toString(), home.toString())) return null
+        if (anywhere) {
+            val realHome = runCatching { home.toRealPath() }.getOrDefault(home)
+            if (!Files.isDirectory(dir) || dir == realHome || dir.parent == null) return null
+        } else if (!Workspace.usable(dir.toString(), home.toString())) return null
         val realHome = runCatching { home.toRealPath() }.getOrDefault(home)
         return Workspace(dir.toString(), instructions(dir, realHome), skills(dir, realHome).first)
     }

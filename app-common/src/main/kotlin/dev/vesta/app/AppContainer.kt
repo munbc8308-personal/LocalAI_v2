@@ -322,7 +322,9 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
     private suspend fun localTools(user: UserContext, workspace: dev.vesta.core.agent.Workspace?): List<dev.vesta.core.tools.Tool> = when (user.role) {
         // CLI 작업 폴더(M17)가 있으면 그 폴더를 첫 허용 폴더로 둔다: 상대 경로·셸 작업 위치가 그 폴더가 된다
         UserRole.OWNER -> workspace?.let { ws ->
-            workspaceTools.getOrPut(ws.path) { tools(PathSandbox(listOf(ws.path) + sandbox.roots.map { it.toString() }), shell = true) }.all
+            // 다른 PC의 작업 폴더(RC-07): 이 Mac의 파일·셸 도구는 주지 않고, 같은 이름의 도구를 그 PC의 CLI가 실행한다
+            if (ws.remote) toolRegistry.all.filter { it.spec.name !in dev.vesta.tools.ClientTool.RISK } + dev.vesta.tools.ClientTool.from(ws.clientTools, clientTools, ws.os)
+            else workspaceTools.getOrPut(ws.path) { tools(PathSandbox(listOf(ws.path) + sandbox.roots.map { it.toString() }), shell = true) }.all
         } ?: toolRegistry.all
         UserRole.GUEST -> emptyList()
         UserRole.MEMBER -> {
@@ -339,6 +341,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         }
     }
     val approvals = InMemoryApprovalBroker()
+    /** 다른 PC의 CLI에 맡긴 도구 실행 (RC-07) */
+    val clientTools = dev.vesta.conversation.InMemoryClientToolBroker()
     /** 주인이 아닌 사용자의 셸 승인을 넘길 곳. 서버가 메신저를 띄운 뒤 채운다 (M20) */
     val escalation = EscalationRelay()
 

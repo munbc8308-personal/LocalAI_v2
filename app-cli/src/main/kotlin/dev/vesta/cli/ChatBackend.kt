@@ -62,6 +62,8 @@ interface ChatBackend : AutoCloseable {
     suspend fun job(id: String): dev.vesta.api.JobDto?
     /** 이 대화 지침을 바꾼다 (C-06, M34 Q-03). null이면 지운다. 문제가 있으면 그 이유 */
     suspend fun setPrompt(id: SessionId, prompt: String?): String?
+    /** 파일·셸 도구를 이 PC에서 실행하는가 (다른 PC에서 `vesta login`으로 붙음, RC-07). 작업 폴더가 홈 밖이어도 되고, 이 PC에서 색인하지 않는다 */
+    val runsToolsHere: Boolean get() = false
 }
 
 /** 같은 프로세스 안에서 바로 실행 */
@@ -106,15 +108,19 @@ class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, o
         }
     }
     override val home: Path = VestaPaths.default().home
+    override val runsToolsHere: Boolean get() = auth is RemoteAuth.Login
+    /** 다른 PC의 작업 폴더에서 도구를 실행하는 곳 (RC-07) */
+    private var client: ClientWorkspace? = null
 
     override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?): Flow<AgentEvent> = flow {
+        // 다른 PC(로그인)의 폴더는 서버 Mac에 없다: 파일·셸 도구를 이 PC에서 실행하겠다고 알리고 도구 정의를 보낸다 (RC-07)
+        val local = workspace?.takeIf { runsToolsHere }?.let { ws -> client?.takeIf { it.root == ws.path } ?: ClientWorkspace(ws.path).also { client = it } }
         http.preparePost("$baseUrl/api/chat") {
             authorize()
             contentType(ContentType.Application.Json)
-            // 다른 PC(로그인)의 폴더는 서버 Mac에 없다: 작업 폴더·지침·스킬을 보내지 않는다
-            val ws = workspace?.takeIf { auth is RemoteAuth.Token }
-            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = ws?.path, instructions = ws?.instructions,
-                skills = ws?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) })))
+            setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions,
+                skills = workspace?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) },
+                remote = local != null, os = local?.os, clientTools = local?.specs().orEmpty())))
         }.execute { response ->
             if (response.status.value == 401 && auth is RemoteAuth.Login) {
                 emit(AgentEvent.Error("로그인이 끝났습니다. vesta login ${auth.login.url} 로 다시 로그인하세요"))
@@ -128,12 +134,27 @@ class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, o
             while (true) {
                 val line = channel.readUTF8Line() ?: break
                 if (!line.startsWith("data:")) continue
-                emit(ApiJson.decodeFromString(EventDto.serializer(), line.removePrefix("data:").trim()).toEvent())
+                when (val event = ApiJson.decodeFromString(EventDto.serializer(), line.removePrefix("data:").trim()).toEvent()) {
+                    // 서버가 맡긴 도구 실행 (RC-07): 이 PC에서 돌리고 결과를 돌려준다
+                    is AgentEvent.ClientToolRequested -> {
+                        val result = local?.run(event.tool, event.arguments)
+                            ?: dev.vesta.core.tools.ToolResult("오류: 이 CLI에는 작업 폴더가 없다", isError = true)
+                        if (result.summary == ClientWorkspace.REFUSED) emit(AgentEvent.Status("⚠ 서버가 승인 없이 ${event.tool} 실행을 요청해 하지 않았습니다"))
+                        http.post("$baseUrl/api/client-tools/${event.requestId}") {
+                            authorize()
+                            contentType(ContentType.Application.Json)
+                            setBody(ApiJson.encodeToString(dev.vesta.api.ClientToolResultDto.serializer(), dev.vesta.api.ClientToolResultDto(result.output, result.isError, result.summary)))
+                        }
+                    }
+                    is AgentEvent.ApprovalRequested -> { local?.seen(event); emit(event) }
+                    else -> emit(event)
+                }
             }
         }
     }
 
     override suspend fun resolveApproval(requestId: String, decision: ApprovalDecision) {
+        client?.decided(requestId, decision)
         val dto = when (decision) {
             ApprovalDecision.Approve -> ApprovalDto("approve")
             is ApprovalDecision.Deny -> ApprovalDto("deny", decision.reason)

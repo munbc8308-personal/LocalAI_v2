@@ -27,7 +27,7 @@ class LoginCommand : CliktCommand(name = "login") {
         RemoteLogin.load()?.takeIf { it.url != server || it.session != result.session }?.let { RemoteLogin.logout(it) }
         RemoteLogin.save(result)
         echo("${server}에 ${result.name}(으)로 로그인했습니다. 이제 vesta 로 대화하세요. (로그인 정보: ${RemoteLogin.file()})")
-        echo("작업 폴더·파일 도구는 이 PC가 아니라 서버 Mac에서 돕니다. 이 PC의 폴더는 보내지 않습니다.")
+        echo("프로젝트 폴더에서 vesta를 실행하면 파일·셸 도구가 이 PC의 그 폴더에서 돕니다 (쓰기·셸은 이 터미널에서 승인). 생각(모델)은 서버가 합니다.")
     }
 }
 

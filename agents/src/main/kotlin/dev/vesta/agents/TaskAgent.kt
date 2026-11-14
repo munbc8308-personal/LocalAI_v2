@@ -437,6 +437,10 @@ class TaskAgent(
             // 나눠 맡기기(팀, M22): 맡은 에이전트의 단계·승인 요청을 이 흐름으로 그대로 흘린다
             if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted || recovered)) { event ->
                 try { emit(event) } catch (e: Throwable) { downstream = e; throw e }
+            }
+            // 다른 PC에서 실행하는 도구(RC-07): 실행 요청 이벤트를 CLI로 흘리고 결과를 기다린다
+            else if (tool is dev.vesta.core.tools.EmittingTool) tool.run(arguments, request) { event ->
+                try { emit(event) } catch (e: Throwable) { downstream = e; throw e }
             } else tool.execute(arguments, context)
         }.getOrElse {
             if (it === downstream) throw it
@@ -478,7 +482,7 @@ class TaskAgent(
     private suspend fun describeForApproval(tool: Tool, arguments: JsonObject): dev.vesta.core.tools.ApprovalDetails {
         var details = tool.describe(arguments)
         // D8: 셸 명령이 지우기·덮어쓰기 등 되돌릴 수 없는 변경을 할 수 있으면 경고
-        if (tool is ShellTool && judge != null) {
+        if ((tool is ShellTool || tool.spec.name == "run_shell") && judge != null) {
             val command = (arguments["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
             val risk = judge.destructive(command)
             if (risk >= dev.vesta.decision.Judge.THRESHOLD && details.warning == null) {
@@ -502,8 +506,9 @@ class TaskAgent(
                 risk = tool.risk,
                 details = details,
                 reason = (arguments["reason"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
-                editableField = if (tool is ShellTool) "command" else null,
-                editableValue = if (tool is ShellTool) (arguments["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content else null,
+                editableField = if (tool is ShellTool || tool.spec.name == "run_shell") "command" else null,
+                editableValue = if (tool is ShellTool || tool.spec.name == "run_shell") (arguments["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content else null,
+                arguments = arguments.toString(),
             ),
         )
         val decision = withTimeoutOrNull(approvalTimeoutSeconds.seconds) { pending.result.await() }

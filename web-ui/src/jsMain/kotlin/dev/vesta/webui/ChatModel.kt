@@ -220,6 +220,8 @@ class ChatController(private val scope: CoroutineScope) {
             is EventDto.Grounding -> turn.grounding = event
             is EventDto.Media -> turn.generated += Generated("/api/media/${event.id}", event.mime.startsWith("video/"))
             is EventDto.Job -> follow(turn, event)
+            // 다른 PC의 CLI에만 오는 이벤트 (RC-07)
+            is EventDto.ClientTool -> Unit
             is EventDto.Saved -> turn.messageId = event.messageId
             is EventDto.Token -> {
                 turn.thinking = false

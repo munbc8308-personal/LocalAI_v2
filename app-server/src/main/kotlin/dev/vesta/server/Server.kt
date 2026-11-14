@@ -120,6 +120,7 @@ fun main() {
         },
         auth = WebAuth(app.webAuth),
         cliPackage = app.paths.home.resolve("app/vesta-cli.zip"),
+        clientTools = app.clientTools,
         // 내 컬렉션과 공유받은 컬렉션 (U-04). GUEST는 로컬 문서를 쓰지 않는다
         documents = app.documentUploads,
         collections = { user ->

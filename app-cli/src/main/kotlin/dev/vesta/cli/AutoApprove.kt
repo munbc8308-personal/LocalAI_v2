@@ -44,15 +44,29 @@ internal object AutoApprove {
     fun allows(event: AgentEvent.ApprovalRequested, workspace: String?): Boolean {
         if (workspace == null || event.risk != RiskLevel.WRITE || event.tool !in TOOLS) return false
         val root = runCatching { Path.of(workspace).toRealPath() }.getOrNull() ?: return false
-        val targets = event.details.targets
+        // 실행할 인자가 오면(다른 PC에서 실행, RC-07) 경로를 서버의 설명이 아니라 인자에서 직접 뽑는다
+        val targets = event.arguments?.let { argumentTargets(event.tool, it) ?: return false } ?: event.details.targets
         return targets.isNotEmpty() && targets.all { target ->
-            val path = Path.of(target).normalize()
+            // `~`는 파일 도구가 홈으로 푼다: 작업 폴더 기준으로 풀면 다른 곳을 보게 되므로 묻는다
+            if (target.startsWith("~")) return@all false
+            val path = runCatching { root.resolve(target).normalize() }.getOrNull() ?: return@all false
             val name = path.fileName?.toString() ?: return@all false
             val fileOk = if (event.tool == "make_directory") true else name.substringAfterLast('.', "").lowercase() in SOURCE_EXTENSIONS && !PROTECTED_FILE.matches(name)
             // 이미 있는 테스트 파일은 고치면 묻는다: 모델이 테스트를 바꿔 "통과"로 만든 일이 있다 (팀 검증, M36 F-05)
             val existingTest = TEST_FILE.matches(name) || root.relativize(path).any { it.toString().lowercase() in TEST_DIRS }
             path.startsWith(root) && path != root && fileOk && !(existingTest && java.nio.file.Files.exists(path)) &&
                 root.relativize(path).none { part -> part.toString().let { it.startsWith(".") || it.lowercase() in PROTECTED_DIRS } }
+        }
+    }
+
+    /** 쓰기 도구 인자의 경로들. 읽을 수 없으면 null (자동 승인하지 않는다) */
+    private fun argumentTargets(tool: String, arguments: String): List<String>? {
+        val json = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(arguments) as kotlinx.serialization.json.JsonObject }.getOrNull() ?: return null
+        fun arg(name: String) = (json[name] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        return when (tool) {
+            "write_file", "make_directory" -> listOf(arg("path") ?: return null)
+            "move_file" -> listOf(arg("from") ?: return null, arg("to") ?: return null)
+            else -> null
         }
     }
 }

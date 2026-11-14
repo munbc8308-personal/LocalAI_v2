@@ -30,6 +30,13 @@ data class ChatRequestDto(
     val instructions: String? = null,
     /** 작업 폴더의 스킬 파일(`.vesta/skills/<폴더>/SKILL.md` 내용, SK-01). CLI가 사용자 승인을 받은 것만 보낸다 */
     val skills: List<ProjectSkillDto> = emptyList(),
+    /**
+     * 다른 PC의 작업 폴더 (RC-07, `vesta login`으로 붙은 CLI): [workspace]는 그 PC의 경로이고, 파일·셸 도구는 그 CLI가 실행한다.
+     * [clientTools]는 그 CLI가 실행할 수 있는 도구 정의, [os]는 그 PC의 운영체제
+     */
+    val remote: Boolean = false,
+    val os: String? = null,
+    val clientTools: List<ClientToolSpecDto> = emptyList(),
     /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,
     /** 질문에 붙인 문서 (.txt·.md·.pdf, V-12). 서버가 글을 뽑아 이번 질문에만 넘긴다 */
@@ -245,6 +252,14 @@ data class RoutingDto(
     val skill: String? = null,
 )
 
+/** 다른 PC의 CLI가 실행할 수 있는 도구 (RC-07). [parameters]는 JSON 스키마 글 */
+@Serializable
+data class ClientToolSpecDto(val name: String, val description: String, val parameters: String)
+
+/** 다른 PC의 CLI가 도구를 실행한 결과 (`POST /api/client-tools/{id}`, RC-07) */
+@Serializable
+data class ClientToolResultDto(val output: String, val isError: Boolean = false, val summary: String? = null)
+
 /** SSE로 흘려보내는 대화 이벤트 (AgentEvent의 직렬화 형태) */
 @Serializable
 sealed interface EventDto {
@@ -260,7 +275,11 @@ sealed interface EventDto {
         val warning: String?, val reason: String?, val editableField: String?, val editableValue: String?,
         /** 쓰는 실제 경로들 (내장 파일 도구만, M17) */
         val targets: List<String> = emptyList(),
+        /** 실행할 인자 그대로 (JSON, RC-07) */
+        val arguments: String? = null,
     ) : EventDto
+    /** 다른 PC의 CLI에게 도구 실행을 맡긴다 (RC-07). 결과는 `POST /api/client-tools/{requestId}` */
+    @Serializable @SerialName("client_tool") data class ClientTool(val requestId: String, val tool: String, val arguments: String) : EventDto
     /** 답변을 저장했다 (피드백용 메시지 ID) */
     @Serializable @SerialName("saved") data class Saved(val messageId: Long) : EventDto
     /** 에이전트가 만든 이미지. 내용은 `GET /api/media/{id}` */

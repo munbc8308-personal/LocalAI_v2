@@ -13,6 +13,7 @@ import dev.vesta.api.TranscriptDto
 import dev.vesta.api.CSRF_HEADER
 import dev.vesta.api.ChatRequestDto
 import dev.vesta.api.CliPackageDto
+import dev.vesta.api.ClientToolResultDto
 import dev.vesta.api.CollectionDto
 import dev.vesta.api.DashboardDto
 import dev.vesta.api.EventDto
@@ -165,6 +166,8 @@ class ServerDeps(
     val google: dev.vesta.google.GoogleAuth? = null,
     /** 다른 PC용 CLI zip (RC-06, 설치 스크립트가 `~/.vesta/app/vesta-cli.zip`에 둔다). 없으면 받기 버튼을 숨긴다 */
     val cliPackage: java.nio.file.Path? = null,
+    /** 다른 PC의 CLI에 맡긴 도구 실행 (RC-07). 없으면 다른 PC의 작업 폴더를 받지 않는다 */
+    val clientTools: dev.vesta.core.tools.ClientToolBroker? = null,
 )
 
 /** 메신저 연결 (M20, U-02). 웹 UI에서 일회용 코드를 만들어 봇에게 보내면 그 사용자로 연결된다 (터미널의 vesta <메신저> pair와 같다) */
@@ -357,9 +360,14 @@ fun Application.vestaApi(deps: ServerDeps) {
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
                     // 작업 폴더는 CLI에서만 받는다 (대화 서비스가 Mac 주인·홈 아래 폴더인지 다시 확인한다).
                     // 바깥 입구로 온 CLI(다른 PC의 vesta login, RC-04)는 받지 않는다: 그 PC의 폴더는 이 Mac에 없다
-                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI && !public }?.let { path ->
+                    // 다른 PC의 작업 폴더(RC-07)는 받는다: 파일·셸 도구는 이 Mac이 아니라 그 PC의 CLI가 실행한다
+                    val remote = request.remote && deps.clientTools != null && request.clientTools.isNotEmpty()
+                    val workspace = request.workspace?.takeIf { channel == ChannelType.CLI && (remote || (!public && !request.remote)) }?.let { path ->
                         val skills = request.skills.take(100).mapNotNull { dev.vesta.core.skill.Skill.parse(it.folder, it.text, dev.vesta.core.skill.SkillSource.PROJECT) }
-                        dev.vesta.core.agent.Workspace(path, request.instructions, skills)
+                        if (remote) dev.vesta.core.agent.Workspace(
+                            path.take(1_000), request.instructions, skills, remote = true, os = request.os?.take(60),
+                            clientTools = request.clientTools.take(20).map { dev.vesta.core.agent.ClientToolSpec(it.name.take(64), it.description, it.parameters.take(8_000)) },
+                        ) else dev.vesta.core.agent.Workspace(path, request.instructions, skills)
                     }
                     // 대화 서비스가 예외로 끝나면(DB 잠김 등) 조용히 끊지 않고 오류를 알린다 (팀 검증, M36)
                     try {
@@ -372,6 +380,15 @@ fun Application.vestaApi(deps: ServerDeps) {
                         runCatching { emit(ApiJson.encodeToString(EventDto.serializer(), dev.vesta.core.agent.AgentEvent.Error("답을 만들지 못했습니다. 잠시 뒤 다시 보내 주세요.").toDto())) }
                     }
                 }
+            }
+            // 다른 PC의 CLI가 실행한 도구 결과 (RC-07): 요청을 연 사용자 본인만
+            post("/client-tools/{id}") {
+                val user = call.principal(deps) ?: return@post
+                val broker = deps.clientTools ?: return@post call.respondJson(HttpStatusCode.NotFound, """{"error":"없음"}""")
+                val dto = ApiJson.decodeFromString(ClientToolResultDto.serializer(), call.receiveText())
+                val result = dev.vesta.core.tools.ToolResult(dto.output.take(dev.vesta.tools.ClientTool.MAX_OUTPUT), dto.isError, dto.summary?.take(200) ?: dto.output.lineSequence().firstOrNull().orEmpty().take(120))
+                val ok = broker.resolve(user, call.parameters["id"].orEmpty(), result)
+                call.respondJson(if (ok) HttpStatusCode.OK else HttpStatusCode.NotFound, buildJsonObject { put("resolved", ok) }.toString())
             }
             post("/approvals/{id}") {
                 val user = call.principal(deps) ?: return@post

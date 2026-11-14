@@ -1,6 +1,6 @@
 # Vesta — 프로젝트 기획서
 
-> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 구현, M32 구현, M33 구현, M34 구현, M35 진행, M36 구현, M37 진행, M38 구현, M39 구현, M40 구현(실제 Google 연결 확인 남음), M41 구현, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v7.13, 2026-11-14)
+> 상태: M0~M9·M13~M20 완료, M22 완료, M25 완료(4단계는 👍 재료 대기), M24 완료, M23 완료, M26 구현(직접 공개 운영 중), M27 완료, M28 구현, M29 구현, M30 구현, M31 구현, M32 구현, M33 구현, M34 구현, M35 진행, M36 구현, M37 진행, M38 구현, M39 구현, M40 구현(실제 Google 연결 확인 남음), M41 구현, M10~M12 구현(실제 메신저·휴대폰 확인 남음) (v7.14, 2026-11-14)
 > 7.1~7.14 기능 표의 상태 칸은 13.45 기획 점검 기준. 7.15부터는 절 제목에 상태를 적는다.
 
 ### 변경 이력
@@ -85,6 +85,7 @@
 | v7.7 | 2026-11-02 | **예약 받을 곳 고르기**(SC-07, 7.23): 웹 상태 탭 예약 카드에서 연결된 메신저를 골라 결과를 받는다. 못 보내면 마지막 결과에 남김. 13.55 |
 | v7.8 | 2026-11-08 | **그림·사진을 붙여 만들기**: `/image`에 붙인 그림을 구도·색 기준으로(V-11, mflux img2img), `/video`에 붙인 사진을 순서대로 장면으로(G-07). 전에는 이미지를 붙이면 명령과 상관없이 일반 대화로 갔다. 13.56 |
 | v7.9 | 2026-11-08 | **다른 PC에서 CLI**(7.36, RC-01~RC-05): `vesta login https://…`로 웹과 같은 이름·비밀번호로 로그인하면 `vesta`·`vesta -p`가 그 서버로 간다. 사용자 권한·한도 그대로, 주인 API 토큰은 밖에 나가지 않는다. 13.57 |
+| v7.14 | 2026-11-14 | **다른 PC에서 도구 실행**(RC-07): Windows PC의 `vesta`(로그인)를 프로젝트 폴더에서 실행하면 파일·셸 도구가 그 PC에서 돈다(PowerShell). 모델은 서버. 승인한 인자만 실행. 13.62 |
 | v7.13 | 2026-11-14 | **코드 개발 기본 스킬**(SK-19): `/review`·`/debug`·`/refactor`·`/patch`·`/commit`·`/pr`·`/security-review`를 내장 스킬로. 13.61 |
 | v7.12 | 2026-11-14 | **메신저 문서도 첨부로**(V-12): 메신저로 보낸 .txt·.md·.pdf를 웹 첨부와 같은 문서로 넘긴다. 설명에 `/image`·`/video`를 붙이면 문서를 참고해 만든다. 13.60 |
 | v7.11 | 2026-11-14 | **CLI 받기**(RC-06): 웹 설정 카드의 [CLI 받기]로 다른 PC용 CLI zip을 내려받고, 화면에 나온 `vesta login` 명령으로 붙는다. 13.59 |
@@ -1308,7 +1309,7 @@ Hermes Agent는 터미널을 Docker·SSH 등 격리 환경에서 돌린다(2026-
 | TR-05 | 설정 | P1 | `decision.teamRouting.enabled·auto·suggest`. 기준은 실제 임베딩으로 맞춘다 |
 | TR-06 | 평가 | P1 | 질문 → 기대 팀(또는 없음) 표로 점수 분포·정확도를 재는 스크립트, 기준을 바꿀 때 다시 잰다 |
 
-### 7.36 다른 PC에서 CLI (Remote CLI) — 구현 (RC-01~RC-06)
+### 7.36 다른 PC에서 CLI (Remote CLI) — 구현 (RC-01~RC-07, RC-07은 Windows 실기 확인 남음)
 **목적**: Mac이 아닌 PC(Windows·Linux·다른 Mac)에서도 터미널로 Vesta를 쓴다(2026-11-08 사용자 요청). 전에는 CLI가 API 토큰을 이 Mac 키체인에서만 읽고, 공개 주소는 토큰 API를 일부러 막아(7.20) 붙을 길이 없었다.
 
 | ID | 기능 | 우선순위 | 설명 |
@@ -1316,9 +1317,10 @@ Hermes Agent는 터미널을 Docker·SSH 등 격리 환경에서 돌린다(2026-
 | RC-01 | 로그인 | P1 | `vesta login <주소> [--name 이름]`: 웹과 같은 `/api/login`. 비밀번호는 터미널에서만 받는다(명령줄 인자 없음). 세션 쿠키·CSRF 값을 `~/.vesta/remote.json`(권한 600)에. 주소는 https만, http는 이 기기·Tailscale `*.ts.net`만 |
 | RC-02 | 로그아웃 | P1 | `vesta logout`: 서버 세션을 지우고 로그인 파일도 지운다 |
 | RC-03 | 대화 | P1 | 로그인 파일이 있으면 `vesta`·`vesta -p`가 그 서버에 쿠키 + CSRF로 붙는다(시작 줄에 이름·역할). 닿지 않거나 로그인이 끝났으면 이유를 알리고 끝낸다(임베디드로 넘어가지 않음, `--local`만 임베디드) |
-| RC-04 | 작업 폴더 | P1 | 다른 PC의 폴더는 서버 Mac에 없으므로 작업 폴더·VESTA.md·스킬을 보내지 않는다. 서버도 바깥 입구로 온 요청의 작업 폴더는 버린다 |
+| RC-04 | 작업 폴더 | P1 | 다른 PC의 폴더는 서버 Mac에 없으므로 작업 폴더·VESTA.md·스킬을 보내지 않는다. 서버도 바깥 입구로 온 요청의 작업 폴더는 버린다 → RC-07에서 바뀜 |
 | RC-05 | 설치 | P1 | `./gradlew :app-cli:distZip` → `app-cli/build/distributions/vesta-*.zip`(약 46MB)을 옮겨 풀고 `bin/vesta`(Windows는 `bin\vesta.bat`). JDK 21 필요 |
 | RC-06 | 웹에서 받기 | P1 | 설치 스크립트가 CLI zip을 `~/.vesta/app/vesta-cli.zip`에 둔다. 웹 설정의 "다른 PC에서 CLI" 카드에 [CLI 받기] 버튼과 그 사람용 `vesta login` 명령. `GET /api/cli`(크기)·`GET /api/cli/download`는 로그인한 사람 누구나(손님 포함, CLI도 그 사람 권한), 꾸러미가 없으면 카드를 숨긴다 |
+| RC-07 | 다른 PC에서 도구 실행 | P1 | 로그인한 CLI를 프로젝트 폴더에서 실행하면, 모델은 서버가 돌리고 파일·셸 도구(list_files·read_file·search_files·write_file·make_directory·move_file·apply_patch·run_shell)는 그 PC의 CLI가 그 폴더에서 실행한다(Claude Code 방식). RC-04의 "작업 폴더를 보내지 않음"을 바꾼다: 폴더 경로·지침·스킬·도구 정의를 보내고, 서버는 이 Mac의 파일·셸 도구 대신 CLI에 맡기는 도구를 준다. Mac 주인만. Windows는 PowerShell. 승인은 그 PC 터미널, CLI는 승인한 인자와 똑같은 요청만 실행(13.62) |
 
 - 권한: 서버는 웹 UI와 똑같이 그 사용자로 본다. 손님·멤버 제한, 하루 질문 한도, 바깥 관리 기능 차단, 직접 모드의 12자 이상 비밀번호 하한이 그대로다. 세션은 웹처럼 30일.
 - 다른 하위 명령(`status`·`user`·`schedule` 등)은 이 Mac 전용 그대로다.
@@ -3529,3 +3531,13 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - ~~웹 수집 DNS rebinding: 검사 시점과 연결 시점 사이에 DNS 응답이 바뀌면 내부 주소로 연결될 수 있음 (UrlGuard는 검사만 함).~~ → 연결 시점 검사로 닫음 (M34 Q-01) 내부 서비스는 127.0.0.1에만 바인딩되어 있어 영향은 제한적. 연결 IP를 고정하는 커스텀 DNS 리졸버는 M7에서 검토
 - 웹 검색어 생성(QueryRewriter)은 이전 대화를 참고한다. 이전 답변에 문서 내용이 있었다면 그 일부가 검색어에 섞일 가능성이 남아 있다 (보낸 검색어는 항상 화면에 표시, W-06). M7에서 검색어에 로컬 문서 문장이 들어갔는지 검사 추가
 - 로컬 모델의 tool calling 정확도 (D11로 도구 수를 줄여 완화, M6a에서 측정)
+
+### 13.62 다른 PC에서 도구 실행 (RC-07, 2026-11-14)
+- 사용자 요청: Windows PC의 CLI로 React·Java 프로젝트를 Vesta에 맡긴다. 전에는 원격 CLI(RC-04)가 PC의 폴더를 보내지 않아 코드 작업을 할 수 없었다. 방법 두 가지 중 A(도구를 PC에서 실행)를 골랐다: PC에 있는 JDK·Node를 그대로 쓰고, 고친 파일이 PC에 남고, 격리 셸 이미지에 툴체인을 넣지 않아도 된다. B(프로젝트를 서버 Mac에 두기)는 git으로 오가야 해서 뺐다.
+- **흐름**: CLI(`RemoteAuth.Login`)가 `ChatRequestDto`에 `workspace`(PC 경로)·`remote=true`·`os`·`clientTools`(도구 정의)·지침·스킬을 보낸다. 서버는 `Workspace(remote=true)`로 받아, 이 Mac의 파일·셸 도구를 빼고 `ClientTool`(같은 이름의 대리 도구)을 준다. 모델이 부르면 승인은 지금처럼(`ApprovalRequested`, PC 터미널에 뜸), 실행은 `ClientToolRequested` 이벤트로 CLI에 맡기고 `POST /api/client-tools/{id}`로 결과를 받는다(`ClientToolBroker`, 요청을 연 사용자만, 15분).
+- **서버를 믿지 않는 CLI**: `ClientWorkspace`가 작업 폴더만 여는 `PathSandbox`와 같은 도구 클래스로 실행한다. 쓰기·셸은 이 터미널에서 승인한(자동 승인 포함) 인자와 똑같은 요청만 한 번 실행한다(`ApprovalRequested.arguments`, 고친 명령은 고친 인자로). 아니면 실행하지 않고 "⚠ 서버가 승인 없이 … 요청"을 보인다. 쓰기 자동 승인은 서버의 설명(targets)이 아니라 실행 인자의 경로로 판단하고, `~` 경로는 묻는다. 차단 목록도 PC에서 다시 본다.
+- **서버 쪽 제한**: 도구 이름은 8개만, 위험 등급은 서버가 이름으로 정한다(READ 셋은 `readsLocalData`라 그 뒤 인터넷 도구는 승인). Mac 주인만(멤버는 다음에). 공개 입구로 온 요청이라도 `remote`와 도구 정의가 있으면 받는다. 도구 정의 없는 `remote`는 작업 폴더를 버린다.
+- **Windows**: `ShellTool(windows=true)`는 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command`(출력 UTF-8), 환경 변수는 Windows 필수값·PATH·JAVA_HOME 등만 넘긴다. 차단 목록에 드라이브 통째 삭제·Format-Volume·Stop-Computer·레지스트리·Set-ExecutionPolicy·`iwr | iex`·RunAs·Start-Job/Start-Process·cmdkey를 더했다. 시스템 프롬프트에 PowerShell 문법·`.\gradlew.bat`·`npm.cmd` 안내. PC 셸 시간 초과는 10분.
+- **CLI**: 작업 폴더는 홈 밖(D:\dev)도 되고(홈·드라이브 루트 제외), 이 PC에서 저장소 색인은 하지 않는다. 시작 줄에 "파일·셸 도구는 이 PC에서 실행". `vesta login` 안내 글도 바꿨다.
+- **테스트**: TaskAgent(승인에 인자, CLI에 맡기고 결과 사용, 모르는 이름 버림), ClientWorkspace(읽기 바로·승인 없는 쓰기 거부·바꿔치기 거부·한 번만·고친 명령만), AutoApprove(인자 경로), ShellTool(Windows 차단 목록), API(remote 받기·결과는 본인만). 관련 모듈 테스트 모두 통과.
+- **남은 것**: Windows PC 실기 확인(사용자가 PowerShell·JDK 설치 중). 이 Mac에서 "다른 PC" 흉내 시험도 아직(로그인 비밀번호 필요). 멤버 계정의 원격 작업 폴더, 실행 전 스냅샷·`/undo`, `edit_file`, 명령 패턴 허용, 긴 대화 요약은 다음(코드 프로젝트 검토, 같은 날).

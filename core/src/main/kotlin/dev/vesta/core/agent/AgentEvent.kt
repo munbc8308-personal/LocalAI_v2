@@ -43,7 +43,18 @@ sealed interface AgentEvent {
         /** 수정 후 승인이 가능한 도구(셸)면 수정할 인자 이름과 지금 값. 수정본은 이 인자만 담아 보내면 된다. */
         val editableField: String? = null,
         val editableValue: String? = null,
+        /**
+         * 실행할 인자 그대로(JSON). 다른 PC의 CLI가 도구를 직접 실행할 때(RC-07) 승인한 인자와 실행 요청([ClientToolRequested])이
+         * 같은지 CLI가 스스로 확인하고, 쓰기 자동 승인의 경로도 이 인자에서 직접 뽑는다 (서버가 준 설명을 믿지 않는다)
+         */
+        val arguments: String? = null,
     ) : AgentEvent
+
+    /**
+     * 다른 PC의 CLI에게 도구 실행을 맡긴다 (RC-07). CLI가 자기 작업 폴더에서 실행하고 `POST /api/client-tools/{requestId}`로 결과를 돌려준다.
+     * 쓰기·셸은 바로 앞에 같은 인자로 승인된 것만 CLI가 실행한다
+     */
+    data class ClientToolRequested(val requestId: String, val tool: String, val arguments: String) : AgentEvent
 
     /** 답변을 저장했다. 채널은 [messageId]로 피드백(👍/👎·라우팅 정정, C-09)을 남길 수 있다 */
     data class Saved(val messageId: Long) : AgentEvent

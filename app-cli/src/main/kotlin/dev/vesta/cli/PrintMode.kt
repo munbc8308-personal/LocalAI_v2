@@ -20,7 +20,7 @@ internal object PrintMode {
         val backend = openBackend(local)
         val err0 = System.err
         // 승인하지 않은(처음 보거나 바뀐) VESTA.md는 쓰지 않는다. 승인은 대화(vesta)에서
-        val workspace = if (!useWorkspace) null else Workspaces.current()?.let { ws ->
+        val workspace = if (!useWorkspace) null else Workspaces.current(anywhere = backend.runsToolsHere)?.let { ws ->
             if (Workspaces.trusted(ws)) ws
             else ws.copy(instructions = null).also { err0.println("${Workspaces.FILE}를 아직 승인하지 않아 쓰지 않습니다 (vesta로 대화를 열어 승인)") }
         }

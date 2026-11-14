@@ -70,7 +70,7 @@ class ChatCommand : CliktCommand(name = "chat") {
             autoWrites = acceptWrites
             autoShell = acceptShell
             if (autoShell) out.println(red("셸 명령을 묻지 않고 실행합니다 (이번 실행에만, 차단 목록은 그대로). 끄기: /accept shell off"))
-            val workspace = if (noWorkspace) null else Workspaces.current()?.let { ws ->
+            val workspace = if (noWorkspace) null else Workspaces.current(anywhere = backend.runsToolsHere)?.let { ws ->
                 if (Workspaces.trusted(ws)) return@let ws
                 // 처음 보거나 바뀐 VESTA.md: 따를지 먼저 묻는다. 입력이 터미널이 아니면 묻지 않고 쓰지 않는다
                 val what = listOfNotNull(Workspaces.FILE.takeIf { ws.instructions != null }, "스킬 ${ws.skills.size}개".takeIf { ws.skills.isNotEmpty() }).joinToString("·")
@@ -92,13 +92,15 @@ class ChatCommand : CliktCommand(name = "chat") {
                 Workspaces.skippedSkills(ws).takeIf { it.isNotEmpty() }?.let { out.println(red("쓰지 않은 스킬 (형식 오류·숨은 문자·예약된 이름): ${it.joinToString()}")) }
                 out.println(dim("작업 폴더 ${Workspaces.display(ws.path)}" + (if (ws.instructions != null) " · ${Workspaces.FILE} 읽음" else "") +
                     (if (ws.skills.isNotEmpty()) " · 스킬 ${ws.skills.joinToString { "/" + it.name }}" else "") +
-                    (if (autoWrites) " · 파일 쓰기 자동 승인" else "") + if (autoShell) " · 셸 자동 승인" else ""))
+                    (if (autoWrites) " · 파일 쓰기 자동 승인" else "") + (if (autoShell) " · 셸 자동 승인" else "") +
+                    if (backend.runsToolsHere) " · 파일·셸 도구는 이 PC에서 실행" else ""))
             }
             session?.let { printHistory(out, backend, it) }
             out.flush()
             // 작업 폴더가 등록한 저장소면 바뀐 파일만 다시 색인한다. 기다리지 않고 대화를 시작한다
             // (입력 대기 readLine이 이 스레드를 막으므로 다른 스레드에서)
-            val refresh = workspace?.let { ws ->
+            // 다른 PC(RC-07)에서는 이 PC에 Vesta 색인이 없다
+            val refresh = workspace?.takeIf { !backend.runsToolsHere }?.let { ws ->
                 launch(kotlinx.coroutines.Dispatchers.IO) {
                     try {
                         Workspaces.refreshRepo(ws)?.let { reader.printAbove(dim(it)) }

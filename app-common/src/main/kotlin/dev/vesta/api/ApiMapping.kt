@@ -22,8 +22,9 @@ fun AgentEvent.toDto(): EventDto = when (this) {
     is AgentEvent.ToolStarted -> EventDto.ToolStarted(callId, tool, risk.name, summary)
     is AgentEvent.ToolFinished -> EventDto.ToolFinished(callId, tool, ok, summary)
     is AgentEvent.ApprovalRequested -> EventDto.Approval(
-        requestId, tool, risk.name, details.title, details.body, details.warning, reason, editableField, editableValue, details.targets,
+        requestId, tool, risk.name, details.title, details.body, details.warning, reason, editableField, editableValue, details.targets, arguments,
     )
+    is AgentEvent.ClientToolRequested -> EventDto.ClientTool(requestId, tool, arguments)
     is AgentEvent.Grounding -> EventDto.Grounding(checked, unsupported)
     is AgentEvent.JobStarted -> EventDto.Job(id, title)
     is AgentEvent.Media -> EventDto.Media(asset.id, asset.mime, caption)
@@ -62,8 +63,9 @@ fun EventDto.toEvent(): AgentEvent = when (this) {
     is EventDto.ToolStarted -> AgentEvent.ToolStarted(callId, tool, RiskLevel.valueOf(risk), summary)
     is EventDto.ToolFinished -> AgentEvent.ToolFinished(callId, tool, ok, summary)
     is EventDto.Approval -> AgentEvent.ApprovalRequested(
-        requestId, tool, RiskLevel.valueOf(risk), ApprovalDetails(title, body, warning, targets), reason, editableField, editableValue,
+        requestId, tool, RiskLevel.valueOf(risk), ApprovalDetails(title, body, warning, targets), reason, editableField, editableValue, arguments,
     )
+    is EventDto.ClientTool -> AgentEvent.ClientToolRequested(requestId, tool, arguments)
     is EventDto.Grounding -> AgentEvent.Grounding(checked, unsupported)
     is EventDto.Job -> AgentEvent.JobStarted(id, title)
     // 원격 모드: 내용은 받지 않았다 (필요하면 /api/media/{id}로 받는다)

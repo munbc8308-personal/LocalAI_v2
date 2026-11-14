@@ -77,6 +77,13 @@ data class Workspace(
     val instructions: String? = null,
     /** 작업 폴더의 스킬(`.vesta/skills`, SK-01). CLI가 VESTA.md처럼 사용자 승인(해시)을 받은 것만 넣는다 */
     val skills: List<dev.vesta.core.skill.Skill> = emptyList(),
+    /**
+     * 다른 PC의 작업 폴더 (RC-07): 이 Mac에는 없는 폴더라 파일·셸 도구를 그 PC의 CLI가 실행한다([clientTools]).
+     * [path]는 그 PC의 경로, [os]는 그 PC의 운영체제 이름(예: "Windows 11")
+     */
+    val remote: Boolean = false,
+    val os: String? = null,
+    val clientTools: List<ClientToolSpec> = emptyList(),
 ) {
     companion object {
         /** 지침 최대 글자 수 (넘으면 앞부분만) */
@@ -93,3 +100,6 @@ data class Workspace(
         }
     }
 }
+
+/** 다른 PC의 CLI가 실행할 수 있는 도구 하나 (RC-07). 위험 등급은 서버가 이름으로 정한다(클라이언트가 정하지 않는다) */
+data class ClientToolSpec(val name: String, val description: String, val parameters: String)

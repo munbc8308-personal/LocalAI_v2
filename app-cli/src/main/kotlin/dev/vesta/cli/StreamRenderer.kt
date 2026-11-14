@@ -35,6 +35,8 @@ internal class StreamRenderer(private val out: PrintWriter, private val showThin
             is AgentEvent.ToolFinished -> out.println(dim("    ${if (event.ok) "✓" else "✗"} ${event.summary}"))
             // 승인 화면은 ChatCommand가 입력을 받아야 하므로 거기서 그린다
             is AgentEvent.ApprovalRequested -> Unit
+            // 다른 PC의 도구 실행(RC-07)은 RemoteBackend가 처리한다
+            is AgentEvent.ClientToolRequested -> Unit
             is AgentEvent.Reasoning -> {
                 if (showThinking) {
                     out.print(dim(event.text))

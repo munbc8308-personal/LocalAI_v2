@@ -59,6 +59,27 @@ interface DelegatingTool : Tool {
     override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("오류: 나눠 맡기기는 에이전트 안에서만 쓸 수 있다", isError = true)
 }
 
+/**
+ * 실행하면서 이벤트를 내는 도구 (RC-07 다른 PC에서 실행하는 도구). 나눠 맡기기와 달리 한 번에 하나씩 차례로 돈다
+ */
+interface EmittingTool : Tool {
+    suspend fun run(arguments: JsonObject, request: dev.vesta.core.agent.AgentRequest, emit: suspend (dev.vesta.core.agent.AgentEvent) -> Unit): ToolResult
+
+    override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("오류: 이 도구는 에이전트 안에서만 쓸 수 있다", isError = true)
+}
+
+/** 다른 PC의 CLI에 맡긴 도구 실행 하나 (RC-07). CLI가 돌려준 결과가 [result]로 들어온다 */
+class PendingClientTool(val id: String, val owner: UserContext) {
+    val result = kotlinx.coroutines.CompletableDeferred<ToolResult>()
+}
+
+/** 다른 PC의 CLI에 맡긴 도구 실행 중계 (RC-07). 요청을 연 사용자 본인만 결과를 돌려줄 수 있다 */
+interface ClientToolBroker {
+    fun open(owner: UserContext): PendingClientTool
+    fun resolve(user: UserContext, id: String, result: ToolResult): Boolean
+    fun close(id: String)
+}
+
 /** 승인 화면 내용 */
 data class ApprovalDetails(
     /** 한 줄 요약. 예: "파일 쓰기: ~/Documents/summary.md (1.2KB, 새 파일)" */

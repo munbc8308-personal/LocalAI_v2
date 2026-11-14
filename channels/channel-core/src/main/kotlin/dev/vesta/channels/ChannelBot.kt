@@ -311,6 +311,8 @@ class ChannelBot(
                     is AgentEvent.Media -> images += event
                     // 끝나면 서버가 이 메신저로 결과를 보낸다 (ChannelNotifier.sendMedia)
                     is AgentEvent.JobStarted -> Unit
+                    // 다른 PC의 CLI에만 오는 이벤트 (RC-07). 메신저 대화에는 오지 않는다
+                    is AgentEvent.ClientToolRequested -> Unit
                     is AgentEvent.Saved -> saved = event.messageId
                     is AgentEvent.ToolStarted -> reply.status("${event.tool} · ${event.summary}")
                     // 시간 초과 등으로 끝난 승인 요청의 버튼을 닫는다

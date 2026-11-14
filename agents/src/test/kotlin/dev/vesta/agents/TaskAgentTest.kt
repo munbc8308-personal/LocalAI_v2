@@ -106,6 +106,39 @@ class TaskAgentTest : FunSpec({
         delegated.single().tainted shouldBe true
     }
 
+    test("다른 PC의 도구 (RC-07): 승인에 실행 인자가 실리고, 실행은 CLI에 맡긴 뒤 돌아온 결과를 쓴다") {
+        val pending = mutableMapOf<String, dev.vesta.core.tools.PendingClientTool>()
+        val broker = object : dev.vesta.core.tools.ClientToolBroker {
+            override fun open(owner: UserContext) = dev.vesta.core.tools.PendingClientTool("c${pending.size}", owner).also { pending[it.id] = it }
+            override fun resolve(user: UserContext, id: String, result: ToolResult) = pending.remove(id)?.result?.complete(result) == true
+            override fun close(id: String) { pending.remove(id)?.result?.complete(ToolResult("닫힘", isError = true)) }
+        }
+        val schema = """{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"}}}"""
+        val tools = dev.vesta.tools.ClientTool.from(listOf(
+            dev.vesta.core.agent.ClientToolSpec("run_shell", "PowerShell", schema),
+            dev.vesta.core.agent.ClientToolSpec("delete_everything", "모르는 이름", schema),
+        ), broker, "Windows 11")
+        tools.map { it.spec.name } shouldBe listOf("run_shell")
+        tools.single().risk shouldBe RiskLevel.EXEC
+        val model = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("t1", "run_shell", """{"command":"npm.cmd test","cwd":"."}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("테스트 결과를 봤어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = mutableListOf<AgentEvent>()
+        TaskAgent(model, models, ToolRegistry(tools), AutoBroker(ApprovalDecision.Approve)).handle(request).collect { event ->
+            events += event
+            if (event is AgentEvent.ClientToolRequested) broker.resolve(user, event.requestId, ToolResult("PASS 3 tests\n[종료 코드 0]"))
+        }
+        events.filterIsInstance<AgentEvent.ApprovalRequested>().single().let {
+            it.arguments shouldBe """{"command":"npm.cmd test","cwd":"."}"""
+            it.editableField shouldBe "command"
+            it.details.title shouldContain "내 PC · Windows 11"
+        }
+        events.filterIsInstance<AgentEvent.ClientToolRequested>().single().arguments shouldBe """{"command":"npm.cmd test","cwd":"."}"""
+        model.requests.last().messages.last().content shouldContain "PASS 3 tests"
+        pending.size shouldBe 0
+    }
+
     test("같은 글을 되풀이하면 그 단계를 멈추고 알린다, 단계마다 생성 한도를 둔다") {
         val loop = List(200) { ChatChunk.Delta("같은 문장을 계속 되풀이하는 중입니다. 같은 문장을 계속 되풀이하는 중입니다. ") }
         val model = ScriptedModel(listOf(loop + ChatChunk.Done("stop", null)))
