@@ -315,7 +315,7 @@ data class MeDto(val name: String, val role: String, val csrf: String, /** 바�
 
 /** 다른 PC용 CLI 꾸러미 (`GET /api/cli`, RC-06): 설치할 때 만든 zip의 크기 */
 @Serializable
-data class CliPackageDto(val version: String, val bytes: Long)
+data class CliPackageDto(val version: String, val bytes: Long, /** zip 안 맨 위 폴더 이름 (예: vesta-0.1.0-SNAPSHOT) */ val folder: String? = null)
 
 /** Google 연결 상태 (`GET /api/google`, M40). [available]: 서버에 설정돼 있고 이 사용자가 쓸 수 있음 */
 @Serializable

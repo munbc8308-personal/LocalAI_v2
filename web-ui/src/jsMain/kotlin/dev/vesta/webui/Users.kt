@@ -566,21 +566,84 @@ fun PasswordCard() {
     }
 }
 
-/** 다른 PC용 CLI 받기 (RC-06). 서버에 꾸러미가 있을 때만 보인다 */
+/**
+ * 다른 PC용 CLI 받기와 설치·실행 안내 (RC-06·RC-07). 서버에 꾸러미가 있을 때만 보인다.
+ * 안내만 보고 다른 PC에서 바로 따라 할 수 있게, 운영체제별 명령을 복사 버튼과 함께 보여 준다
+ */
 @Composable
 fun CliCard(me: MeDto) {
     var pkg by remember { mutableStateOf<CliPackageDto?>(null) }
+    var open by remember { mutableStateOf(false) }
+    var os by remember { mutableStateOf(if (window.navigator.userAgent.contains("Windows")) "windows" else "unix") }
+    var copied by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { pkg = runCatching { Http.get("/api/cli", CliPackageDto.serializer()) }.getOrNull() }
     val p = pkg ?: return
     val server = me.publicUrl ?: window.location.origin
+    val folder = p.folder ?: "vesta-${p.version}"
+    val zip = "vesta-cli-${p.version}.zip"
+    val name = if (me.role == "OWNER") "" else " --name ${me.name}"
+
+    @Composable
+    fun step(title: String, note: String?, command: String?) {
+        Div({ classes("stack"); style { property("margin", "10px 0") } }) {
+            B({ classes("small") }) { Text(title) }
+            note?.let { P({ classes("muted", "small"); style { property("margin", "2px 0") } }) { Text(it) } }
+            command?.let { cmd ->
+                Div({ style { property("position", "relative") } }) {
+                    Pre({ classes("mono", "small"); style { property("white-space", "pre-wrap"); property("padding-right", "64px") } }) { Text(cmd) }
+                    Button({
+                        classes("link", "small")
+                        style { property("position", "absolute"); property("top", "4px"); property("right", "4px") }
+                        onClick { window.navigator.clipboard.writeText(cmd).then { copied = title }.catch { copied = null; it } }
+                    }) { Text(if (copied == title) "복사됨" else "복사") }
+                }
+            }
+        }
+    }
+
     Div({ classes("card") }) {
         Div({ classes("row") }) {
             Span { B { Text("다른 PC에서 CLI") } }
-            A("/api/cli/download", { classes("button", "small"); attr("download", "vesta-cli-${p.version}.zip") }) { Text("CLI 받기 (${p.bytes / 1_048_576}MB)") }
+            A("/api/cli/download", { classes("button", "small"); attr("download", zip) }) { Text("CLI 받기 (${p.bytes / 1_048_576}MB)") }
         }
-        P({ classes("muted", "small") }) { Text("JDK 21이 필요합니다. 압축을 풀고 풀린 폴더에서 아래처럼 로그인하면 이 웹과 같은 이름·권한으로 대화합니다. 작업 폴더·파일 도구는 이 서버 Mac에서 돕니다.") }
-        Pre({ classes("mono", "small") }) { Text("bin/vesta login $server${if (me.role == "OWNER") "" else " --name ${me.name}"}\nbin/vesta") }
-        P({ classes("muted", "small") }) { Text("Windows는 bin\\vesta.bat 를 씁니다.") }
+        P({ classes("muted", "small") }) {
+            Text("다른 PC의 터미널에서 Vesta를 씁니다. 생각(모델)은 이 서버가 하고, 프로젝트 폴더에서 실행하면 파일 읽기·고치기·셸 명령은 그 PC에서 돕니다. 쓰기·셸은 그 PC 터미널에서 매번 승인합니다.")
+        }
+        Button({ classes("link", "small"); onClick { open = !open } }) { Text(if (open) "설치 방법 닫기" else "설치·실행 방법 보기") }
+        if (open) {
+            Div({ classes("row"); style { property("justify-content", "flex-start"); property("gap", "8px"); property("margin-top", "8px") } }) {
+                Button({ classes("small"); if (os == "windows") classes("primary"); onClick { os = "windows"; copied = null } }) { Text("Windows") }
+                Button({ classes("small"); if (os == "unix") classes("primary"); onClick { os = "unix"; copied = null } }) { Text("macOS · Linux") }
+            }
+            if (os == "windows") {
+                step("1. Java 21 이상 설치 (PowerShell)", "이미 있으면 건너뜁니다. 설치 뒤 PowerShell 창을 새로 열고 java -version 으로 확인. 코드 작업이면 Git·Node도 함께.",
+                    "winget install EclipseAdoptium.Temurin.21.JDK\nwinget install Git.Git\nwinget install OpenJS.NodeJS.LTS")
+                step("2. CLI 받아서 풀기", "위 [CLI 받기]로 받은 파일(다운로드 폴더)을 C:\\tools 에 풉니다. 새 버전으로 바꿀 때도 같은 명령.",
+                    "Expand-Archive \"\$HOME\\Downloads\\$zip\" -DestinationPath C:\\tools -Force")
+                step("3. PATH에 추가 (한 번만)", "새 PowerShell 창부터 vesta 만 치면 됩니다.",
+                    "[Environment]::SetEnvironmentVariable(\"Path\", [Environment]::GetEnvironmentVariable(\"Path\", \"User\") + \";C:\\tools\\$folder\\bin\", \"User\")")
+                step("4. 로그인 (한 번만)", "새 PowerShell 창에서. 이 웹과 같은 비밀번호" + (if (me.role == "OWNER") ", 이름은 Enter." else "."),
+                    "vesta login $server$name")
+                step("5. 프로젝트 폴더에서 실행", "login 없이 vesta 만. 시작 줄에 '파일·셸 도구는 이 PC에서 실행'이 보이면 됩니다. 셸은 PowerShell로 돕니다.",
+                    "cd D:\\dev\\내프로젝트\nvesta")
+            } else {
+                step("1. Java 21 이상 설치", "이미 있으면 건너뜁니다. java -version 으로 확인.",
+                    "# macOS\nbrew install openjdk@21\n# Ubuntu·Debian\nsudo apt install openjdk-21-jdk")
+                step("2. CLI 받아서 풀기", "위 [CLI 받기]로 받은 파일을 ~/tools 에 풉니다.",
+                    "mkdir -p ~/tools && unzip -o ~/Downloads/$zip -d ~/tools")
+                step("3. PATH에 추가 (한 번만)", "zsh 기준. bash면 ~/.bashrc.",
+                    "echo 'export PATH=\"\$HOME/tools/$folder/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc")
+                step("4. 로그인 (한 번만)", "이 웹과 같은 비밀번호" + (if (me.role == "OWNER") ", 이름은 Enter." else "."), "vesta login $server$name")
+                step("5. 프로젝트 폴더에서 실행", "login 없이 vesta 만. 시작 줄에 '파일·셸 도구는 이 PC에서 실행'이 보이면 됩니다.", "cd ~/dev/내프로젝트\nvesta")
+            }
+            step("자주 쓰는 것", null,
+                "vesta -p \"질문\"          # 한 번만 묻고 끝\n/help                     # 대화 중 명령 목록\n/review  /debug  /patch   # 코드 개발 스킬 (/skills 로 전체)\n" +
+                    "vesta --accept-writes    # 작업 폴더 안 소스 파일 쓰기는 묻지 않음\nvesta logout             # 로그아웃\nCtrl+D                   # 대화 끝내기")
+            P({ classes("muted", "small") }) {
+                Text(if (me.role == "OWNER") "PC에서 파일·셸 도구를 쓰는 것은 지금 Mac 주인 계정만 됩니다. 셸은 격리 없이 그 PC에서 돌므로 명령을 보고 승인하세요."
+                    else "PC에서 파일·셸 도구를 쓰는 것은 지금 Mac 주인 계정만 됩니다. 이 계정으로는 대화만 할 수 있습니다.")
+            }
+        }
     }
 }
 

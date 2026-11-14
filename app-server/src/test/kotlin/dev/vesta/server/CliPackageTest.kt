@@ -27,11 +27,12 @@ class CliPackageTest : FunSpec({
         client.get("/api/cli/download").status shouldBe HttpStatusCode.Unauthorized
         client.get("/api/cli") { bearerAuth("secret") }.status shouldBe HttpStatusCode.NotFound
 
-        Files.write(zip, byteArrayOf(0x50, 0x4b, 3, 4, 9))
-        client.get("/api/cli") { bearerAuth("secret") }.bodyAsText() shouldBe """{"version":"9.9","bytes":5}"""
+        java.util.zip.ZipOutputStream(Files.newOutputStream(zip)).use { it.putNextEntry(java.util.zip.ZipEntry("vesta-9.9/bin/vesta")); it.write(byteArrayOf(1)); it.closeEntry() }
+        val size = Files.size(zip)
+        client.get("/api/cli") { bearerAuth("secret") }.bodyAsText() shouldBe """{"version":"9.9","bytes":$size,"folder":"vesta-9.9"}"""
         val response = client.get("/api/cli/download") { bearerAuth("secret") }
         response.status shouldBe HttpStatusCode.OK
         response.headers[HttpHeaders.ContentDisposition]!! shouldContain "vesta-cli-9.9.zip"
-        response.readRawBytes().size shouldBe 5
+        response.readRawBytes().size.toLong() shouldBe size
     } }
 })

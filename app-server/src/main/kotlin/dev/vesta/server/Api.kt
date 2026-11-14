@@ -334,7 +334,9 @@ fun Application.vestaApi(deps: ServerDeps) {
                 call.principal(deps) ?: return@get
                 val zip = deps.cliPackage?.takeIf { java.nio.file.Files.isRegularFile(it) }
                     ?: return@get call.respondJson(HttpStatusCode.NotFound, """{"error":"CLI 꾸러미가 없습니다 (Mac에서 scripts/install-vesta.sh 를 다시 실행하세요)"}""")
-                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(CliPackageDto.serializer(), CliPackageDto(deps.version, java.nio.file.Files.size(zip))))
+                // 설치 안내에 쓸 폴더 이름 (압축을 풀면 생기는 폴더)
+                val folder = runCatching { java.util.zip.ZipFile(zip.toFile()).use { z -> z.entries().asSequence().firstOrNull()?.name?.substringBefore('/')?.takeIf { it.isNotBlank() } } }.getOrNull()
+                call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(CliPackageDto.serializer(), CliPackageDto(deps.version, java.nio.file.Files.size(zip), folder)))
             }
             get("/cli/download") {
                 call.principal(deps) ?: return@get

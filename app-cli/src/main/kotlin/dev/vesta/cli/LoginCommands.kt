@@ -26,7 +26,10 @@ class LoginCommand : CliktCommand(name = "login") {
         val result = RemoteLogin.login(server, login, secret).getOrElse { echo(it.message, err = true); throw ProgramResult(1) }
         RemoteLogin.load()?.takeIf { it.url != server || it.session != result.session }?.let { RemoteLogin.logout(it) }
         RemoteLogin.save(result)
-        echo("${server}에 ${result.name}(으)로 로그인했습니다. 이제 vesta 로 대화하세요. (로그인 정보: ${RemoteLogin.file()})")
+        echo("${server}에 ${result.name}(으)로 로그인했습니다. (로그인 정보: ${RemoteLogin.file()})")
+        // 다시 login을 치는 실수가 있었다 (Windows 시험): 다음에 칠 명령을 그대로 보여 준다
+        val launcher = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "vesta.bat" else "vesta"
+        echo("다음: 프로젝트 폴더로 가서 login 없이  $launcher  만 실행하면 대화가 열립니다.")
         echo("프로젝트 폴더에서 vesta를 실행하면 파일·셸 도구가 이 PC의 그 폴더에서 돕니다 (쓰기·셸은 이 터미널에서 승인). 생각(모델)은 서버가 합니다.")
     }
 }

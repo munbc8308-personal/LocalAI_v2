@@ -3475,6 +3475,7 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - 질문 버튼·컬렉션 추가 버튼은 그대로. 테스트: Telegram(질문 버튼 → 문서, 캡션 `/image` → 문서), Slack·Discord(문서로 넘김).
 - 실제 메신저로 보내 보는 확인은 남았다(봇 계정에서 사용자가).
 - 보안 검토(커밋 뒤 자동 검토): 웹 리서치(WebResearchAgent)는 `tainted`를 보지 않고 질문+문서로 검색어를 만들어 밖으로 보낸다. 문서 안의 지시가 문서 내용을 검색어·주소에 실어 내보낼 수 있다(웹 첨부도 같음). → 문서를 붙인 질문은 `/web`이어도 일반 대화(CHAT)로. 작업·개인 에이전트(TaskAgent)는 tainted면 인터넷 도구 승인, 문서·코드 에이전트는 로컬 검색만이라 그대로.
+- 보안 검토 2차: 문서를 붙인 턴의 답(저장됨)에 문서 속 지시가 섞여 다음 `/web` 턴의 대화 기록으로 들어갈 수 있다. 웹 리서치는 대화 기록으로 검색어를 만든다(`QueryRewriter.webQueries(history)`). → 같은 대화에 앞서 문서를 붙인 질문(📎)이 있으면 웹 리서치에는 지난 대화 없이 이번 질문만 준다. 지난 대화 찾기(pastFound) 내용은 페르소나 프롬프트로만 가고 검색어에는 쓰이지 않아 그대로.
 
 ### 13.61 코드 개발 기본 스킬 (SK-19, 2026-11-14)
 - 사용자 요청: 코드 개발 스킬을 기본으로. 고른 종류는 리뷰·디버깅, 리팩터·작은 수정, 커밋·PR 글, 보안 점검이고, 방식은 "부르면 쓰기"다(늘 붙이면 질문마다 프롬프트가 길어진다).
@@ -3539,5 +3540,8 @@ Qwen3.5 계열은 생각 모드가 기본으로 켜져 있어, 그대로 두면 
 - **서버 쪽 제한**: 도구 이름은 8개만, 위험 등급은 서버가 이름으로 정한다(READ 셋은 `readsLocalData`라 그 뒤 인터넷 도구는 승인). Mac 주인만(멤버는 다음에). 공개 입구로 온 요청이라도 `remote`와 도구 정의가 있으면 받는다. 도구 정의 없는 `remote`는 작업 폴더를 버린다.
 - **Windows**: `ShellTool(windows=true)`는 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command`(출력 UTF-8), 환경 변수는 Windows 필수값·PATH·JAVA_HOME 등만 넘긴다. 차단 목록에 드라이브 통째 삭제·Format-Volume·Stop-Computer·레지스트리·Set-ExecutionPolicy·`iwr | iex`·RunAs·Start-Job/Start-Process·cmdkey를 더했다. 시스템 프롬프트에 PowerShell 문법·`.\gradlew.bat`·`npm.cmd` 안내. PC 셸 시간 초과는 10분.
 - **CLI**: 작업 폴더는 홈 밖(D:\dev)도 되고(홈·드라이브 루트 제외), 이 PC에서 저장소 색인은 하지 않는다. 시작 줄에 "파일·셸 도구는 이 PC에서 실행". `vesta login` 안내 글도 바꿨다.
+- **보안 검토 후속**: `--accept-shell`은 서버가 준 경고(warning)만 봤다. 원격이면 서버가 경고를 빼고 지우기 명령을 자동 승인받을 수 있었다. → 실행 인자가 오면 CLI가 명령을 다시 보고(`ShellTool.blocked`·`dangerous`) 걸리면 묻는다. 위험 패턴에 PowerShell 별칭(ri·mi·sc·ac·cpi·rni)·Copy/Add-Content, 셸 안의 셸(cmd /c·powershell·pwsh·bash·sh·wsl), 인코딩된 명령(-enc), .NET 파일 API(`[IO.File]::`)를 더했다(이 Mac의 셸 승인 화면에도 경고가 더 자주 붙는다).
 - **테스트**: TaskAgent(승인에 인자, CLI에 맡기고 결과 사용, 모르는 이름 버림), ClientWorkspace(읽기 바로·승인 없는 쓰기 거부·바꿔치기 거부·한 번만·고친 명령만), AutoApprove(인자 경로), ShellTool(Windows 차단 목록), API(remote 받기·결과는 본인만). 관련 모듈 테스트 모두 통과.
-- **남은 것**: Windows PC 실기 확인(사용자가 PowerShell·JDK 설치 중). 이 Mac에서 "다른 PC" 흉내 시험도 아직(로그인 비밀번호 필요). 멤버 계정의 원격 작업 폴더, 실행 전 스냅샷·`/undo`, `edit_file`, 명령 패턴 허용, 긴 대화 요약은 다음(코드 프로젝트 검토, 같은 날).
+- **Windows 첫 실행 (같은 날)**: `vesta.bat`이 어떤 명령이든 첫 출력에서 `ClassCastException: Cannot cast java.lang.Integer to java.lang.foreign.MemorySegment`(Mordant FFM `TerminalInterfaceFfmWindows.getTerminalSize`)로 죽었다. → app-cli에서 `mordant-jvm-ffm`을 빼 JNA 방식으로. 그 뒤 CLI가 Windows에서 열렸다. 로그인 뒤 다시 `login`을 치는 혼동이 있어 로그인 완료 글에 "login 없이 vesta(.bat)만"을 보인다.
+- **웹 설치 안내**: 설정의 "다른 PC에서 CLI" 카드에 [설치·실행 방법 보기]: Windows / macOS·Linux 탭, 단계마다 복사 버튼(Java 설치 → 받은 zip 풀기 `Expand-Archive` → PATH → `vesta login <주소>` → 프로젝트 폴더에서 `vesta`, 자주 쓰는 명령). `/api/cli`가 zip 안 폴더 이름(`folder`)도 돌려줘 PATH 명령에 쓴다.
+- **남은 것**: Windows에서 파일·셸 도구 실행 확인. 이 Mac에서 "다른 PC" 흉내 시험도 아직(로그인 비밀번호 필요). 멤버 계정의 원격 작업 폴더, 실행 전 스냅샷·`/undo`, `edit_file`, 명령 패턴 허용, 긴 대화 요약은 다음(코드 프로젝트 검토, 같은 날).
