@@ -165,7 +165,8 @@ class DefaultConversationService(
         // 이미지를 붙인 질문은 비전 모델이 있는 일반 대화가 받는다 (V-04). 다른 에이전트는 이미지를 읽지 못한다
         // 사용자 정의 에이전트 (`/agent 이름 할 일`, M22): 라우터를 거치지 않고 그 에이전트로. 작업 에이전트 권한 안에서만
         // 작업 폴더는 Mac 주인만 (파일 도구 범위를 넓히므로). 다른 사용자가 보내면 무시한다
-        val workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && dev.vesta.core.agent.Workspace.usable(it.path) }
+        // 다른 PC의 작업 폴더(RC-07)는 이 Mac에 없으므로 폴더 확인 대신 그 PC의 CLI가 실행할 도구가 있어야 한다
+        val workspace = input.workspace?.takeIf { user.role == dev.vesta.core.UserRole.OWNER && (if (it.remote) it.clientTools.isNotEmpty() else dev.vesta.core.agent.Workspace.usable(it.path)) }
         suspend fun notice(text: String) {
             messages.append(session.id, NewMessage(role = ChatRole.ASSISTANT, content = text, agent = AgentType.CHAT, model = POLICY_MODEL))
                 .let { emit(AgentEvent.Token(text)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
@@ -239,7 +240,10 @@ class DefaultConversationService(
             else mentionAgent(user, routed.collections)?.let { routed.copy(agent = it, requested = null) }
                 // @이름으로 직접 지정했는데 그 컬렉션이 없으면 일반 대화로 넘기지 말고 DocsAgent가 "없다"고 알린다
                 ?: if (routed.requested == AgentType.DOCS && AgentType.DOCS in agents) routed.copy(agent = AgentType.DOCS, requested = null) else routed
-        val decision = if (mentioned.agent in allowed) mentioned else mentioned.copy(agent = AgentType.CHAT, requested = mentioned.agent)
+        val permitted = if (mentioned.agent in allowed) mentioned else mentioned.copy(agent = AgentType.CHAT, requested = mentioned.agent)
+        // 문서를 붙인 질문은 웹 리서치로 보내지 않는다 (V-12 보안 검토): 웹 리서치는 tainted 승인을 보지 않고
+        // 질문(+문서)으로 검색어를 만들어 밖으로 보내므로, 문서 안의 지시가 문서 내용을 검색어·주소에 실어 내보낼 수 있다
+        val decision = if (input.documents.isNotEmpty() && permitted.agent == AgentType.WEB) permitted.copy(agent = AgentType.CHAT) else permitted
         // 역할 때문에 못 쓰는 에이전트가 판정됐으면 일반 대화로 넘기지 않고 바로 알린다.
         // 일반 대화 모델은 일정·메일·파일을 볼 수 없어 그럴듯하게 지어내기 때문이다 (예: MEMBER의 "내일 일정")
         val denied = decision.requested?.takeIf { it !in allowed }
