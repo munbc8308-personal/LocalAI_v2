@@ -326,7 +326,7 @@ class TelegramBotTest : FunSpec({
         }
     }
 
-    test("파일: 설명 없이 보내면 질문/컬렉션 추가를 고르고, 질문하면 파일 내용을 붙여 일반 대화로 보낸다") {
+    test("파일: 설명 없이 보내면 질문/컬렉션 추가를 고르고, 질문하면 파일을 문서로 붙인다 (설명이 /image면 그림에 참고)") {
         runTest {
             val h = Harness({ _, _ -> emit(AgentEvent.Token("화요일입니다")); emit(AgentEvent.Done(AgentType.CHAT, "m", null)) })
             with(h) {
@@ -336,11 +336,16 @@ class TelegramBotTest : FunSpec({
                 offer.keyboard!!.rows.flatten().map { it.text } shouldBe listOf("이 파일에 대해 질문", "'notes' 컬렉션에 추가")
                 send(button(offer.keyboard!!.rows[0][0].callbackData))
                 send(text("배포일은?"))
-                conversation.inputs.single().let {
-                    it shouldContain "/chat 첨부 파일 \"meeting.md\""
-                    it shouldContain "회의록: 다음 주 화요일에 배포"
-                    it shouldContain "배포일은?"
+                // 웹 첨부와 같이 문서로 넘긴다 (V-12): 질문 글에는 문서가 섞이지 않는다
+                conversation.userInputs.single().let {
+                    it.text shouldBe "배포일은?"
+                    it.documents.single().name shouldBe "meeting.md"
+                    it.documents.single().text shouldContain "회의록: 다음 주 화요일에 배포"
                 }
+
+                // 설명에 /image를 붙여 올리면 문서를 참고해 그린다
+                send(TgUpdate(5, message = TgMessage(7, TgChat(ME, "private"), TgUser(ME), document = TgDocument("f1", "meeting.md", 100), caption = "/image 이 회의 분위기로")))
+                conversation.userInputs.last().let { it.text shouldBe "/image 이 회의 분위기로"; it.documents.single().name shouldBe "meeting.md" }
 
                 send(doc)
                 send(button(api.messages.last().keyboard!!.rows[1][0].callbackData))

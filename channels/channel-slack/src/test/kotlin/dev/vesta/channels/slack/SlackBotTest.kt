@@ -203,7 +203,7 @@ class SlackBotTest : FunSpec({
                 interactive(action(offer.buttons()[0]["value"]!!.jsonPrimitive.content))
                 offer.blocks!!.size shouldBe 0
                 event(message("배포일은?"))
-                conversation.inputs.single() shouldContain "회의록: 다음 주 화요일에 배포"
+                conversation.userInputs.single().documents.single().text shouldContain "회의록: 다음 주 화요일에 배포"
 
                 // 설명을 붙여 올리면 바로 질문
                 event(message("요약해 줘", extra = file))

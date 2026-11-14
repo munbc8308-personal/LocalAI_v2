@@ -263,7 +263,7 @@ class DiscordBotTest : FunSpec({
                 send("INTERACTION_CREATE", button(offer.rows.flatten()[0].customId))
                 offer.rows.shouldBeEmpty()
                 send("MESSAGE_CREATE", message("배포일은?"))
-                conversation.inputs.single() shouldContain "회의록: 다음 주 화요일에 배포"
+                conversation.userInputs.single().documents.single().text shouldContain "회의록: 다음 주 화요일에 배포"
 
                 send("MESSAGE_CREATE", message("", attachment = attachment))
                 send("INTERACTION_CREATE", button(api.messages.last().rows.flatten()[1].customId))

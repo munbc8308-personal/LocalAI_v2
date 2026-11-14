@@ -13,6 +13,7 @@ import dev.vesta.core.config.MessengerConfig
 import dev.vesta.core.conversation.ConversationService
 import dev.vesta.core.knowledge.Evidence
 import dev.vesta.core.media.AudioFormat
+import dev.vesta.core.agent.DocumentInput
 import dev.vesta.core.media.ImageInput
 import dev.vesta.core.media.MediaException
 import dev.vesta.core.media.SpeechToText
@@ -187,8 +188,8 @@ class ChannelBot(
         val attachment = state.attachment
         state.attachment = null
         val question = routed(text)
-        val input = if (attachment != null) withFile(chat, attachment, question) ?: return else question
-        startTurn(binding, state, chat, UserInput(input), scope)
+        val input = if (attachment != null) withFile(chat, attachment, question) ?: return else UserInput(question)
+        startTurn(binding, state, chat, input, scope)
     }
 
     /**
@@ -630,8 +631,8 @@ class ChannelBot(
         val attachment = Attachment(name, path)
         if (!caption.isNullOrEmpty()) {
             if (state.job?.isActive == true) return send(chat, "앞 질문에 답하는 중입니다. 멈추려면 ${surface.commandPrefix}cancel")
-            val input = withFile(chat, attachment, caption) ?: return
-            return startTurn(binding, state, chat, UserInput(input), scope)
+            val input = withFile(chat, attachment, routed(caption)) ?: return
+            return startTurn(binding, state, chat, input, scope)
         }
         val collections = files.collections(binding.user).take(MAX_COLLECTION_BUTTONS)
         val key = UUID.randomUUID().toString().take(8)
@@ -666,17 +667,24 @@ class ChannelBot(
         }
     }
 
-    /** 파일 본문을 붙인 질문. 일반 대화로 보낸다 (파일 내용이 웹 검색어로 나가지 않게) */
-    private suspend fun withFile(chat: String, attachment: Attachment, question: String): String? {
+    /**
+     * 파일을 붙인 질문 (V-12): 웹 첨부와 같이 문서로 넘긴다. `/image`·`/video`도 문서를 참고하고,
+     * 문서 글은 이번 질문에만 쓰이며(기록에는 이름만) 문서를 붙인 질문의 인터넷 도구는 승인을 받는다
+     */
+    private suspend fun withFile(chat: String, attachment: Attachment, question: String): UserInput? {
         val content = try {
-            files.readText(attachment.path, FILE_CHARS)
+            files.readText(attachment.path, DocumentInput.MAX_TOTAL_CHARS)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             send(chat, "파일을 읽지 못했습니다: ${e.message}")
             return null
         }
-        return "/chat 첨부 파일 \"${attachment.name}\"의 내용입니다.\n\n<<<\n$content\n>>>\n\n$question"
+        if (content.isBlank()) {
+            send(chat, "파일에서 글을 찾지 못했습니다 (스캔한 PDF는 아직 읽지 못합니다).")
+            return null
+        }
+        return UserInput(question, documents = listOf(DocumentInput(attachment.name, content)))
     }
 
     private suspend fun send(chat: String, text: String) {
@@ -692,7 +700,6 @@ class ChannelBot(
         private const val PUBLIC_PREFIX = "public:"
         private const val HOUR_MILLIS = 3_600_000L
         const val MAX_PAIRING_FAILURES = 5
-        const val FILE_CHARS = 30_000
         private const val MAX_COLLECTION_BUTTONS = 6
         private const val MAX_OFFERS = 10
 
