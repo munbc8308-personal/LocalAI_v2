@@ -5,6 +5,7 @@
 - 고른 스킬만 app-common/src/main/resources/skills/<이름>/SKILL.md 로 복사한다
 - 머리말은 name·description에 Vesta의 agent·tools를 붙여 다시 쓴다 (disable-model-invocation 등 Cursor 전용 키는 버린다)
 - 본문의 [글](../이름/SKILL.md) 링크는 글(/이름) 으로 바꾼다 (Vesta에는 다른 스킬 파일을 여는 길이 없다)
+- Vesta가 직접 쓴 기본 스킬("(Vesta 기본)")은 지우지 않는다.
 - index.txt(이름 목록)·PSTACK-LICENSE·PSTACK-SOURCE(원본 커밋)를 남긴다. 다시 돌려도 같은 결과
 """
 import pathlib
@@ -55,10 +56,19 @@ def main() -> None:
     if not (src / "skills").is_dir():
         sys.exit(f"pstack/skills가 없다: {checkout}")
     dest = pathlib.Path(__file__).resolve().parent.parent / "app-common/src/main/resources/skills"
+    # Vesta가 직접 쓴 기본 스킬(설명 끝 "(Vesta 기본)")은 남긴다
+    own = {}
     if dest.exists():
+        for f in dest.glob("*/SKILL.md"):
+            if "(Vesta 기본)" in f.read_text(encoding="utf-8"):
+                own[f.parent.name] = f.read_text(encoding="utf-8")
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
     names = []
+    for name, text in own.items():
+        (dest / name).mkdir()
+        (dest / name / "SKILL.md").write_text(text, encoding="utf-8")
+        names.append(name)
     for agent, group in (("task", TASK), ("chat", CHAT)):
         for name in group:
             text = (src / "skills" / name / "SKILL.md").read_text(encoding="utf-8")

@@ -12,9 +12,9 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 
 class BuiltinSkillsTest : FunSpec({
-    test("pstack 31개가 모두 읽히고, 코드 원칙은 작업 에이전트·글 다듬기는 대화 에이전트 (M33 K-16·K-18)") {
+    test("기본 스킬 38개(pstack 31 + Vesta 7)가 모두 읽히고, 코드 원칙은 작업 에이전트·글 다듬기는 대화 에이전트 (M33 K-16·K-18)") {
         val skills = BuiltinSkills.load()
-        skills.size shouldBe 31
+        skills.size shouldBe 38
         skills.map { it.source }.toSet() shouldBe setOf(SkillSource.BUILTIN)
         val byName = skills.associateBy { it.name }
         byName.getValue("tdd").agent shouldBe AgentType.TASK
@@ -26,6 +26,18 @@ class BuiltinSkillsTest : FunSpec({
         // 50자 원본 이름도 그대로 부를 수 있다
         SkillCall.parse("/principle-separate-before-serializing-shared-state 이 코드 봐 줘")?.name shouldBe "principle-separate-before-serializing-shared-state"
         byName["principle-separate-before-serializing-shared-state"] shouldNotBe null
+    }
+
+    test("Vesta 코드 개발 스킬 7개: 모두 작업 에이전트, 리뷰·보안·커밋·PR은 쓰기 도구 없이") {
+        val byName = BuiltinSkills.load().associateBy { it.name }
+        listOf("review", "debug", "refactor", "patch", "commit", "pr", "security-review").forEach { name ->
+            byName.getValue(name).agent shouldBe AgentType.TASK
+            byName.getValue(name).description shouldContain "(Vesta 기본)"
+            Skill.RESERVED.contains(name) shouldBe false
+        }
+        listOf("review", "security-review", "commit", "pr").forEach { byName.getValue(it).tools.contains("write_file") shouldBe false }
+        listOf("debug", "refactor", "patch").forEach { byName.getValue(it).tools shouldContainAll listOf("apply_patch", "run_shell") }
+        SkillCall.parse("/security-review app-server")?.name shouldBe "security-review"
     }
 
     test("웹에서 만드는 스킬 이름은 지금처럼 32자까지") {

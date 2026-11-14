@@ -1,7 +1,11 @@
 blast-radius
 bro
+commit
 correct
+debug
 in-your-own-words
+patch
+pr
 principle-attack-the-premise
 principle-boundary-discipline
 principle-build-the-lever
@@ -26,6 +30,9 @@ principle-sequence-verifiable-units
 principle-subtract-before-you-add
 principle-test-behavior-not-implementation
 principle-type-system-discipline
+refactor
+review
+security-review
 sharpen
 tdd
 unslop
