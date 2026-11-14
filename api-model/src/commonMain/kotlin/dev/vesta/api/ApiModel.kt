@@ -32,7 +32,13 @@ data class ChatRequestDto(
     val skills: List<ProjectSkillDto> = emptyList(),
     /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,
+    /** 질문에 붙인 문서 (.txt·.md·.pdf, V-12). 서버가 글을 뽑아 이번 질문에만 넘긴다 */
+    val documents: List<AttachedDocumentDto> = emptyList(),
 )
+
+/** 붙인 문서 하나: 파일 이름과 내용(base64) */
+@Serializable
+data class AttachedDocumentDto(val name: String, val data: String)
 
 @Serializable
 data class ProjectSkillDto(val folder: String, val text: String)

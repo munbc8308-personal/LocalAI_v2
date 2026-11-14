@@ -119,8 +119,12 @@ fun StudioView() {
                     onClick {
                         val text = "/$target $task"
                         task = ""
-                        // 새 대화로 보낸다. 진행은 아래 실행 목록·타임라인에서 실시간으로 본다
-                        scope.launch { runCatching { Http.chat(ChatRequestDto(text)).collect { } }.onFailure { error = it.message } }
+                        // 새 대화로 보낸다. 진행은 아래 실행 목록·타임라인·사무실에서 실시간으로 본다.
+                        // 탭을 옮겨도 끊기지 않게 화면 scope가 아니라 AppScope에서 보낸다
+                        AppScope.launch {
+                            runCatching { Http.chat(ChatRequestDto(text)).collect { } }
+                                .onFailure { if (it !is kotlinx.coroutines.CancellationException) error = it.message }
+                        }
                     }
                 }) { Text("맡기기") }
             }

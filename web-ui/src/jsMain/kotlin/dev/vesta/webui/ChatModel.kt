@@ -68,6 +68,7 @@ class ChatController(private val scope: CoroutineScope) {
     var loadError by mutableStateOf<String?>(null)
     /** 다음 질문에 붙일 이미지 (V-04) */
     val pendingImages = mutableStateListOf<PendingImage>()
+    val pendingDocuments = mutableStateListOf<PendingDocument>()
     private var job: Job? = null
 
     /** 지난 대화 찾기 (M30): 검색어가 있으면 목록 대신 맞은 대화 */
@@ -130,6 +131,7 @@ class ChatController(private val scope: CoroutineScope) {
         sessionId = null
         turns.clear()
         pendingImages.clear()
+        pendingDocuments.clear()
         loadError = null
     }
 
@@ -148,14 +150,17 @@ class ChatController(private val scope: CoroutineScope) {
     /** 질문을 보낸다. 보냈으면 그 묶음(음성 대화가 답을 따라 읽는다), 못 보냈으면 null */
     fun send(text: String, spoken: Boolean = false): Turn? {
         val images = pendingImages.map { it.dataUrl }
-        if (busy || (text.isBlank() && images.isEmpty())) return null
-        val turn = Turn(text.trim(), images)
+        val documents = pendingDocuments.map { dev.vesta.api.AttachedDocumentDto(it.name, it.data) }
+        if (busy || (text.isBlank() && images.isEmpty() && documents.isEmpty())) return null
+        // 붙인 문서는 서버가 저장하는 질문처럼 이름만 보여 준다
+        val turn = Turn(listOfNotNull(text.trim().ifEmpty { null }, documents.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "📎 ") { it.name }).joinToString("\n"), images)
         pendingImages.clear()
+        pendingDocuments.clear()
         turns += turn
         busy = true
         job = scope.launch {
             try {
-                Http.chat(ChatRequestDto(turn.question, sessionId, images = images.map { it.substringAfter("base64,") }, spoken = spoken)).collect { apply(turn, it) }
+                Http.chat(ChatRequestDto(text.trim(), sessionId, images = images.map { it.substringAfter("base64,") }, spoken = spoken, documents = documents)).collect { apply(turn, it) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 turn.error = "중지함"
                 throw e

@@ -180,7 +180,12 @@ internal class Office(private val userName: String, private val onCount: (Int) -
         val door = stations.getValue("door")
         val w = Worker(run, agent, name, door.col, door.row)
         w.nth = renumber(agent, name)
-        w.desk = freeDesk()
+        // 사무실을 일 도중에 열면 담당 소식(routed)은 이미 지나갔다: 팀 일은 처음부터 그 팀 방에 앉힌다
+        if (agent == "TEAM" && name != null) {
+            if (name !in themes) addRoom(name, null)
+            w.room = name
+        }
+        w.desk = freeDesk(w.room)
         desks.getOrNull(w.desk)?.let { (c, r) -> w.tx = c; w.ty = r; if (atDesk) { w.x = c; w.y = r } }
         workers[run] = w
         onCount(workers.values.count { !it.member })

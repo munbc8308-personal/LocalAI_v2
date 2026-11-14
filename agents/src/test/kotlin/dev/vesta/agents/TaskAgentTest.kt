@@ -494,6 +494,38 @@ class TaskAgentTest : FunSpec({
         events.last().javaClass.simpleName shouldBe "Done"
     }
 
+    test("도구 안의 시간 초과(withTimeout)는 그 도구의 오류로 돌려주고 대화는 이어 간다 (팀 실패, 2026-11-11)") {
+        val slow = object : Tool {
+            override val spec = ToolSpec("calendar_list", "calendar_list", buildJsonObject { })
+            override val risk = RiskLevel.READ
+            override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult =
+                kotlinx.coroutines.withTimeout(10) { kotlinx.coroutines.delay(1_000); ToolResult("늦음") }
+        }
+        val model = ScriptedModel(turns(listOf(ToolCall("c1", "calendar_list", "{}"))))
+        val events = TaskAgent(model, models, ToolRegistry(listOf(slow)), AutoBroker(ApprovalDecision.Approve)).handle(request).toList()
+        events.filterIsInstance<AgentEvent.ToolFinished>().single().ok shouldBe false
+        model.requests[1].messages.last().content shouldContain "오류"
+        events.last().javaClass.simpleName shouldBe "Done"
+    }
+
+    test("받는 쪽(화면 연결)이 끊겨 던진 예외는 도구 실패로 바꾸지 않고 그대로 올라간다") {
+        val member = object : dev.vesta.core.tools.DelegatingTool {
+            override val spec = ToolSpec("delegate", "delegate", buildJsonObject { })
+            override val risk = RiskLevel.READ
+            override suspend fun execute(arguments: JsonObject, context: ToolContext) = ToolResult("x")
+            override suspend fun delegate(arguments: JsonObject, request: AgentRequest, emit: suspend (AgentEvent) -> Unit): ToolResult {
+                emit(AgentEvent.Status("[멤버] 조사 중"))
+                return ToolResult("끝")
+            }
+        }
+        val model = ScriptedModel(turns(listOf(ToolCall("c1", "delegate", "{}"))))
+        val error = runCatching {
+            TaskAgent(model, models, ToolRegistry(listOf(member)), AutoBroker(ApprovalDecision.Approve)).handle(request)
+                .collect { if (it is AgentEvent.Status && it.text.startsWith("[멤버]")) throw java.io.IOException("Broken pipe") }
+        }.exceptionOrNull()
+        (error is java.io.IOException) shouldBe true
+    }
+
     test("최대 단계에서 멈춘다") {
         val call = listOf(ToolCall("c", "read_file", "{}"))
         val model = ScriptedModel(List(5) { listOf(ChatChunk.ToolCalls(call), ChatChunk.Done("tool_calls", null)) })

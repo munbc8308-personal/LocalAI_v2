@@ -130,13 +130,17 @@ class DefaultConversationService(
             return@flow
         }
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }
-        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else "" }))
+        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else if (input.documents.isNotEmpty()) "문서 질문" else "" }))
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
 
         val saved = input.images.mapNotNull { image ->
             media?.let { runCatching { it.save(user.userId, MediaKind.IMAGE, image.mime, image.bytes) }.onFailure { e -> log.warn(e) { "이미지 저장 실패" } }.getOrNull() }
         }
-        val current = messages.append(session.id, NewMessage(ChatRole.USER, input.text, attachments = saved.map { it.id }))
+        // 붙인 문서(V-12)는 글을 저장하지 않고 이름만 남긴다 (대화 목록·기록이 커지지 않게)
+        val documentNote = input.documents.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "📎 ") { it.name }
+        val current = messages.append(session.id, NewMessage(ChatRole.USER, listOfNotNull(input.text.ifBlank { null }, documentNote).joinToString("\n"), attachments = saved.map { it.id }))
+        // 붙인 것이 없는 평범한 글 질문 (명령·이어서·팀 자동 배정은 이때만)
+        val plain = input.images.isEmpty() && input.documents.isEmpty()
         // 모델 없이 답한 턴(기억·스킬 명령, 목록, 정책 안내)은 대화 맥락에서 뺀다: 명령과 안내 글이 다음 질문을 흐리지 않게 (M28)
         val all = messages.list(session.id)
         val commands = all.withIndex().filter { (_, m) -> m.role == ChatRole.ASSISTANT && m.model == POLICY_MODEL }
@@ -167,24 +171,24 @@ class DefaultConversationService(
                 .let { emit(AgentEvent.Token(text)); emit(AgentEvent.Done(AgentType.CHAT, POLICY_MODEL, null)); emit(AgentEvent.Saved(it.id)) }
         }
         // 기억 명령 (M27): 모델 없이 바로 저장·지우기·목록
-        if (input.images.isEmpty()) runCatching { memoryCommand(user, input.text) }.onFailure { log.warn(it) { "기억 명령 실패" } }.getOrNull()?.let {
+        if (plain) runCatching { memoryCommand(user, input.text) }.onFailure { log.warn(it) { "기억 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
         }
         // 스킬 초안 (M28 SK-11·SK-12): 모델 없이 승인·버리기, `/skillify`는 이 대화의 마지막 도구 실행으로 초안을
-        if (input.images.isEmpty()) runCatching { skillCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "스킬 명령 실패" } }.getOrNull()?.let {
+        if (plain) runCatching { skillCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "스킬 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
         }
         // 지난 대화 찾기 (M30 H-04): 모델 없이 맞은 대화 목록
-        if (input.images.isEmpty()) runCatching { pastCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()?.let {
+        if (plain) runCatching { pastCommand(user, session.id, input.text) }.onFailure { log.warn(it) { "지난 대화 찾기 실패" } }.getOrNull()?.let {
             // 지난 대화는 로컬 자료다: 로컬 자료를 막은 메신저가 보내지 않게 알린다 (보안 검토)
             emit(AgentEvent.Sources(listOf(PAST_EVIDENCE)))
             notice(it)
             return@flow
         }
         // 예약 (M29 SC-01·SC-04): 모델 없이 만들기·목록·멈춤·지우기. 예약 실행 안에서는 받지 않는다
-        if (input.images.isEmpty() && !input.unattended) runCatching { scheduleCommand(user, channel, input.text) }.onFailure { log.warn(it) { "예약 명령 실패" } }.getOrNull()?.let {
+        if (plain && !input.unattended) runCatching { scheduleCommand(user, channel, input.text) }.onFailure { log.warn(it) { "예약 명령 실패" } }.getOrNull()?.let {
             notice(it)
             return@flow
         }
@@ -197,13 +201,13 @@ class DefaultConversationService(
         // 스킬 (`/이름 할 일`, SK-02): 지침의 `$ARGUMENTS`를 할 일로 바꿔 스킬이 정한 에이전트에게. 없는 이름이면 평소처럼 라우팅
         val skill = if (call == null) dev.vesta.core.skill.SkillCall.parse(input.text)?.let { c -> skills(user, workspace).firstOrNull { it.name == c.name }?.let { it to c } } else null
         // "이어서 해 줘" (가계부 앱 시험에서): 같은 대화의 직전 담당에게 그대로. 라우터에 맡기면 도구 없는 에이전트로 가서 한 척만 했다
-        val continued = if (call == null && skill == null && input.images.isEmpty() && CONTINUE.matches(input.text.trim()))
+        val continued = if (call == null && skill == null && plain && CONTINUE.matches(input.text.trim()))
             // 서버를 다시 띄우면 직전 판정(메모리)이 없으니, 저장된 마지막 답의 에이전트로
             (lastDecision[session.id] ?: all.lastOrNull { it.role == ChatRole.ASSISTANT && it.model != POLICY_MODEL && it.agent != null }?.agent
                 ?.let { RoutingDecision(it, 1.0, RoutingStage.EXPLICIT, question = input.text) })?.takeIf { it.agent != AgentType.CHAT && it.agent in allowed } else null
         // 팀 자동 배정 (M41): 명령·스킬·이어서·이미지·예약 실행이 아니고 작업 에이전트를 쓸 수 있을 때. 확실하면 맡기고 애매하면 추천만
         val text = input.text.trim()
-        val picked = if (call == null && skill == null && continued == null && input.images.isEmpty() && !input.unattended && AgentType.TASK in allowed &&
+        val picked = if (call == null && skill == null && continued == null && plain && !input.unattended && AgentType.TASK in allowed &&
             !text.startsWith("/") && !text.startsWith("@") && !text.startsWith("!"))
             runCatching { teamRoute(user, input.text) }.onFailure { log.warn(it) { "팀 자동 배정 실패, 평소대로" } }.getOrNull() else null
         val autoTeam = picked?.takeIf { it.auto }?.let { p -> teams(user, p.name)?.let { p to it } }
@@ -227,6 +231,7 @@ class DefaultConversationService(
                 if (e != null && e.agent in REFERENCE_AGENTS) RoutingDecision(e.agent, 1.0, RoutingStage.EXPLICIT, question = e.question.ifBlank { DEFAULT_REFERENCE_QUESTION.getValue(e.agent) })
                 else RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = e?.question?.ifBlank { null } ?: input.text.ifBlank { DEFAULT_IMAGE_QUESTION })
             }
+            else if (input.documents.isNotEmpty() && text.isBlank()) RoutingDecision(AgentType.CHAT, 1.0, RoutingStage.RULE, question = DEFAULT_DOCUMENT_QUESTION)
             else router?.route(input.text, history.dropLast(1), available, lastDecision[session.id])
             ?: ExplicitRoute.parse(input.text)?.let { RoutingDecision(it.agent, 1.0, RoutingStage.EXPLICIT, collections = it.collections, question = it.question) }
             ?: RoutingDecision(AgentType.CHAT, 0.0, RoutingStage.DEFAULT, question = input.text)
@@ -285,9 +290,12 @@ class DefaultConversationService(
         if (pastFound) emit(AgentEvent.Sources(listOf(PAST_EVIDENCE)))
         val personaText = listOfNotNull(runCatching { persona(user.userId) }.getOrNull(), memoryPrompt(remembered), past?.second).joinToString("\n").ifBlank { null }
         suspend fun runAgent() =
-            agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { DEFAULT_IMAGE_QUESTION } }), route.collections, route,
+            agent.handle(AgentRequest(user, session, history.dropLast(1) + history.last().copy(content = route.question.ifBlank { input.text.ifBlank { if (input.images.isEmpty() && input.documents.isNotEmpty()) DEFAULT_DOCUMENT_QUESTION else DEFAULT_IMAGE_QUESTION } } +
+                (if (input.documents.isNotEmpty()) dev.vesta.core.agent.DocumentInput.block(input.documents) else "")), route.collections, route,
                 workspace = workspace,
-                spoken = input.spoken, persona = personaText, unattended = input.unattended, tainted = pastFound))
+                spoken = input.spoken, persona = personaText, unattended = input.unattended,
+                // 붙인 문서는 바깥에서 온 글이다: 지난 대화처럼 인터넷 도구에 승인을 받게 한다
+                tainted = pastFound || input.documents.isNotEmpty()))
                 .catch { error ->
                     log.error(error) { "에이전트 실패: session=${session.id.value}" }
                     emit(AgentEvent.Error(error.message ?: error::class.simpleName.orEmpty()))
@@ -345,6 +353,7 @@ class DefaultConversationService(
 
         /** 글 없이 이미지만 보냈을 때 */
         const val DEFAULT_IMAGE_QUESTION = "이 이미지를 설명해 줘."
+        const val DEFAULT_DOCUMENT_QUESTION = "이 문서를 요약해 줘."
         /** 붙인 이미지를 재료로 쓰는 담당 (V-11·G-07) */
         private val REFERENCE_AGENTS = setOf(AgentType.IMAGE, AgentType.VIDEO)
         private val DEFAULT_REFERENCE_QUESTION = mapOf(AgentType.IMAGE to "이 이미지를 기준으로 그려 줘.", AgentType.VIDEO to "이 사진들을 이어서 영상으로 만들어 줘.")

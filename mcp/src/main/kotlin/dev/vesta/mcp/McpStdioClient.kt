@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -120,7 +120,9 @@ class McpStdioClient(
             }
         }
         try {
-            val response = withTimeout(requestTimeout) { deferred.await() }
+            // 시간 초과는 도구 오류로 (TimeoutCancellationException은 취소로 보여 부른 쪽 대화 전체가 끝나 버린다)
+            val response = withTimeoutOrNull(requestTimeout) { deferred.await() }
+                ?: throw McpException("$name $method: ${requestTimeout.inWholeSeconds}초 안에 답이 없음")
             response["error"]?.jsonObject?.let { error ->
                 throw McpException("$name $method: ${error["message"]?.jsonPrimitive?.contentOrNull ?: error}")
             }

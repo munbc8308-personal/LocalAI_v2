@@ -328,6 +328,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                     is ImagesResult.Ok -> decoded.images
                     is ImagesResult.Invalid -> return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", decoded.message) }.toString())
                 }
+                // PDF 글 뽑기는 막는 일이라 IO 스레드에서
+                val documents = when (val decoded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { decodeDocuments(request.documents) }) {
+                    is DocumentsResult.Ok -> decoded.documents
+                    is DocumentsResult.Invalid -> return@post call.respondJson(HttpStatusCode.BadRequest, buildJsonObject { put("error", decoded.message) }.toString())
+                }
                 val public = call.attributes.contains(PUBLIC_REQUEST)
                 call.sse { emit ->
                     val channel = if (request.channel == "CLI") ChannelType.CLI else ChannelType.WEB
@@ -339,7 +344,7 @@ fun Application.vestaApi(deps: ServerDeps) {
                     }
                     // 대화 서비스가 예외로 끝나면(DB 잠김 등) 조용히 끊지 않고 오류를 알린다 (팀 검증, M36)
                     try {
-                        deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken))
+                        deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken, documents = documents))
                             .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
@@ -1198,6 +1203,38 @@ internal fun decodeImages(encoded: List<String>, limits: MediaConfig): ImagesRes
         ImageInput.of(bytes) ?: return ImagesResult.Invalid("PNG·JPEG·WebP·GIF 이미지만 붙일 수 있습니다")
     }
     return ImagesResult.Ok(images)
+}
+
+internal sealed interface DocumentsResult {
+    data class Ok(val documents: List<dev.vesta.core.agent.DocumentInput>) : DocumentsResult
+    data class Invalid(val message: String) : DocumentsResult
+}
+
+/** 붙인 문서는 이만큼까지 (V-12) */
+internal const val MAX_DOCUMENTS = 3
+internal const val MAX_DOCUMENT_MEGABYTES = 10
+
+/**
+ * 붙인 문서(V-12)의 글을 뽑는다: .txt·.md·.pdf (문서 컬렉션과 같은 파서). 이름은 파일 이름만 남긴다.
+ * 글이 없는 PDF(스캔)는 알려 준다. 글은 [dev.vesta.core.agent.DocumentInput.MAX_TOTAL_CHARS]까지만 모델에 간다
+ */
+internal fun decodeDocuments(encoded: List<dev.vesta.api.AttachedDocumentDto>): DocumentsResult {
+    if (encoded.size > MAX_DOCUMENTS) return DocumentsResult.Invalid("문서는 ${MAX_DOCUMENTS}개까지 붙일 수 있습니다")
+    val documents = encoded.map { doc ->
+        val name = doc.name.substringAfterLast('/').substringAfterLast('\\').filter { it >= ' ' }.take(100).ifBlank { "문서" }
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext !in dev.vesta.knowledge.DocumentParser.supportedExtensions) return DocumentsResult.Invalid("문서는 .txt·.md·.pdf만 붙일 수 있습니다: $name")
+        // base64는 원본보다 4/3 크다: 디코드 전에 길이로 먼저 거른다
+        if (doc.data.length > MAX_DOCUMENT_MEGABYTES * 1024L * 1024 * 4 / 3 + 4) return DocumentsResult.Invalid("문서가 너무 큽니다 (최대 ${MAX_DOCUMENT_MEGABYTES}MB): $name")
+        val bytes = runCatching { java.util.Base64.getDecoder().decode(doc.data.substringAfter("base64,")) }.getOrNull()
+            ?: return DocumentsResult.Invalid("문서를 읽지 못했습니다 (base64): $name")
+        val parsed = runCatching { dev.vesta.knowledge.DocumentParser.parse(java.nio.file.Path.of(name), bytes) }.getOrNull()
+            ?: return DocumentsResult.Invalid("문서를 읽지 못했습니다: $name")
+        val text = parsed.blocks.joinToString("\n\n") { it.text }.trim()
+        if (text.isEmpty()) return DocumentsResult.Invalid("문서에서 글을 찾지 못했습니다 (스캔한 PDF는 아직 읽지 못합니다): $name")
+        dev.vesta.core.agent.DocumentInput(name, text)
+    }
+    return DocumentsResult.Ok(documents)
 }
 
 /** 본문을 [megabytes]까지만 받는다. 넘으면 413을 보내고 null */

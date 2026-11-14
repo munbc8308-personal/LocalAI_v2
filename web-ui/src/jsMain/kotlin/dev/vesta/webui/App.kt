@@ -252,7 +252,7 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
     fun submit() {
         val area = document.getElementById("composer") as? HTMLTextAreaElement ?: return
         val text = area.value
-        if (chat.busy || (text.isBlank() && chat.pendingImages.isEmpty())) return
+        if (chat.busy || (text.isBlank() && chat.pendingImages.isEmpty() && chat.pendingDocuments.isEmpty())) return
         chat.send(text)
         setDraft("")
         area.value = ""
@@ -264,7 +264,13 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
         val picked = (0 until count).map { files.item(it).unsafeCast<org.w3c.files.File>() }
         scope.launch {
             for (file in picked) {
-                if (!file.type.startsWith("image/")) continue
+                // 문서(.txt·.md·.pdf, V-12)도 같은 단추·끌어 놓기로 붙인다
+                if (Documents.supports(file.name)) {
+                    if (chat.pendingDocuments.size >= MAX_DOCUMENTS) { mediaError = "문서는 ${MAX_DOCUMENTS}개까지 붙일 수 있습니다"; break }
+                    runCatching { Documents.prepare(file) }.onSuccess { chat.pendingDocuments += it; mediaError = null }.onFailure { mediaError = it.message }
+                    continue
+                }
+                if (!file.type.startsWith("image/")) { mediaError = "이미지나 .txt·.md·.pdf 문서만 붙일 수 있습니다"; continue }
                 if (chat.pendingImages.size >= MAX_IMAGES) { mediaError = "이미지는 ${MAX_IMAGES}장까지 붙일 수 있습니다"; break }
                 runCatching { Images.prepare(file) }.onSuccess { chat.pendingImages += it; mediaError = null }.onFailure { mediaError = it.message }
             }
@@ -296,7 +302,13 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
         }
     }
     if (voice.active || voice.error != null) VoiceBar(voice)
-    if (chat.pendingImages.isNotEmpty() || mediaError != null) Div({ classes("attachments") }) {
+    if (chat.pendingImages.isNotEmpty() || chat.pendingDocuments.isNotEmpty() || mediaError != null) Div({ classes("attachments") }) {
+        chat.pendingDocuments.forEach { doc ->
+            Div({ classes("thumb"); style { property("width", "auto"); property("padding", "4px 22px 4px 8px"); property("display", "flex"); property("align-items", "center") } }) {
+                Span({ classes("small") }) { Text("📄 ${doc.name.take(30)}") }
+                Button({ classes("remove"); attr("aria-label", "빼기"); onClick { chat.pendingDocuments.remove(doc) } }) { Text("×") }
+            }
+        }
         chat.pendingImages.forEach { image ->
             Div({ classes("thumb") }) {
                 Img(image.dataUrl, "붙인 이미지")
@@ -316,7 +328,7 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
     }) {
         Input(InputType.File) {
             id("image-input")
-            attr("accept", "image/*")
+            attr("accept", "image/*,.txt,.md,.markdown,.pdf")
             attr("multiple", "")
             style { property("display", "none") }
             onChange { event ->
@@ -327,8 +339,8 @@ private fun Composer(chat: ChatController, draft: String, setDraft: (String) -> 
         }
         Button({
             classes("icon")
-            attr("title", "이미지 붙이기")
-            attr("aria-label", "이미지 붙이기")
+            attr("title", "이미지·문서 붙이기")
+            attr("aria-label", "이미지·문서 붙이기")
             onClick { (document.getElementById("image-input") as? HTMLElement)?.click() }
         }) { Text("📎") }
         Button({
@@ -1091,6 +1103,7 @@ private val citation = Regex("\\[(\\d+(?:\\s*,\\s*\\d+)*)\\]")
 
 /** 서버 설정(media.maxImages) 기본값과 같게 */
 private const val MAX_IMAGES = 4
+private const val MAX_DOCUMENTS = 3
 
 private fun citedNumbers(answer: String): Set<Int> =
     citation.findAll(answer).flatMap { m -> m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() } }.toSet()

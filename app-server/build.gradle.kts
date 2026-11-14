@@ -18,6 +18,7 @@ dependencies {
     testImplementation(libs.ktor.client.mock)
     testImplementation(libs.ktor.client.websockets)
     testImplementation(testFixtures(project(":channel-core")))
+    testImplementation(libs.pdfbox)
 }
 
 // channel-discord-voice가 쓰는 JDAVE는 Java 25 클래스다: 실행 JVM(27)이 읽으므로 의존성 버전 확인을 끈다

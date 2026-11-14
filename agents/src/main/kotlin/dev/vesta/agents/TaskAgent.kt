@@ -431,11 +431,18 @@ class TaskAgent(
         }
         emit(AgentEvent.ToolStarted(call.id, tool.spec.name, tool.risk, tool.describe(arguments).title))
         val start = TimeSource.Monotonic.markNow()
+        // 받는 쪽(화면 연결 등)이 던진 예외는 도구 실패가 아니다: 그대로 올려 보낸다 (잡아서 다시 emit하면 Flow 규칙 위반)
+        var downstream: Throwable? = null
         val result = runCatching {
             // 나눠 맡기기(팀, M22): 맡은 에이전트의 단계·승인 요청을 이 흐름으로 그대로 흘린다
-            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted || recovered)) { emit(it) } else tool.execute(arguments, context)
+            if (tool is dev.vesta.core.tools.DelegatingTool) tool.delegate(arguments, request.copy(tainted = taint.tainted || recovered)) { event ->
+                try { emit(event) } catch (e: Throwable) { downstream = e; throw e }
+            } else tool.execute(arguments, context)
         }.getOrElse {
-            if (it is kotlinx.coroutines.CancellationException) throw it
+            if (it === downstream) throw it
+            // 도구 안의 시간 초과(withTimeout)는 도구 오류로. 이 대화가 취소된 것이면 그대로 끝낸다
+            if (it is kotlinx.coroutines.TimeoutCancellationException) { if (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == false) throw it }
+            else if (it is kotlinx.coroutines.CancellationException) throw it
             log.warn(it) { "도구 실패: ${tool.spec.name}" }
             ToolResult("오류: ${it.message ?: it::class.simpleName}", isError = true)
         }

@@ -130,12 +130,28 @@ object Images {
         }
     }
 
-    private suspend fun dataUrl(file: Blob): String {
+    internal suspend fun dataUrl(file: Blob): String {
         val reader = FileReader()
         val result = CompletableDeferred<String>()
         reader.onload = { result.complete(reader.result.unsafeCast<String>()) }
         reader.onerror = { result.completeExceptionally(IllegalArgumentException("파일을 읽지 못했습니다")) }
         reader.readAsDataURL(file)
         return result.await()
+    }
+}
+
+/** 질문에 붙일 문서 (V-12): .txt·.md·.pdf, 10MB까지. 글은 서버가 뽑는다 */
+class PendingDocument(val name: String, val data: String)
+
+object Documents {
+    val EXTENSIONS = setOf("txt", "md", "markdown", "pdf")
+    private const val MAX_BYTES = 10 * 1024 * 1024
+
+    fun supports(name: String) = name.substringAfterLast('.', "").lowercase() in EXTENSIONS
+
+    suspend fun prepare(file: org.w3c.files.File): PendingDocument {
+        if (!supports(file.name)) throw IllegalArgumentException("문서는 .txt·.md·.pdf만 붙일 수 있습니다")
+        if (file.size.toDouble() > MAX_BYTES) throw IllegalArgumentException("문서가 너무 큽니다 (최대 10MB): ${file.name}")
+        return PendingDocument(file.name, Images.dataUrl(file).substringAfter("base64,"))
     }
 }

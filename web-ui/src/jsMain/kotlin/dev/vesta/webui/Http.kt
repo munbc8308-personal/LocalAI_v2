@@ -22,6 +22,12 @@ class HttpError(val status: Int, override val message: String) : Exception(messa
  * 같은 출처의 Vesta API 호출 (PROJECT.md 6.3). 인증은 HttpOnly 세션 쿠키가 하고,
  * GET 외 요청에는 로그인 때 받은 CSRF 값을 `X-Vesta-CSRF` 헤더로 붙인다.
  */
+/**
+ * 화면(탭)보다 오래 사는 일. 탭을 옮기면 그 화면의 scope가 취소되고, 대화 요청이 끊기면 서버가 생성을 멈춘다:
+ * 스튜디오에서 맡긴 일이 사무실 탭으로 옮기는 순간 실패하던 원인 (2026-11-12)
+ */
+internal val AppScope = kotlinx.coroutines.MainScope()
+
 object Http {
     var csrf: String? = null
 
