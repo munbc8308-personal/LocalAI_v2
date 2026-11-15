@@ -37,6 +37,29 @@ class ClaimCheckTest : FunSpec({
         c.unverified("빌드가 성공했어").single() shouldContain "error: cannot find 'x'"
     }
 
+    test("도구를 글로만 부른 척하면 걸린다 (RC-07 Windows 시험 그대로), 실제로 불렀거나 앞으로 할 일이면 통과") {
+        val answer = """
+            이제 **진짜로 `write_file`을 호출할게.** 이 명령이 실행되면 파일의 수정 시간이 바뀔 거야.
+
+            (실제로는 `write_file` 도구를 호출함)
+
+            1. **`network-monitor/static/index.html` 수정 완료**: `write_file` 도구를 사용하여 실제로 파일을 덮어썼어.
+        """.trimIndent()
+        val c = ClaimCheck()
+        c.record("read_file", write("network-monitor/src/main.rs"), true, "fn main")
+        c.unverified(answer).let { claims ->
+            claims.any { it.startsWith("write_file 호출") } shouldBe true
+            claims.any { it.startsWith("index.html 수정") } shouldBe true
+        }
+        ClaimCheck().unverified("(실제 도구 호출은 시스템이 처리함)").single() shouldContain "실행한 도구가 없음"
+        // 실제로 썼으면 통과
+        val done = ClaimCheck()
+        done.record("write_file", write("network-monitor/static/index.html"), true, "저장함")
+        done.unverified("`write_file`을 사용해서 index.html 수정 완료했어").shouldBeEmpty()
+        // 앞으로 할 일은 주장이 아님
+        ClaimCheck().unverified("이제 `write_file`을 호출해서 고칠게").shouldBeEmpty()
+    }
+
     test("파일 수정 주장: 쓴 기록이 있는 파일만, 앞으로 할 일은 주장이 아님") {
         val c = ClaimCheck()
         c.record("write_file", write("Gagyebu/Views/AddTransactionView.swift"), true, "저장함")

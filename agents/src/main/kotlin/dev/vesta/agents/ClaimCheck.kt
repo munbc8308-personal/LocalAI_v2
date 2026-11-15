@@ -41,12 +41,23 @@ internal class ClaimCheck {
         }
         // "X.swift를 수정했다"류: 그 파일 이름으로 쓰기·고치기·옮기기가 성공한 기록이 있어야
         val written = steps.filter { it.tool in WRITES && it.ok }.mapNotNull { it.path?.substringAfterLast('/') }.toSet()
-        for (sentence in answer.split(Regex("\\n|[.!?](\\s|$)")).filter { EDIT_VERB.containsMatchIn(it) && !FUTURE.containsMatchIn(it) }) {
+        for (sentence in answer.split(Regex("\\n|[.!?](\\s|$)")).filter { EDIT_VERB.containsMatchIn(it) && !future(it) }) {
             FILE.findAll(sentence).map { it.value.substringAfterLast('/') }.distinct()
                 .filter { it !in written }
                 .forEach { add("$it 수정 — 이번 작업에서 이 파일을 쓴 기록이 없음") }
         }
+        // 도구를 글로만 부른 척 (RC-07 Windows 시험: "(실제로는 `write_file` 도구를 호출함)", "도구 호출은 시스템이 처리함")
+        val ran = steps.filter { it.ok }.map { it.tool }.toSet()
+        for (sentence in answer.split(Regex("\\n|[.!?](\\s|$)")).filter { !future(it) }) {
+            if (TOOL_VERB.containsMatchIn(sentence)) TOOL_NAME.findAll(sentence).map { it.value }.distinct().filter { it !in ran }
+                .forEach { add("$it 호출 — 글로만 썼고 이번 작업에서 이 도구를 실행한 기록이 없음") }
+            if (FAKE_CALL.containsMatchIn(sentence) && steps.isEmpty()) add("도구 호출 — 글로만 썼고 이번 작업에서 실행한 도구가 없음")
+        }
     }.distinct()
+
+    /** 앞으로 할 일인 문장 ("할게", "고칠게"처럼 ㄹ받침 + 게, "하겠", "예정"…) */
+    private fun future(sentence: String) = FUTURE.containsMatchIn(sentence) ||
+        Regex("([가-힣])게").findAll(sentence).any { (it.groupValues[1][0].code - 0xAC00) % 28 == 8 }
 
     /** 빌드·테스트가 이번 실행에서 성공했고 그 뒤 파일을 고치지 않았는지 (계획 항목 완료 확인, M32 J-05). 아니면 그 이유 */
     fun verified(check: dev.vesta.core.plan.PlanCheck): String? {
@@ -84,7 +95,10 @@ internal class ClaimCheck {
         private val TEST_COMMAND = Regex("(?<![A-Za-z])(test|tests|pytest|unittest|vitest|jest)(?![A-Za-z])")
         private val BUILD_COMMAND = Regex("\\b(build|xcodebuild|gradlew?|make|cargo|tsc|swift\\s+build|npm\\s+run)\\b")
         private val FAILED = Regex("\\*\\* (BUILD|TEST) FAILED \\*\\*|\\berror:|\\bFAILED\\b|Parsing project spec failed|failures?=\"[1-9]")
-        private val EDIT_VERB = Regex("(수정했|고쳤|작성했|만들었|추가했|생성했|바꿨|변경했|업데이트했|되살렸|복구했)")
+        private val EDIT_VERB = Regex("(수정했|고쳤|작성했|만들었|추가했|생성했|바꿨|변경했|업데이트했|되살렸|복구했|덮어썼|덮어씌웠|저장했|반영했|적용했|건드렸|(수정|작성|생성|변경|저장|반영)\\s?완료)")
+        private val TOOL_NAME = Regex("\\b(write_file|apply_patch|run_shell|make_directory|move_file|read_file|list_files|search_files)\\b")
+        private val TOOL_VERB = Regex("(호출함|호출했|호출하여|호출해서|호출 완료|불렀|사용했|사용하여|사용해서|실행했|실행함|써서|썼)")
+        private val FAKE_CALL = Regex("(실제로는?\\s*`?[a-z_]*`?\\s*도구를?\\s*호출|도구\\s?호출은\\s?시스템|\\(도구\\s?호출|\\[도구\\s?호출)")
         private val FUTURE = Regex("(할게|하겠|할\\s?거|하자|할까|예정|하려)")
         private val FILE = Regex("[\\w./-]+\\.(swift|kt|kts|java|py|js|ts|tsx|jsx|ya?ml|json|md|plist|toml|gradle|sh|html|css|go|rs)\\b")
     }

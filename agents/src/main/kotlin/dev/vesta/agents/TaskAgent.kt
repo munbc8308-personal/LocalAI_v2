@@ -232,7 +232,8 @@ class TaskAgent(
                     emit(AgentEvent.Token("\n\n"))
                     messages += ChatMessage(ChatRole.ASSISTANT, text.toString())
                     messages += ChatMessage(ChatRole.USER, "[시스템 확인] 방금 답에 이번 작업의 실행 기록으로 확인되지 않은 주장이 있다:\n" +
-                        unverified.joinToString("\n") { "- $it" } + "\n도구로 실제로 실행해 확인하라(실패하면 고친다). 확인할 수 없으면 답에서 그 주장을 빼고 사실대로 다시 보고하라.")
+                        unverified.joinToString("\n") { "- $it" } + "\n도구로 실제로 실행해 확인하라(실패하면 고친다). 확인할 수 없으면 답에서 그 주장을 빼고 사실대로 다시 보고하라. " +
+                        "도구는 답에 '호출함'이라고 쓰는 것으로 실행되지 않는다. 도구 호출(tool call)로 내야만 실행된다.")
                     continue
                 }
                 if (plan?.remaining?.isNotEmpty() == true && !calledAny && !idleNudged && step < maxSteps) {
