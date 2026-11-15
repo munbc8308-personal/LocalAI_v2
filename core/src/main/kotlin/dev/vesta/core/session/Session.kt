@@ -15,6 +15,8 @@ data class Session(
     val systemPrompt: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** 이 대화를 만든 CLI 클라이언트(설치마다 하나, RC-08). 웹·메신저 대화는 null */
+    val client: String? = null,
 )
 
 data class StoredMessage(
@@ -48,6 +50,9 @@ interface SessionRepository {
     suspend fun create(userId: UserId, channel: ChannelType, title: String?): Session
     suspend fun find(userId: UserId, id: SessionId): Session?
     suspend fun listRecent(userId: UserId, limit: Int): List<Session>
+    /** CLI 클라이언트의 대화 (RC-08). [client]가 null이면 어느 CLI 클라이언트에도 속하지 않은 대화(웹·메신저·예전 CLI) */
+    suspend fun create(userId: UserId, channel: ChannelType, title: String?, client: String?): Session = create(userId, channel, title)
+    suspend fun listRecent(userId: UserId, limit: Int, client: String?): List<Session> = listRecent(userId, limit * 4).filter { it.client == client }.take(limit)
     suspend fun updateTitle(userId: UserId, id: SessionId, title: String)
     /** 세션과 메시지·라우팅 기록을 지운다 (평가용으로 만든 대화 정리, M16). 지웠으면 true */
     suspend fun delete(userId: UserId, id: SessionId): Boolean = false

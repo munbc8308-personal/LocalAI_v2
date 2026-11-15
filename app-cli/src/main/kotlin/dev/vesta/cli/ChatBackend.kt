@@ -72,12 +72,13 @@ class EmbeddedBackend(private val app: AppContainer) : ChatBackend {
         "모델 ${g.name}${g.reasoningEffort?.let { " (생각 $it)" }.orEmpty()} · 임베디드"
     } ?: "임베디드"
     override val home: Path = app.paths.home
+    private val client = ClientId.get()
     override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?) =
-        app.conversation.send(app.owner, ChannelType.CLI, sessionId, UserInput(text, workspace = workspace))
+        app.conversation.send(app.owner, ChannelType.CLI, sessionId, UserInput(text, workspace = workspace, client = client))
     override suspend fun resolveApproval(requestId: String, decision: ApprovalDecision) {
         app.conversation.resolveApproval(app.owner, requestId, decision)
     }
-    override suspend fun recent(limit: Int) = app.sessions.listRecent(app.owner.userId, limit)
+    override suspend fun recent(limit: Int) = app.sessions.listRecent(app.owner.userId, limit, client)
     override suspend fun find(id: SessionId) = app.sessions.find(app.owner.userId, id)
     override suspend fun messages(id: SessionId) = app.messages.list(id)
     override suspend fun media(id: String) = app.mediaStore.load(app.owner.userId, id)?.second
@@ -111,6 +112,8 @@ class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, o
     override val runsToolsHere: Boolean get() = auth is RemoteAuth.Login
     /** 다른 PC의 작업 폴더에서 도구를 실행하는 곳 (RC-07) */
     private var client: ClientWorkspace? = null
+    /** 이 CLI 설치의 ID: 대화 기록을 클라이언트마다 따로 (RC-08) */
+    private val clientId = ClientId.get()
 
     override fun send(sessionId: SessionId?, text: String, workspace: dev.vesta.core.agent.Workspace?): Flow<AgentEvent> = flow {
         // 다른 PC(로그인)의 폴더는 서버 Mac에 없다: 파일·셸 도구를 이 PC에서 실행하겠다고 알리고 도구 정의를 보낸다 (RC-07)
@@ -120,7 +123,7 @@ class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, o
             contentType(ContentType.Application.Json)
             setBody(ApiJson.encodeToString(ChatRequestDto.serializer(), ChatRequestDto(text, sessionId?.value, channel = "CLI", workspace = workspace?.path, instructions = workspace?.instructions,
                 skills = workspace?.skills.orEmpty().map { dev.vesta.api.ProjectSkillDto(it.name, it.toMarkdown()) },
-                remote = local != null, os = local?.os, clientTools = local?.specs().orEmpty())))
+                remote = local != null, os = local?.os, clientTools = local?.specs().orEmpty(), client = clientId)))
         }.execute { response ->
             if (response.status.value == 401 && auth is RemoteAuth.Login) {
                 emit(AgentEvent.Error("로그인이 끝났습니다. vesta login ${auth.login.url} 로 다시 로그인하세요"))
@@ -168,7 +171,7 @@ class RemoteBackend(private val baseUrl: String, private val auth: RemoteAuth, o
     }
 
     override suspend fun recent(limit: Int): List<Session> =
-        get("/api/sessions?limit=$limit")?.let { ApiJson.decodeFromString(ListSerializer(SessionDto.serializer()), it) }.orEmpty().map { it.toSession() }
+        get("/api/sessions?limit=$limit&client=$clientId")?.let { ApiJson.decodeFromString(ListSerializer(SessionDto.serializer()), it) }.orEmpty().map { it.toSession() }
 
     override suspend fun find(id: SessionId): Session? = recent(200).firstOrNull { it.id == id }
 

@@ -36,6 +36,8 @@ data class ChatRequestDto(
      */
     val remote: Boolean = false,
     val os: String? = null,
+    /** 보낸 CLI 클라이언트 ID (RC-08, 설치마다 하나). 새 대화가 이 클라이언트의 기록으로 남는다 */
+    val client: String? = null,
     val clientTools: List<ClientToolSpecDto> = emptyList(),
     /** 답을 소리로 들려준다 (웹 음성 대화, M19): 짧게 말하듯이 */
     val spoken: Boolean = false,

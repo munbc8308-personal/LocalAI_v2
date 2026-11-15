@@ -373,7 +373,8 @@ fun Application.vestaApi(deps: ServerDeps) {
                     }
                     // 대화 서비스가 예외로 끝나면(DB 잠김 등) 조용히 끊지 않고 오류를 알린다 (팀 검증, M36)
                     try {
-                        deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken, documents = documents))
+                        deps.conversation.send(user, channel, request.sessionId?.let(::SessionId), UserInput(request.text, images, workspace, spoken = request.spoken, documents = documents,
+                            client = request.client?.takeIf { channel == ChannelType.CLI && CLIENT_ID.matches(it) }))
                             .collect { emit(ApiJson.encodeToString(EventDto.serializer(), it.toDto())) }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
@@ -406,7 +407,9 @@ fun Application.vestaApi(deps: ServerDeps) {
             get("/sessions") {
                 val user = call.principal(deps) ?: return@get
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 20
-                val list = deps.sessions.listRecent(user.userId, limit).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString(), it.systemPrompt) }
+                // CLI 클라이언트마다 기록을 따로 (RC-08): ?client=ID면 그 클라이언트의 대화만, 없으면(웹) CLI 클라이언트 대화는 빼고
+                val client = call.request.queryParameters["client"]?.takeIf { CLIENT_ID.matches(it) }
+                val list = deps.sessions.listRecent(user.userId, limit, client).map { SessionDto(it.id.value, it.title, it.originChannel.name, it.updatedAt.toString(), it.systemPrompt) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(ListSerializer(SessionDto.serializer()), list))
             }
             // 지난 대화 찾기 (M30 H-05): 본인 대화만, 손님은 안 됨
@@ -1646,3 +1649,6 @@ class StudioEndpoints(
         )
     }
 }
+
+/** CLI 클라이언트 ID 형식 (RC-08) */
+private val CLIENT_ID = Regex("^[A-Za-z0-9-]{8,64}$")

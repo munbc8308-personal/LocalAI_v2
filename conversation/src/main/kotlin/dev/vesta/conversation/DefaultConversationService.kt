@@ -130,7 +130,7 @@ class DefaultConversationService(
             return@flow
         }
         val existing = sessionId?.let { sessions.find(user.userId, it) ?: throw SessionNotFoundException(it) }
-        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else if (input.documents.isNotEmpty()) "문서 질문" else "" }))
+        val session = existing ?: sessions.create(user.userId, channel, titleOf(input.text.ifBlank { if (input.images.isNotEmpty()) "이미지 질문" else if (input.documents.isNotEmpty()) "문서 질문" else "" }), input.client)
         emit(AgentEvent.SessionReady(session.id, session.title, created = existing == null))
 
         val saved = input.images.mapNotNull { image ->

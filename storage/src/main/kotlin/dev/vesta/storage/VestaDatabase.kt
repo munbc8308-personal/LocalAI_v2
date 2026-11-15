@@ -64,6 +64,9 @@ class VestaDatabase private constructor(val db: Database) {
         // v28: task_plan.tainted (보안 검토로 더함. 표는 위 create가 만든다)
         val planColumns = exec("PRAGMA table_info(task_plan)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
         if ("tainted" !in planColumns) exec("ALTER TABLE task_plan ADD COLUMN tainted BOOLEAN DEFAULT 0 NOT NULL")
+        // v29: sessions.client (CLI 클라이언트마다 대화 기록 따로, RC-08)
+        val sessionColumns = exec("PRAGMA table_info(sessions)") { rs -> buildList { while (rs.next()) add(rs.getString("name")) } }.orEmpty()
+        if ("client" !in sessionColumns) exec("ALTER TABLE sessions ADD COLUMN client VARCHAR(64)")
         if (current < CURRENT_VERSION) {
             SchemaVersion.insert { it[version] = CURRENT_VERSION }
             log.info { "schema $current -> $CURRENT_VERSION" }
@@ -85,8 +88,8 @@ class VestaDatabase private constructor(val db: Database) {
     }
 
     companion object {
-        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12), 11: media_asset.caption (M13), 12: message_feedback·training_run·model_version (M14), 13: collection_share (M15), 14: evolution_run·evolution_proposal·evolution_candidate (M16), 15: user_settings (M20), 16: custom_agent·agent_run·run_event (M22), 17: agent_team (M22 팀), 18: a2a_agent (M22 A2A), 19: a2a_agent.local, 20: skill (M22 스킬), 21: training_sample·curator_state (M25), 22: video_project (M24), 23: users.email (M26), 24: memory·user_settings.memory_auto (M27), 25: skill.status·origin·run_id·user_settings.skill_auto (M28), 26: schedule·schedule_run (M29), 27: messages_fts·트리거 (M30), 28: task_plan (M32) */
-        const val CURRENT_VERSION = 28
+        /** 1: users, 2: sessions·messages (M1), 3: collections·documents·chunks·chunks_fts (M2), 4: web_pages·web_search_log (M3), 5: routing_log (M4), 6: collections.kind·root_path (M5), 7: tool_run (M6), 8: web_session (M9), 9: channel_binding·channel_pairing (M10), 10: media_asset (M12), 11: media_asset.caption (M13), 12: message_feedback·training_run·model_version (M14), 13: collection_share (M15), 14: evolution_run·evolution_proposal·evolution_candidate (M16), 15: user_settings (M20), 16: custom_agent·agent_run·run_event (M22), 17: agent_team (M22 팀), 18: a2a_agent (M22 A2A), 19: a2a_agent.local, 20: skill (M22 스킬), 21: training_sample·curator_state (M25), 22: video_project (M24), 23: users.email (M26), 24: memory·user_settings.memory_auto (M27), 25: skill.status·origin·run_id·user_settings.skill_auto (M28), 26: schedule·schedule_run (M29), 27: messages_fts·트리거 (M30), 28: task_plan (M32), 29: sessions.client (RC-08) */
+        const val CURRENT_VERSION = 29
 
         fun open(file: Path): VestaDatabase {
             file.parent?.createDirectories()

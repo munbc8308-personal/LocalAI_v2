@@ -34,6 +34,8 @@ object Sessions : org.jetbrains.exposed.v1.core.Table("sessions") {
     val systemPrompt = text("system_prompt").nullable()
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at").index()
+    /** 만든 CLI 클라이언트 (v29, RC-08) */
+    val client = varchar("client", 64).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 

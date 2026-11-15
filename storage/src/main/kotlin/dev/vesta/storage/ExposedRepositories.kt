@@ -53,7 +53,9 @@ class ExposedSessionRepository(
     private val clock: Clock = Clock.systemUTC(),
 ) : SessionRepository {
 
-    override suspend fun create(userId: UserId, channel: ChannelType, title: String?): Session = db.io {
+    override suspend fun create(userId: UserId, channel: ChannelType, title: String?): Session = create(userId, channel, title, null)
+
+    override suspend fun create(userId: UserId, channel: ChannelType, title: String?, client: String?): Session = db.io {
         val now = clock.instant()
         val id = UUID.randomUUID().toString()
         Sessions.insert {
@@ -63,8 +65,9 @@ class ExposedSessionRepository(
             it[originChannel] = channel.name
             it[createdAt] = now
             it[updatedAt] = now
+            it[Sessions.client] = client
         }
-        Session(SessionId(id), userId, title, channel, null, now, now)
+        Session(SessionId(id), userId, title, channel, null, now, now, client)
     }
 
     override suspend fun find(userId: UserId, id: SessionId): Session? = db.io {
@@ -76,6 +79,14 @@ class ExposedSessionRepository(
     override suspend fun listRecent(userId: UserId, limit: Int): List<Session> = db.io {
         Sessions.selectAll()
             .where { Sessions.userId eq userId.value }
+            .orderBy(Sessions.updatedAt, SortOrder.DESC)
+            .limit(limit)
+            .map { it.toSession() }
+    }
+
+    override suspend fun listRecent(userId: UserId, limit: Int, client: String?): List<Session> = db.io {
+        Sessions.selectAll()
+            .where { (Sessions.userId eq userId.value) and (if (client == null) Sessions.client.isNull() else Sessions.client eq client) }
             .orderBy(Sessions.updatedAt, SortOrder.DESC)
             .limit(limit)
             .map { it.toSession() }
@@ -110,6 +121,7 @@ class ExposedSessionRepository(
         title = this[Sessions.title],
         originChannel = ChannelType.valueOf(this[Sessions.originChannel]),
         systemPrompt = this[Sessions.systemPrompt],
+        client = this[Sessions.client],
         createdAt = this[Sessions.createdAt],
         updatedAt = this[Sessions.updatedAt],
     )

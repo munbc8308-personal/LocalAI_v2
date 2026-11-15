@@ -71,4 +71,17 @@ class ExposedRepositoriesTest : FunSpec({
         sessions.listRecent(owner, 10).first().id shouldBe older.id
         newer.id shouldNotBe older.id
     }
+
+    test("CLI 클라이언트마다 대화 기록을 따로 본다, 웹 목록에는 CLI 클라이언트 대화가 없다 (RC-08)") {
+        val (db, sessions, _) = setup()
+        val owner = db.ensureOwner("owner")
+        val web = sessions.create(owner, ChannelType.WEB, "웹")
+        val schedule = sessions.create(owner, ChannelType.TELEGRAM, "⏰ 예약")
+        val windows = sessions.create(owner, ChannelType.CLI, "윈도우", "client-windows-1")
+        val mac = sessions.create(owner, ChannelType.CLI, "맥", "client-mac-0001")
+        sessions.listRecent(owner, 10, "client-windows-1").map { it.id } shouldBe listOf(windows.id)
+        sessions.listRecent(owner, 10, "client-mac-0001").map { it.id } shouldBe listOf(mac.id)
+        sessions.listRecent(owner, 10, null).map { it.id }.toSet() shouldBe setOf(web.id, schedule.id)
+        sessions.find(owner, windows.id)?.client shouldBe "client-windows-1"
+    }
 })

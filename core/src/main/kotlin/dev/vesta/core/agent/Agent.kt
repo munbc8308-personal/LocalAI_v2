@@ -47,6 +47,8 @@ data class UserInput(
     val unattended: Boolean = false,
     /** 이번 질문에 붙인 문서의 글 (.txt·.md·.pdf, V-12). 이번 턴에만 모델에 넘기고, 저장하는 질문에는 파일 이름만 남긴다 */
     val documents: List<DocumentInput> = emptyList(),
+    /** 보낸 CLI 클라이언트 (RC-08). 새 대화를 만들면 이 클라이언트의 대화로 남는다 */
+    val client: String? = null,
 )
 
 /** 붙인 문서 하나: 파일 이름과 뽑은 글 */
