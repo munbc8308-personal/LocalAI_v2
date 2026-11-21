@@ -59,6 +59,21 @@ class ApprovalView(val request: EventDto.Approval) {
     var edited by mutableStateOf(request.editableValue.orEmpty())
 }
 
+/** 승인 답을 서버로 보낸다. 대화 화면과 스튜디오 맡기기가 같이 쓴다 */
+internal suspend fun sendApproval(view: ApprovalView, decision: String) {
+    view.state = ApprovalState.SENDING
+    val dto = when (decision) {
+        "edit" -> ApprovalDto("edit", edited = mapOf(view.request.editableField.orEmpty() to view.edited))
+        "deny" -> ApprovalDto("deny", reason = "웹 UI에서 거부함")
+        else -> ApprovalDto("approve")
+    }
+    view.state = runCatching { Http.post("/api/approvals/${view.request.requestId}", ApiJson.encodeToString(ApprovalDto.serializer(), dto)) }
+        .fold(
+            { if (decision == "deny") ApprovalState.DENIED else if (decision == "edit") ApprovalState.EDITED else ApprovalState.APPROVED },
+            { if ((it as? HttpError)?.status == 404) ApprovalState.EXPIRED else ApprovalState.PENDING },
+        )
+}
+
 /** 대화 화면 상태와 동작. 한 번에 질문 하나만 보낸다. */
 class ChatController(private val scope: CoroutineScope) {
     val turns = mutableStateListOf<Turn>()
@@ -190,19 +205,7 @@ class ChatController(private val scope: CoroutineScope) {
         job = null
     }
 
-    fun decide(view: ApprovalView, decision: String) = scope.launch {
-        view.state = ApprovalState.SENDING
-        val dto = when (decision) {
-            "edit" -> ApprovalDto("edit", edited = mapOf(view.request.editableField.orEmpty() to view.edited))
-            "deny" -> ApprovalDto("deny", reason = "웹 UI에서 거부함")
-            else -> ApprovalDto("approve")
-        }
-        view.state = runCatching { Http.post("/api/approvals/${view.request.requestId}", ApiJson.encodeToString(ApprovalDto.serializer(), dto)) }
-            .fold(
-                { if (decision == "deny") ApprovalState.DENIED else if (decision == "edit") ApprovalState.EDITED else ApprovalState.APPROVED },
-                { if ((it as? HttpError)?.status == 404) ApprovalState.EXPIRED else ApprovalState.PENDING },
-            )
-    }
+    fun decide(view: ApprovalView, decision: String) = scope.launch { sendApproval(view, decision) }
 
     private fun apply(turn: Turn, event: EventDto) {
         when (event) {

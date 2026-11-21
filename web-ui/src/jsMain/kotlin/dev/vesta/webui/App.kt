@@ -415,7 +415,7 @@ private fun TurnView(chat: ChatController, turn: Turn) {
                 tool.result?.takeIf { it.isNotBlank() && tool.ok == false }?.let { Div({ classes("muted", "small") }) { Text(it) } }
             }
         }
-        turn.approvals.forEach { ApprovalCard(chat, it) }
+        turn.approvals.forEach { view -> ApprovalCard(view) { d -> chat.decide(view, d) } }
         // 만든 이미지: 누르면 원본을 새 탭에서
         turn.job?.takeIf { it.status == "QUEUED" || it.status == "RUNNING" }?.let { job ->
             Div({ classes("muted", "pulse", "small") }) { Text("🎬 ${job.title} 만드는 중 · ${job.progress ?: if (job.status == "QUEUED") "차례를 기다리는 중" else "시작"} (다른 것을 물어봐도 됩니다)") }
@@ -660,7 +660,7 @@ private fun SpeakButton(turn: Turn) {
 }
 
 @Composable
-private fun ApprovalCard(chat: ChatController, view: ApprovalView) {
+internal fun ApprovalCard(view: ApprovalView, decide: (String) -> Unit) {
     val r = view.request
     Div({ classes("approval", "risk-${r.risk.lowercase()}") }) {
         Div({ classes("approval-head") }) {
@@ -684,9 +684,9 @@ private fun ApprovalCard(chat: ChatController, view: ApprovalView) {
                 // 보낼 때 다시 계산한다: 화면을 그린 뒤 고친 명령이 원래 명령으로 승인되면 안 된다
                 Button({
                     classes("primary")
-                    onClick { chat.decide(view, if (r.editableField != null && view.edited != r.editableValue) "edit" else "approve") }
+                    onClick { decide(if (r.editableField != null && view.edited != r.editableValue) "edit" else "approve") }
                 }) { Text(if (changed) "수정해서 승인" else "승인") }
-                Button({ classes("danger"); onClick { chat.decide(view, "deny") } }) { Text("거부") }
+                Button({ classes("danger"); onClick { decide("deny") } }) { Text("거부") }
             }
             ApprovalState.SENDING -> Div({ classes("muted") }) { Text("보내는 중…") }
             ApprovalState.APPROVED -> Div({ classes("good") }) { Text("✓ 승인함") }

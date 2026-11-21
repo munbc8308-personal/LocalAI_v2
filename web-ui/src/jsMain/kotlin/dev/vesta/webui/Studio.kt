@@ -16,6 +16,7 @@ import dev.vesta.api.AgentsDto
 import dev.vesta.api.ApiJson
 import dev.vesta.api.ChatRequestDto
 import dev.vesta.api.CustomAgentDto
+import dev.vesta.api.EventDto
 import dev.vesta.api.RunDetailDto
 import dev.vesta.api.RunDto
 import dev.vesta.api.RunEventDto
@@ -46,6 +47,10 @@ import org.jetbrains.compose.web.dom.TextArea
  * 에이전트 스튜디오 (PROJECT.md 7.16, M22): 에이전트 목록·만들기·고치기, 일 맡기기, 실행 목록과 단계 타임라인(실시간).
  * 실시간 소식은 `/api/runs/stream`(SSE, 내 실행만)
  */
+
+/** 스튜디오에서 맡긴 일이 낸 승인 요청. 맡기기 스트림이 AppScope에 살아 있으므로 화면 밖에 둔다 */
+internal val StudioApprovals = mutableStateListOf<ApprovalView>()
+
 @Composable
 fun StudioView() {
     val scope = rememberCoroutineScope()
@@ -122,12 +127,24 @@ fun StudioView() {
                         // 새 대화로 보낸다. 진행은 아래 실행 목록·타임라인·사무실에서 실시간으로 본다.
                         // 탭을 옮겨도 끊기지 않게 화면 scope가 아니라 AppScope에서 보낸다
                         AppScope.launch {
-                            runCatching { Http.chat(ChatRequestDto(text)).collect { } }
-                                .onFailure { if (it !is kotlinx.coroutines.CancellationException) error = it.message }
+                            // 승인 요청은 아래 카드로 띄운다. 끝나면 이 실행의 카드를 거둔다
+                            val mine = mutableListOf<ApprovalView>()
+                            try {
+                                runCatching {
+                                    Http.chat(ChatRequestDto(text)).collect { event ->
+                                        if (event is EventDto.Approval) ApprovalView(event).also { mine += it; StudioApprovals += it }
+                                    }
+                                }.onFailure { if (it !is kotlinx.coroutines.CancellationException) error = it.message }
+                            } finally { StudioApprovals.removeAll(mine) }
                         }
                     }
                 }) { Text("맡기기") }
             }
+        }
+        // 맡긴 일의 승인 요청 (쓰기·셸). 탭을 옮겨도 남는다
+        if (StudioApprovals.isNotEmpty()) Div({ classes("card") }) {
+            Div({ classes("row") }) { Span { B { Text("승인 요청") } }; Span({ classes("muted", "small") }) { Text("맡긴 일이 기다리는 중 · 답이 없으면 정해진 시간 뒤 거부") } }
+            StudioApprovals.forEach { view -> ApprovalCard(view) { d -> AppScope.launch { sendApproval(view, d) } } }
         }
         // 실행 목록 + 타임라인
         Div({ classes("card") }) {
