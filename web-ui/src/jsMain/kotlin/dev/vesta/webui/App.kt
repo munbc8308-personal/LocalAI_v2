@@ -129,6 +129,14 @@ private fun Main(me: MeDto, onLogout: () -> Unit) {
     LaunchedEffect(Unit) { chat.refreshSessions() }
 
     Div({ classes("app") }) {
+        UpdateWatcher(
+            busy = {
+                chat.busy || draft.isNotBlank() ||
+                    StudioApprovals.any { it.state == ApprovalState.PENDING } ||
+                    chat.turns.lastOrNull()?.approvals?.any { it.state == ApprovalState.PENDING } == true
+            },
+            onTick = { if (!chat.busy) chat.refreshSessions() },
+        )
         Div({ classes("topbar") }) {
             if (tab == Tab.CHAT) Button({ classes("icon"); attr("aria-label", "대화 목록"); onClick { drawer = !drawer } }) { Text("☰") }
             Span({ classes("brand") }) { Text("Vesta") }

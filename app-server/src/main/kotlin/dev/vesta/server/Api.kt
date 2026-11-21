@@ -329,6 +329,11 @@ fun Application.vestaApi(deps: ServerDeps) {
                 call.publicMismatch(deps, session.user)?.let { return@get call.respondJson(HttpStatusCode.Unauthorized, buildJsonObject { put("error", it) }.toString()) }
                 call.respondJson(HttpStatusCode.OK, ApiJson.encodeToString(MeDto.serializer(), session.toMe(deps.publicGate)))
             }
+            // 웹 화면 판 (새로 설치하면 바뀐다). 열린 웹이 이것을 보고 스스로 새로 고친다
+            get("/build") {
+                call.principal(deps) ?: return@get
+                call.respondJson(HttpStatusCode.OK, buildJsonObject { put("build", WEB_BUILD) }.toString())
+            }
             // 다른 PC용 CLI 받기 (RC-06): 로그인한 사람 누구나 (CLI도 그 사람 권한으로만 붙는다)
             get("/cli") {
                 call.principal(deps) ?: return@get
@@ -1299,6 +1304,13 @@ private suspend fun ApplicationCall.receiveLimited(megabytes: Int): ByteArray? {
     return bytes
 }
 internal const val SESSION_COOKIE = "vesta_session"
+
+/** 웹 UI 묶음(app.js)의 해시 앞부분. 웹 UI가 없으면 "none" */
+internal val WEB_BUILD: String by lazy {
+    ServerDeps::class.java.classLoader.getResourceAsStream("web/app.js")?.use { input ->
+        java.security.MessageDigest.getInstance("SHA-256").digest(input.readBytes()).take(8).joinToString("") { "%02x".format(it) }
+    } ?: "none"
+}
 /** Google 연결을 시작한 브라우저 표시 (M40, 보안 검토) */
 internal const val GOOGLE_FLOW_COOKIE = "vesta_google_flow"
 
