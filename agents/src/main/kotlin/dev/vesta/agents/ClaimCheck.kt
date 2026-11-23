@@ -46,6 +46,10 @@ internal class ClaimCheck {
                 .filter { it !in written }
                 .forEach { add("$it 수정 — 이번 작업에서 이 파일을 쓴 기록이 없음") }
         }
+        // 파일 이름 없이 "요청한 경로에 저장했어" (디자인팀 시험: 조사원이 write_file 없이 저장했다고 했다)
+        if (steps.none { it.tool in FILE_WRITES && it.ok } && answer.split(Regex("\\n|[.!?](\\s|$)")).any { SAVED.containsMatchIn(it) && !future(it) && FILE.find(it) == null }) {
+            add("파일 저장 — 이번 작업에서 파일을 쓴 기록이 없음")
+        }
         // 도구를 글로만 부른 척 (RC-07 Windows 시험: "(실제로는 `write_file` 도구를 호출함)", "도구 호출은 시스템이 처리함")
         val ran = steps.filter { it.ok }.map { it.tool }.toSet()
         for (sentence in answer.split(Regex("\\n|[.!?](\\s|$)")).filter { !future(it) }) {
@@ -89,13 +93,16 @@ internal class ClaimCheck {
     companion object {
         private const val SHELL = "run_shell"
         private val WRITES = setOf("write_file", "apply_patch", "move_file", "make_directory")
+        private val FILE_WRITES = setOf("write_file", "apply_patch")
         private val TEST_CLAIM = Regex("(테스트|tests?)[^\\n.]{0,25}(통과|성공|passed|succeeded|문제\\s?없|모두\\s?정상)", RegexOption.IGNORE_CASE)
         private val BUILD_CLAIM = Regex("빌드[^\\n.]{0,25}(성공|통과|문제\\s?없|정상)|build succeeded", RegexOption.IGNORE_CASE)
         /** 테스트 실행 명령. `test_x.py`·`python3 -m unittest`도 알아보게 영문자 경계로 (팀 검증: `\b`는 `_`·`unit` 때문에 놓쳤다) */
         private val TEST_COMMAND = Regex("(?<![A-Za-z])(test|tests|pytest|unittest|vitest|jest)(?![A-Za-z])")
         private val BUILD_COMMAND = Regex("\\b(build|xcodebuild|gradlew?|make|cargo|tsc|swift\\s+build|npm\\s+run)\\b")
         private val FAILED = Regex("\\*\\* (BUILD|TEST) FAILED \\*\\*|\\berror:|\\bFAILED\\b|Parsing project spec failed|failures?=\"[1-9]")
-        private val EDIT_VERB = Regex("(수정했|고쳤|작성했|만들었|추가했|생성했|바꿨|변경했|업데이트했|되살렸|복구했|덮어썼|덮어씌웠|저장했|반영했|적용했|건드렸|(수정|작성|생성|변경|저장|반영)\\s?완료)")
+        private val EDIT_VERB = Regex("(수정했|고쳤|작성했|만들었|추가했|생성했|바꿨|변경했|업데이트했|되살렸|복구했|덮어썼|덮어씌웠|저장했|반영했|적용했|건드렸|(수정|작성|생성|변경|저장|반영|조사|설계|제작)\\s?완료|\\((업데이트|생성|작성|수정|저장)(됨|함)?\\))")
+        /** 파일 이름 없는 저장 주장 */
+        private val SAVED = Regex("(저장했|저장 완료|덮어썼|파일(을|로)?\\s?(만들었|작성했|생성했))")
         private val TOOL_NAME = Regex("\\b(write_file|apply_patch|run_shell|make_directory|move_file|read_file|list_files|search_files)\\b")
         private val TOOL_VERB = Regex("(호출함|호출했|호출하여|호출해서|호출 완료|불렀|사용했|사용하여|사용해서|실행했|실행함|써서|썼)")
         private val FAKE_CALL = Regex("(실제로는?\\s*`?[a-z_]*`?\\s*도구를?\\s*호출|도구\\s?호출은\\s?시스템|\\(도구\\s?호출|\\[도구\\s?호출)")

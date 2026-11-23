@@ -79,4 +79,18 @@ class ClaimCheckTest : FunSpec({
         failed.record("run_shell", shell("python3 -m unittest -q"), true, "FAILED (failures=1)\n[종료 코드 0]")
         failed.unverified("테스트 통과했어").single() shouldContain "성공한 기록이 없음"
     }
+
+    test("파일 이름 없이 저장했다고 하거나, 파일 옆에 '(조사 완료)'만 붙여도 쓴 기록을 본다 (디자인팀 시험)") {
+        val researcher = ClaimCheck()
+        researcher.record("web_search", buildJsonObject { put("query", JsonPrimitive("food app trends")) }, true, "8건")
+        researcher.record("make_directory", write("~/Documents/vesta-design-test"), true, "만듦")
+        researcher.unverified("최신 음식 주문 앱 트렌드를 조사해서 요청한 경로에 저장했어.").single() shouldContain "파일을 쓴 기록이 없음"
+        researcher.unverified("조사 결과를 저장할게").shouldBeEmpty()
+        val lead = ClaimCheck()
+        lead.record("write_file", write("~/Documents/vesta-design-test/index.html"), true, "저장함")
+        lead.unverified("* `~/Documents/vesta-design-test/research_report.md` (조사 완료)\n* `index.html` (업데이트)").single() shouldContain "research_report.md"
+        val saved = ClaimCheck()
+        saved.record("write_file", write("research.md"), true, "저장함")
+        saved.unverified("요청한 경로에 저장했어").shouldBeEmpty()
+    }
 })

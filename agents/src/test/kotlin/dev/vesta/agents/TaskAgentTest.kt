@@ -603,6 +603,27 @@ class TaskAgentTest : FunSpec({
         events.filterIsInstance<AgentEvent.Done>().size shouldBe 1
     }
 
+    test("팀: 멤버가 실제로 쓴 파일은 리더의 주장 확인이 근거로 본다 (디자인팀 시험: 리더가 '확인 안 됨'으로 보고 다시 시켜 좋은 목업을 덮어썼다)") {
+        val write = RecordingTool("write_file", RiskLevel.WRITE)
+        val memberModel = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("m1", "write_file", """{"path":"design/index.html","content":"<html>"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("목업을 만들었어"), ChatChunk.Done("stop", null)),
+        ))
+        val broker = AutoBroker(ApprovalDecision.Approve)
+        val member = TaskAgent(memberModel, models, ToolRegistry(listOf(write)), broker)
+        val delegate = DelegateTool(listOf(TeamMember("ui-designer", "목업") { member }))
+        val leaderModel = ScriptedModel(listOf(
+            listOf(ChatChunk.ToolCalls(listOf(ToolCall("c1", "delegate", """{"agent":"ui-designer","task":"목업"}"""))), ChatChunk.Done("tool_calls", null)),
+            listOf(ChatChunk.Delta("index.html 저장했어"), ChatChunk.Done("stop", null)),
+        ))
+        val events = TaskAgent(leaderModel, models, ToolRegistry(listOf(delegate)), broker).handle(request).toList()
+        leaderModel.requests.size shouldBe 2
+        events.filterIsInstance<AgentEvent.Status>().none { "확인되지 않은" in it.text } shouldBe true
+        // 화면으로 가는 멤버 단계에는 인자·결과를 싣지 않는다
+        events.filterIsInstance<AgentEvent.ToolFinished>().first { it.tool == "ui-designer/write_file" }.step shouldBe null
+        leaderModel.requests[1].messages.single { it.role == ChatRole.TOOL }.content shouldContain "실제로 쓴 파일 — design/index.html"
+    }
+
     test("팀 (M22 보안 검토): 리더가 로컬 데이터를 읽은 뒤 맡기면 멤버의 인터넷 도구도 승인을 받는다 (할 일에 실린 유출 방지)") {
         fun run(leaderReads: Boolean): Int {
             val web = RecordingTool("web_search", RiskLevel.NETWORK)

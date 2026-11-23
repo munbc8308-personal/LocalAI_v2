@@ -67,12 +67,16 @@ class DelegateTool(private val members: List<TeamMember>, private val maxResultC
         // 마지막 도구 뒤의 글 (요약 한 줄용: 앞쪽은 대개 "확인하겠습니다" 같은 계획)
         val last = StringBuilder()
         var failed: String? = null
+        val steps = mutableListOf<dev.vesta.core.tools.ToolStep>()
         agent.handle(request.copy(history = listOf(ChatMessage(ChatRole.USER, task)), collections = emptyList())).collect { event ->
             when (event) {
                 is AgentEvent.Token -> { answer.append(event.text); last.append(event.text) }
                 is AgentEvent.Status -> emit(AgentEvent.Status("[$name] ${event.text}"))
                 is AgentEvent.ToolStarted -> last.clear().let { emit(event.copy(callId = "$name:${event.callId}", tool = "$name/${event.tool}")) }
-                is AgentEvent.ToolFinished -> emit(event.copy(callId = "$name:${event.callId}", tool = "$name/${event.tool}"))
+                is AgentEvent.ToolFinished -> {
+                    event.step?.let { steps += it }
+                    emit(event.copy(callId = "$name:${event.callId}", tool = "$name/${event.tool}", step = null))
+                }
                 is AgentEvent.ApprovalRequested -> emit(event)
                 is AgentEvent.Error -> { failed = event.message; emit(AgentEvent.Status("[$name] 오류: ${event.message}")) }
                 else -> Unit
@@ -81,13 +85,21 @@ class DelegateTool(private val members: List<TeamMember>, private val maxResultC
         val text = answer.toString().trim()
         failed?.let { if (text.isEmpty()) return ToolResult("멤버 '$name'이 실패했다: $it", isError = true, summary = "$name 실패") }
         if (text.isEmpty()) return ToolResult("멤버 '$name'이 답을 내지 않았다", isError = true, summary = "$name: 답 없음")
-        val output = if (text.length > maxResultChars) text.take(maxResultChars) + "\n…(멤버 답이 길어 ${maxResultChars}자까지만)" else text
-        return ToolResult("멤버 '$name'의 결과:\n$output", summary = "$name: " + last.toString().ifBlank { text }.lineSequence().first { it.isNotBlank() }.trim().take(100))
+        val output = (if (text.length > maxResultChars) text.take(maxResultChars) + "\n…(멤버 답이 길어 ${maxResultChars}자까지만)" else text) + "\n\n" + record(steps)
+        return ToolResult("멤버 '$name'의 결과:\n$output", summary = "$name: " + last.toString().ifBlank { text }.lineSequence().first { it.isNotBlank() }.trim().take(100), steps = steps)
+    }
+
+    /** 멤버 답과 별개로 실제 기록 (디자인팀 시험: 멤버가 저장하지 않고 "저장했어"라고 해 리더가 그대로 보고했다) */
+    private fun record(steps: List<dev.vesta.core.tools.ToolStep>): String {
+        val written = steps.filter { it.ok && it.tool in WRITES }.mapNotNull { (it.arguments["path"] as? JsonPrimitive)?.content }.distinct()
+        return if (written.isEmpty()) "[실행 기록: 이 멤버는 이번에 파일을 쓰지 않았다. 저장했다는 말이 있어도 파일은 없다]"
+        else "[실행 기록: 이 멤버가 실제로 쓴 파일 — ${written.joinToString()}]"
     }
 
     private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.content.orEmpty()
 
     companion object {
         const val NAME = "delegate"
+        private val WRITES = setOf("write_file", "apply_patch")
     }
 }

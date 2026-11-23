@@ -16,7 +16,12 @@ data class ToolResult(
     val isError: Boolean = false,
     /** 사용자에게 보여 줄 한 줄 요약 */
     val summary: String = output.lineSequence().firstOrNull().orEmpty().take(120),
+    /** 이 도구 안에서 다른 에이전트가 실행한 도구 (나눠 맡기기). 맡긴 쪽의 주장 확인이 함께 본다 */
+    val steps: List<ToolStep> = emptyList(),
 )
+
+/** 실행한 도구 한 번 (주장 확인용): 이름·인자·성공·결과 끝부분 */
+data class ToolStep(val tool: String, val arguments: kotlinx.serialization.json.JsonObject, val ok: Boolean, val output: String)
 
 /**
  * 도구 (PROJECT.md 7.7 T-01). 위험 등급에 따라 승인 정책이 적용된다:

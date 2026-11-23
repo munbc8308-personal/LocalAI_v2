@@ -28,7 +28,14 @@ sealed interface AgentEvent {
     data class ToolStarted(val callId: String, val tool: String, val risk: dev.vesta.core.RiskLevel, val summary: String) : AgentEvent
 
     /** 도구 실행 결과 */
-    data class ToolFinished(val callId: String, val tool: String, val ok: Boolean, val summary: String) : AgentEvent
+    data class ToolFinished(
+        val callId: String,
+        val tool: String,
+        val ok: Boolean,
+        val summary: String,
+        /** 인자·결과 (나눠 맡긴 쪽의 주장 확인용, 화면·API로는 보내지 않는다) */
+        val step: dev.vesta.core.tools.ToolStep? = null,
+    ) : AgentEvent
 
     /**
      * 사용자 승인이 필요하다 (T-03). 채널은 승인/거부(셸은 수정 후 승인)를 받아
