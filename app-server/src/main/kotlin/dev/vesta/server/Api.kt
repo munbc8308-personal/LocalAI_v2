@@ -1555,7 +1555,7 @@ class StudioEndpoints(
     suspend fun agents(user: UserContext): dev.vesta.api.AgentsDto {
         val builtin = BUILTIN.filter { (type, _, _) -> type in dev.vesta.identity.RolePolicy.agents(user.role) }
             .map { (type, label, description) -> dev.vesta.api.BuiltinAgentDto(type.name, label, description) }
-        val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString()) }
+        val custom = agentRepo.list(user.userId).map { dev.vesta.api.CustomAgentDto(it.name, it.description, it.instructions, it.model.name, it.tools, it.updatedAt.toString(), it.skills) }
         val tools = toolCatalog(user).map { dev.vesta.api.ToolInfoDto(it.spec.name, it.risk.name, it.spec.description) }
         val teams = teamRepo?.list(user.userId).orEmpty().map { dev.vesta.api.TeamDto(it.name, it.description, it.leader, it.members, it.updatedAt.toString(), it.theme, it.examples) }
         val owner = user.role == UserRole.OWNER && a2aRepo != null && a2aClient != null
@@ -1645,7 +1645,12 @@ class StudioEndpoints(
         val unknown = dto.tools.filter { it !in allowed }
         if (unknown.isNotEmpty()) return "쓸 수 없는 도구: ${unknown.joinToString()}"
         if (a2aRepo?.find(user.userId, dto.name) != null) return "같은 이름의 A2A 에이전트가 있습니다"
-        agentRepo.save(dev.vesta.core.studio.CustomAgentDef(user.userId, dto.name, dto.description.trim(), dto.instructions, model, dto.tools.distinct()))
+        val skills = dto.skills.distinct()
+        if (skills.size > d.MAX_SKILLS) return "스킬은 ${d.MAX_SKILLS}개까지 고를 수 있습니다"
+        val known = skillsFor(user).map { it.name }.toSet()
+        val missing = skills.filter { it !in known }
+        if (missing.isNotEmpty()) return "없는 스킬: ${missing.joinToString()}"
+        agentRepo.save(dev.vesta.core.studio.CustomAgentDef(user.userId, dto.name, dto.description.trim(), dto.instructions, model, dto.tools.distinct(), skills = skills))
         return null
     }
 

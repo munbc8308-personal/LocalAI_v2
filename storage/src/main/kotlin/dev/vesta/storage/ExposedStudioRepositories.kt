@@ -54,6 +54,7 @@ class ExposedCustomAgentRepository(private val db: Database, private val clock: 
             it[model] = def.model.name
             it[tools] = def.tools.joinToString("\n")
             it[collections] = def.collections.joinToString("\n")
+            it[skills] = def.skills.joinToString("\n")
             it[updatedAt] = now
         }
         if (updated == 0) CustomAgents.insert {
@@ -64,6 +65,7 @@ class ExposedCustomAgentRepository(private val db: Database, private val clock: 
             it[model] = def.model.name
             it[tools] = def.tools.joinToString("\n")
             it[collections] = def.collections.joinToString("\n")
+            it[skills] = def.skills.joinToString("\n")
             it[updatedAt] = now
         }
         def.copy(updatedAt = now)
@@ -82,6 +84,7 @@ class ExposedCustomAgentRepository(private val db: Database, private val clock: 
         tools = this[CustomAgents.tools].lines().filter { it.isNotBlank() },
         collections = this[CustomAgents.collections].lines().filter { it.isNotBlank() },
         updatedAt = this[CustomAgents.updatedAt],
+        skills = this[CustomAgents.skills].lines().filter { it.isNotBlank() },
     )
 }
 

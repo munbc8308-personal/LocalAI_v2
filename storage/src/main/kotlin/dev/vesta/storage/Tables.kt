@@ -309,6 +309,8 @@ object CustomAgents : LongIdTable("custom_agent") {
     val tools = text("tools")
     val collections = text("collections")
     val updatedAt = timestamp("updated_at")
+    /** v30: 이 에이전트가 따르는 스킬 (줄바꿈으로 나눈 목록) */
+    val skills = text("skills").default("")
 
     init { uniqueIndex(owner, name) }
 }

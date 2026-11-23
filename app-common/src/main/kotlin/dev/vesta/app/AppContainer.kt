@@ -512,7 +512,8 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
         teamRules: String = "",
     ): dev.vesta.core.agent.Agent? {
         val def = customAgentRepository.find(user.userId, name) ?: return null
-        val rules = Prompts.TASK_RULES + "\n\n너는 사용자 정의 에이전트 '${def.name}'이다. 역할: ${def.description}\n지침:\n${def.instructions.take(dev.vesta.core.studio.CustomAgentDef.MAX_INSTRUCTIONS)}" + teamRules
+        val rules = Prompts.TASK_RULES + "\n\n너는 사용자 정의 에이전트 '${def.name}'이다. 역할: ${def.description}\n지침:\n${def.instructions.take(dev.vesta.core.studio.CustomAgentDef.MAX_INSTRUCTIONS)}" +
+            agentSkills(user, def) + teamRules
         return TaskAgent(
             inference, modelManager, toolRegistry, approvals, ExposedToolRunLog(database.db),
             maxSteps = config.tools.maxSteps, approvalTimeoutSeconds = config.tools.approvalTimeoutSeconds,
@@ -549,6 +550,16 @@ class AppContainer(generalOverride: String? = null) : AutoCloseable {
      * 부를 수 있는 스킬 (SK-01): 작업 폴더(CLI가 승인받은 것) > 내 파일(`~/.vesta/skills/<이름>/SKILL.md`) > 웹에서 만든 것 > 내장(M33 SK-15).
      * 작업 폴더·내 파일은 Mac 주인 것이라 Mac 주인만 쓴다. 내장은 모두가 쓴다 (도구는 그 역할 도구와 겹치는 것만)
      */
+    /** 에이전트에 고른 스킬의 지침 (지운 스킬은 건너뛴다). 길면 자른다 */
+    private suspend fun agentSkills(user: UserContext, def: dev.vesta.core.studio.CustomAgentDef): String {
+        if (def.skills.isEmpty()) return ""
+        val d = dev.vesta.core.studio.CustomAgentDef
+        val byName = skillsFor(user).associateBy { it.name }
+        val text = def.skills.mapNotNull { byName[it] }.joinToString("\n\n") { "### /${it.name} — ${it.description}\n${it.body.take(d.MAX_SKILL_CHARS)}" }
+        if (text.isEmpty()) return ""
+        return "\n\n쓸 수 있는 스킬 (할 일이 맞으면 그 절차를 따른다):\n" + text.take(d.MAX_SKILLS_CHARS)
+    }
+
     suspend fun skillsFor(user: UserContext, workspace: dev.vesta.core.agent.Workspace? = null): List<dev.vesta.core.skill.Skill> {
         val owner = user.role == UserRole.OWNER
         val project = if (owner) workspace?.skills.orEmpty() else emptyList()

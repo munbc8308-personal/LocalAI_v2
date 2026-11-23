@@ -32,6 +32,16 @@ class ExposedStudioRepositoriesTest : FunSpec({
         repo.list(other).shouldBeEmpty()
     }
 
+    test("사용자 정의 에이전트에 고른 스킬을 저장하고 고칠 수 있다 (v30)") {
+        val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
+        val owner = db.ensureOwner("owner")
+        val repo = ExposedCustomAgentRepository(db.db)
+        repo.save(CustomAgentDef(owner, "디자인-리더", "디자인 총괄", "", skills = listOf("review", "frontend-design")))
+        repo.find(owner, "디자인-리더")?.skills shouldBe listOf("review", "frontend-design")
+        repo.save(CustomAgentDef(owner, "디자인-리더", "디자인 총괄", ""))
+        repo.find(owner, "디자인-리더")?.skills.shouldBeEmpty()
+    }
+
     test("실행 기록: 단계 번호는 실행마다 1부터, 끝나지 못한 실행은 실패로 정리") {
         val db = VestaDatabase.open(createTempDirectory("vesta").resolve("vesta.db")).also { it.migrate() }
         val owner = db.ensureOwner("owner")

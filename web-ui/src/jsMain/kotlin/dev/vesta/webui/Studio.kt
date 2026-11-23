@@ -61,6 +61,10 @@ fun StudioView() {
     val liveEvents = remember { mutableStateListOf<RunEventDto>() }
     var editing by remember { mutableStateOf<CustomAgentDto?>(null) }
     var editingTeam by remember { mutableStateOf<TeamDto?>(null) }
+    /** 고치는 칸 안에 보여 줄 저장 오류 (위쪽 오류 줄은 화면 밖이라 안 보였다) */
+    var editorError by remember { mutableStateOf<String?>(null) }
+    var showSkills by remember { mutableStateOf(false) }
+    var showDrafts by remember { mutableStateOf(false) }
     var addingA2a by remember { mutableStateOf(false) }
     var editingSkill by remember { mutableStateOf<SkillDto?>(null) }
     // 스킬 제안 켜기·끄기 (M28): 내 설정에 함께 둔다
@@ -108,13 +112,12 @@ fun StudioView() {
         // 일 맡기기: 사용자 정의 에이전트·팀에게 (기본 에이전트는 대화 탭에서 /web·/code·/task). target은 "agent 이름" 또는 "team 이름"
         if (a != null) Div({ classes("card") }) {
             Div({ classes("row") }) { Span { B { Text("일 맡기기") } }; Span({ classes("muted", "small") }) { Text("CLI·메신저: /agent 이름 할 일, /team 이름 할 일, /스킬 할 일") } }
-            if (a.custom.isEmpty() && a.a2a.isEmpty() && a.skills.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
+            if (a.custom.isEmpty() && a.a2a.isEmpty()) P({ classes("muted", "small") }) { Text("아래에서 에이전트를 먼저 만드세요.") }
             else {
                 Select({ onChange { e -> target = e.value.orEmpty() } }) {
                     Option("", { if (target.isEmpty()) selected() }) { Text("에이전트·팀 고르기") }
                     a.custom.forEach { c -> Option("agent ${c.name}", { if ("agent ${c.name}" == target) selected() }) { Text("${c.name} — ${c.description.take(40)}") } }
                     a.a2a.forEach { r -> Option("agent ${r.name}", { if ("agent ${r.name}" == target) selected() }) { Text("${r.name} (A2A) — ${r.description.take(40)}") } }
-                    a.skills.forEach { k -> Option(k.name, { if (k.name == target) selected() }) { Text("스킬 /${k.name} — ${k.description.take(40)}") } }
                     a.teams.forEach { t -> Option("team ${t.name}", { if ("team ${t.name}" == target) selected() }) { Text("팀 ${t.name} — ${t.description.take(40)}") } }
                 }
                 TextArea(task) { placeholder("할 일"); attr("rows", "3"); onInput { task = it.value } }
@@ -224,7 +227,7 @@ fun StudioView() {
                             }) { Text("지우기") }
                         }
                     }
-                    Div({ classes("muted", "small") }) { Text("모델 ${if (c.model == "CODE") "코드" else "일반"} · 도구 ${c.tools.ifEmpty { listOf("없음") }.joinToString()}") }
+                    Div({ classes("muted", "small") }) { Text("모델 ${if (c.model == "CODE") "코드" else "일반"} · 도구 ${c.tools.ifEmpty { listOf("없음") }.joinToString()}" + if (c.skills.isNotEmpty()) " · 스킬 ${c.skills.joinToString { "/$it" }}" else "") }
                 }
             }
             a.builtin.forEach { b -> Div({ classes("row", "small") }) { Span({ classes("muted") }) { Text("기본 · ${b.label}") }; Span({ classes("muted") }) { Text(b.description) } } }
@@ -269,7 +272,12 @@ fun StudioView() {
                 Button({ classes("link", "small"); onClick { editingSkill = SkillDto("", "", "") } }) { Text("새 스킬") }
             }
             if (a.skills.isEmpty()) P({ classes("muted", "small") }) { Text("자주 하는 일을 지침으로 만들어 /이름 할 일 로 부릅니다. ~/.vesta/skills/<이름>/SKILL.md 파일이나 작업 폴더의 .vesta/skills 도 읽습니다.") }
-            a.skills.forEach { k ->
+            // 목록이 길어 접어 둔다. 에이전트에 붙이려면 에이전트를 만들 때 고른다
+            else Div({ classes("row", "small") }) {
+                Span({ classes("muted") }) { Text("${a.skills.size}개 · 에이전트를 만들거나 고칠 때 골라 붙입니다") }
+                Button({ classes("link", "small"); onClick { showSkills = !showSkills } }) { Text(if (showSkills) "접기" else "목록 보기") }
+            }
+            if (showSkills) a.skills.forEach { k ->
                 Div({ classes("run") }) {
                     Div({ classes("row", "small") }) {
                         Span { B { Text("/${k.name}") }; Text(" · ${k.description}") }
@@ -289,8 +297,11 @@ fun StudioView() {
             }
             // 제안된 스킬 (M28 SK-11): 도구로 끝낸 실행에서 만든 초안. 쓰기(저장)해야 /이름 으로 부를 수 있다
             if (a.drafts.isNotEmpty()) {
-                Div({ classes("small") }) { B { Text("제안된 스킬 ${a.drafts.size}개") }; Span({ classes("muted") }) { Text(" · 승인하기 전에는 부를 수 없습니다") } }
-                a.drafts.forEach { k ->
+                Div({ classes("row", "small") }) {
+                    Span { B { Text("제안된 스킬 ${a.drafts.size}개") }; Span({ classes("muted") }) { Text(" · 승인하기 전에는 부를 수 없습니다") } }
+                    Button({ classes("link", "small"); onClick { showDrafts = !showDrafts } }) { Text(if (showDrafts) "접기" else "보기") }
+                }
+                if (showDrafts) a.drafts.forEach { k ->
                     Div({ classes("run") }) {
                         Div({ classes("row", "small") }) {
                             Span { B { Text("/${k.name}") }; Text(" · ${k.description}") }
@@ -356,33 +367,37 @@ fun StudioView() {
             } }
             if (addingA2a) A2aAdder(onError = { error = it }) { addingA2a = false; error = null; loadAgents() }
         }
-        editingTeam?.let { t -> TeamEditor(t, a?.custom.orEmpty(), a?.a2a.orEmpty(), onCancel = { editingTeam = null }) { saved ->
+        editingTeam?.let { t -> TeamEditor(t, a?.custom.orEmpty(), a?.a2a.orEmpty(), editorError, onCancel = { editingTeam = null; editorError = null }) { saved ->
             scope.launch {
-                runCatching { Http.put("/api/teams/${saved.name}", ApiJson.encodeToString(TeamDto.serializer(), saved)) }
-                    .onSuccess { editingTeam = null; error = null; loadAgents() }
-                    .onFailure { error = it.message }
+                runCatching { Http.put("/api/teams/${encodeURIComponent(saved.name)}", ApiJson.encodeToString(TeamDto.serializer(), saved)) }
+                    .onSuccess { editingTeam = null; editorError = null; loadAgents() }
+                    .onFailure { editorError = it.message }
             }
         } }
-        editing?.let { e -> AgentEditor(e, a?.tools.orEmpty(), onCancel = { editing = null }) { saved ->
+        editing?.let { e -> AgentEditor(e, a?.tools.orEmpty(), a?.skills.orEmpty(), editorError, onCancel = { editing = null; editorError = null }) { saved ->
             scope.launch {
-                runCatching { Http.put("/api/agents/${saved.name}", ApiJson.encodeToString(CustomAgentDto.serializer(), saved)) }
-                    .onSuccess { editing = null; error = null; loadAgents() }
-                    .onFailure { error = it.message }
+                runCatching { Http.put("/api/agents/${encodeURIComponent(saved.name)}", ApiJson.encodeToString(CustomAgentDto.serializer(), saved)) }
+                    .onSuccess { editing = null; editorError = null; loadAgents() }
+                    .onFailure { editorError = it.message }
             }
         } }
     }
 }
 
 @Composable
-private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolInfoDto>, onCancel: () -> Unit, onSave: (CustomAgentDto) -> Unit) {
+private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolInfoDto>, skills: List<SkillDto>, saveError: String?, onCancel: () -> Unit, onSave: (CustomAgentDto) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial.name) }
     var description by remember(initial) { mutableStateOf(initial.description) }
     var instructions by remember(initial) { mutableStateOf(initial.instructions) }
     var model by remember(initial) { mutableStateOf(initial.model) }
     var chosen by remember(initial) { mutableStateOf(initial.tools.toSet()) }
-    Div({ classes("card", "stack") }) {
+    var chosenSkills by remember(initial) { mutableStateOf(initial.skills.toSet()) }
+    var skillFilter by remember(initial) { mutableStateOf("") }
+    val nameProblem = if (initial.name.isEmpty()) nameProblem(name) else null
+    Div({ classes("card", "stack"); scrollOnOpen() }) {
         Div({ classes("row") }) { Span { B { Text(if (initial.name.isEmpty()) "새 에이전트" else "${initial.name} 고치기") } }; Button({ classes("link", "small"); onClick { onCancel() } }) { Text("닫기") } }
         Input(InputType.Text) { value(name); placeholder("이름 (공백 없이, /agent 이름)"); if (initial.name.isNotEmpty()) disabled(); onInput { name = it.value } }
+        nameProblem?.let { P({ classes("error", "small") }) { Text(it) } }
         Input(InputType.Text) { value(description); placeholder("역할 (예: 코드 리뷰어 — 변경 사항을 읽고 문제를 찾는다)"); onInput { description = it.value } }
         TextArea(instructions) { placeholder("지침: 어떻게 일할지, 무엇을 하지 말지, 답 형식"); attr("rows", "6"); onInput { instructions = it.value } }
         Select({ onChange { e -> model = e.value ?: "GENERAL" } }) {
@@ -402,7 +417,31 @@ private fun AgentEditor(initial: CustomAgentDto, tools: List<dev.vesta.api.ToolI
                 Span({ classes("muted") }) { Text(riskLabel(t.risk)) }
             }
         }
-        Button({ classes("primary"); onClick { onSave(CustomAgentDto(name.trim(), description.trim(), instructions, model, chosen.toList())) } }) { Text("저장") }
+        // 스킬: 이 에이전트가 따를 절차. 고른 스킬의 지침이 에이전트 지침에 붙는다
+        Div({ classes("small") }) { B { Text("스킬") }; Span({ classes("muted") }) { Text(" (${chosenSkills.size}/8 · 고른 스킬의 절차를 따른다)") } }
+        if (skills.isNotEmpty()) Input(InputType.Text) { value(skillFilter); placeholder("스킬 찾기 (이름·설명)"); onInput { skillFilter = it.value } }
+        val query = skillFilter.trim().lowercase()
+        // 고른 것은 늘 보이고, 나머지는 찾을 때만 (목록이 길다)
+        skills.filter { it.name in chosenSkills || query.isNotEmpty() && (query in it.name.lowercase() || query in it.description.lowercase()) }.take(30).forEach { k ->
+            Label(attrs = { classes("row", "small") }) {
+                Span {
+                    Input(InputType.Checkbox) {
+                        checked(k.name in chosenSkills)
+                        if (k.name !in chosenSkills && chosenSkills.size >= 8) disabled()
+                        onChange { chosenSkills = if (k.name in chosenSkills) chosenSkills - k.name else chosenSkills + k.name }
+                    }
+                    Text(" /${k.name}")
+                }
+                Span({ classes("muted") }) { Text(k.description.take(50)) }
+            }
+        }
+        if (skills.isNotEmpty() && query.isEmpty() && chosenSkills.isEmpty()) P({ classes("muted", "small") }) { Text("찾기 칸에 입력하면 스킬이 나옵니다 (예: review, 리뷰)") }
+        saveError?.let { P({ classes("error", "small") }) { Text(it) } }
+        Button({
+            classes("primary")
+            if (name.isBlank() || nameProblem != null || description.isBlank()) disabled()
+            onClick { onSave(CustomAgentDto(name.trim(), description.trim(), instructions, model, chosen.toList(), skills = chosenSkills.toList())) }
+        }) { Text("저장") }
     }
 }
 
@@ -509,16 +548,18 @@ private fun A2aAdder(onError: (String?) -> Unit, onSaved: () -> Unit) {
 }
 
 @Composable
-private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: List<A2aAgentDto>, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
+private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: List<A2aAgentDto>, saveError: String?, onCancel: () -> Unit, onSave: (TeamDto) -> Unit) {
     var name by remember(initial) { mutableStateOf(initial.name) }
     var description by remember(initial) { mutableStateOf(initial.description) }
     var theme by remember(initial) { mutableStateOf(initial.theme.orEmpty()) }
     var examples by remember(initial) { mutableStateOf(initial.examples.joinToString("\n")) }
     var leader by remember(initial) { mutableStateOf(initial.leader) }
     var members by remember(initial) { mutableStateOf(initial.members.toSet()) }
-    Div({ classes("card", "stack") }) {
+    Div({ classes("card", "stack"); scrollOnOpen() }) {
         Div({ classes("row") }) { Span { B { Text(if (initial.name.isEmpty()) "새 팀" else "${initial.name} 고치기") } }; Button({ classes("link", "small"); onClick { onCancel() } }) { Text("닫기") } }
         Input(InputType.Text) { value(name); placeholder("팀 이름 (공백 없이, /team 이름)"); if (initial.name.isNotEmpty()) disabled(); onInput { name = it.value } }
+        val nameProblem = if (initial.name.isEmpty()) nameProblem(name) else null
+        nameProblem?.let { P({ classes("error", "small") }) { Text(it) } }
         Input(InputType.Text) { value(description); placeholder("무엇을 하는 팀인지 (예: 기획 → 개발 → 리뷰)"); onInput { description = it.value } }
         Div({ classes("small") }) { B { Text("리더") }; Span({ classes("muted") }) { Text(" (일을 나누고 결과를 모아 답한다)") } }
         Select({ onChange { e -> leader = e.value.orEmpty(); members = members - leader } }) {
@@ -547,13 +588,32 @@ private fun TeamEditor(initial: TeamDto, agents: List<CustomAgentDto>, remote: L
         }
         Div({ classes("small") }) { B { Text("맡을 질문 예시") }; Span({ classes("muted") }) { Text(" (한 줄에 하나, 8개까지. 비슷한 질문이 오면 /team 없이도 이 팀이 맡는다)") } }
         TextArea(examples) { attr("rows", "4"); placeholder("예: 자료를 조사해서 구글 시트로 정리해 줘"); onInput { examples = it.value } }
+        saveError?.let { P({ classes("error", "small") }) { Text(it) } }
+        if (description.isBlank()) P({ classes("muted", "small") }) { Text("팀 설명을 적어야 저장할 수 있습니다") }
         Button({
             classes("primary")
-            if (leader.isEmpty() || members.isEmpty()) disabled()
+            if (name.isBlank() || leader.isEmpty() || members.isEmpty() || description.isBlank() || nameProblem != null) disabled()
             onClick { onSave(TeamDto(name.trim(), description.trim(), leader, candidates.map { it.first }.filter { it in members }, theme = theme.ifEmpty { null }, examples = examples.lines().map { it.trim() }.filter { it.isNotEmpty() })) }
         }) { Text("저장") }
     }
 }
+
+/** 이름 규칙 (서버의 CustomAgentDef.NAME과 같다). `/agent 이름`으로 부르므로 공백이 없어야 한다 */
+private val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31}$")
+
+private fun nameProblem(name: String): String? = when {
+    name.isBlank() -> null
+    name.trim().contains(' ') -> "이름에 공백은 쓸 수 없습니다. 예: ${name.trim().replace(Regex("\\s+"), "-")}"
+    !NAME.matches(name.trim()) -> "이름은 글자·숫자로 시작하는 1~32자(글자·숫자·_-)여야 합니다"
+    else -> null
+}
+
+/** 고치는 칸은 화면 맨 아래에 생기므로 열 때 그리로 옮긴다 */
+private fun org.jetbrains.compose.web.attributes.AttrsScope<org.w3c.dom.HTMLDivElement>.scrollOnOpen() {
+    ref { element -> element.asDynamic().scrollIntoView(js("({behavior: 'smooth', block: 'start'})")); onDispose { } }
+}
+
+private fun encodeURIComponent(value: String): String = js("encodeURIComponent")(value) as String
 
 @Composable
 private fun EventRow(e: RunEventDto, depth: Int = 0) {

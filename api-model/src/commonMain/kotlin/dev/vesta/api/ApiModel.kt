@@ -451,6 +451,8 @@ data class CustomAgentDto(
     val model: String = "GENERAL",
     val tools: List<String> = emptyList(),
     val updatedAt: String? = null,
+    /** 이 에이전트가 따르는 스킬 이름 */
+    val skills: List<String> = emptyList(),
 )
 
 @Serializable

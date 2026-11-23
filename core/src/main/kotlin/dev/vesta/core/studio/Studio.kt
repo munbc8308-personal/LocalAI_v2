@@ -18,8 +18,14 @@ data class CustomAgentDef(
     val tools: List<String> = emptyList(),
     val collections: List<String> = emptyList(),
     val updatedAt: Instant = Instant.EPOCH,
+    /** 이 에이전트가 따르는 스킬 이름 (지침에 붙는다) */
+    val skills: List<String> = emptyList(),
 ) {
     companion object {
+        const val MAX_SKILLS = 8
+        /** 지침에 붙이는 스킬 하나·전체의 최대 글자 수 */
+        const val MAX_SKILL_CHARS = 4_000
+        const val MAX_SKILLS_CHARS = 12_000
         /** `/agent 이름` 으로 부르므로 공백 없는 짧은 이름 */
         val NAME = Regex("^[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{0,31}$")
         const val MAX_INSTRUCTIONS = 8_000
