@@ -133,4 +133,15 @@ class ApplyPatchToolTest : FunSpec({
         tool.describe(args).warning!!.contains("155줄 → 51줄") shouldBe true
         tool.execute(args, ToolContext(UserContext(UserId(1), UserRole.OWNER))).output.contains("기능을 지운 것이면") shouldBe true
     }
+
+    test("웹 검색: 검색어 자리에 보고서·명령을 넣으면 바깥으로 보내지 않는다 (디자인팀 시험)") {
+        val sent = mutableListOf<String>()
+        val tool = WebSearchTool(object : dev.vesta.core.web.WebSearchClient {
+            override suspend fun search(query: String, limit: Int) = emptyList<dev.vesta.core.web.SearchHit>().also { sent += query }
+        })
+        tool.execute(buildJsonObject { put("query", "mkdir -p ~/x && printf \"# 조사 결과\\n\\n## 1.\"\n본문") }, ctx).isError shouldBe true
+        tool.execute(buildJsonObject { put("query", "가".repeat(201)) }, ctx).output shouldContain "검색어만"
+        tool.execute(buildJsonObject { put("query", "food ordering app UI trends 2025") }, ctx).isError shouldBe false
+        sent shouldBe listOf("food ordering app UI trends 2025")
+    }
 })

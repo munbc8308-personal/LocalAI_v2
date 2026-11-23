@@ -53,12 +53,18 @@ class WebSearchTool(private val search: WebSearchClient) : Tool {
     )
 
     override suspend fun execute(arguments: JsonObject, context: ToolContext): ToolResult {
-        val query = arguments.string("query") ?: return fail("query가 필요함")
+        val query = arguments.string("query")?.trim() ?: return fail("query가 필요함")
+        // 검색어 자리에 파일 내용·명령을 넣으면 그대로 바깥 검색 엔진으로 나간다 (디자인팀 시험에서 조사원이 보고서를 검색어로 보냈다)
+        if ('\n' in query || query.length > MAX_QUERY) return fail("검색어만 넣는다 (한 줄, ${MAX_QUERY}자까지). 파일 내용·명령은 검색어가 아니다. 파일로 남기려면 write_file을 쓴다")
         val hits = search.search(query, 8)
         return ToolResult(
             if (hits.isEmpty()) "검색 결과 없음" else hits.mapIndexed { i, h -> "[${i + 1}] ${h.title}\n${h.url}\n${h.snippet.take(300)}" }.joinToString("\n\n"),
             summary = "\"$query\" 검색 ${hits.size}건",
         )
+    }
+
+    companion object {
+        const val MAX_QUERY = 200
     }
 }
 
